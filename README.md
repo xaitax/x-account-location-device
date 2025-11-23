@@ -27,6 +27,9 @@ The script extracts this official location and device data from X's GraphQL API,
 <img width="866" height="100" alt="image" src="https://github.com/user-attachments/assets/7ab9f87a-ef6b-4c78-9fca-38d98a34cba5" />
 <hr>
 
+> [!NOTE]  
+> On Windows, Chromium-based browsers (Chrome, Edge, Brave) don’t display emoji flags by default. Firefox does.
+
 ## 🚀 Installation
 
 ### Prerequisites
