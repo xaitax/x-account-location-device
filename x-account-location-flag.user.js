@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         X Account Location & Device Info
+// @name         X-Posed: Account Location & Device Info
 // @namespace    http://tampermonkey.net/
-// @version      1.4.0
-// @description  Shows country flag emojis and device/platform emojis next to X usernames with hover tooltips
+// @version      1.5.0
+// @description  See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.
 // @author       Alexander Hagenah (@xaitax)
 // @homepage     https://github.com/xaitax/x-account-location-device
 // @supportURL   https://primepage.de
@@ -20,10 +20,10 @@
      * Configuration & Constants
      */
     const CONFIG = {
-        VERSION: '1.4.0',
-        CACHE_KEY: 'x_location_cache_v2',
+        VERSION: '1.5.0',
+        CACHE_KEY: 'x_location_cache_v3', // v3 includes locationAccurate field
         BLOCKED_COUNTRIES_KEY: 'x_blocked_countries',
-        CACHE_EXPIRY: 24 * 60 * 60 * 1000, // 24 hours
+        CACHE_EXPIRY: 48 * 60 * 60 * 1000, // 48 hours (extended from 24)
         API: {
             QUERY_ID: 'XRqGa7EeokUU5kppkh13EA', // AboutAccountQuery
             MIN_INTERVAL: 2000,
@@ -116,6 +116,7 @@
 
         init() {
             console.log(`🚀 X Account Location v${CONFIG.VERSION} initializing...`);
+            console.log(`📦 Cache expiry: ${CONFIG.CACHE_EXPIRY / 1000 / 60 / 60} hours`);
             this.loadSettings();
             this.loadCache();
             this.loadBlockedCountries();
@@ -334,10 +335,12 @@
             this.lastRequestTime = Date.now();
 
             try {
+                console.debug(`📡 API Request for: ${request.screenName}`);
                 const result = await this.executeApiCall(request.screenName);
                 this.cache.set(request.screenName, result);
                 request.resolve(result);
             } catch (error) {
+                console.warn(`❌ API Error for ${request.screenName}:`, error.message);
                 request.reject(error);
             } finally {
                 this.activeRequests--;
@@ -392,7 +395,8 @@
             
             return {
                 location: profile?.account_based_in || null,
-                device: profile?.source || null
+                device: profile?.source || null,
+                locationAccurate: profile?.location_accurate !== false // Default to true if not present
             };
         }
 
@@ -414,7 +418,7 @@
                     animation: x-shimmer 1.5s infinite;
                 }
                 .x-info-badge {
-                    margin: 0 4px; display: inline-flex; align-items: center; vertical-align: middle; gap: 4px;
+                    margin: 0 4px 0 8px; display: inline-flex; align-items: center; vertical-align: middle; gap: 4px;
                     font-family: "Twemoji Mozilla", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", "EmojiOne Color", "Android Emoji", sans-serif;
                     font-size: 14px; opacity: 0.8; transition: all 0.2s; cursor: help;
                 }
@@ -540,11 +544,18 @@
         getDeviceEmoji(deviceString) {
             if (!deviceString) return null;
             const d = deviceString.toLowerCase();
+            // App stores are always mobile
+            if (d.includes('app store')) return '📱';
+            // Explicit mobile devices
             if (d.includes('android') || d.includes('iphone') || d.includes('mobile')) return '📱';
+            // Tablets treated as computers
             if (d.includes('ipad')) return '💻';
+            // Desktop OS
             if (d.includes('mac') || d.includes('linux') || d.includes('windows')) return '💻';
+            // Web clients
             if (d.includes('web')) return '🌐';
-            return '💻';
+            // Unknown = assume mobile (more common than desktop for unknown strings)
+            return '📱';
         }
 
         async processElement(element) {
@@ -590,6 +601,11 @@
                     if (info.location) {
                         const flag = this.getFlagEmoji(info.location);
                         if (flag) content += `<span title="${info.location}">${flag}</span>`;
+                        
+                        // Add VPN/Proxy indicator if location is not accurate
+                        if (info.locationAccurate === false) {
+                            content += `<span title="Location may not be accurate (VPN/Proxy detected)">🔒</span>`;
+                        }
                     }
                     
                     const device = info.device;
@@ -865,6 +881,11 @@
                         if (cachedInfo.location) {
                             const flag = this.getFlagEmoji(cachedInfo.location);
                             if (flag) content += `<span title="${cachedInfo.location}">${flag}</span>`;
+                            
+                            // Add VPN/Proxy indicator if location is not accurate
+                            if (cachedInfo.locationAccurate === false) {
+                                content += `<span title="Location may not be accurate (VPN/Proxy detected)">🔒</span>`;
+                            }
                         }
                         if (cachedInfo.device) {
                             const emoji = this.getDeviceEmoji(cachedInfo.device);
@@ -970,6 +991,11 @@
                                         if (cachedInfo.location) {
                                             const flag = this.getFlagEmoji(cachedInfo.location);
                                             if (flag) content += `<span title="${cachedInfo.location}">${flag}</span>`;
+                                            
+                                            // Add VPN/Proxy indicator if location is not accurate
+                                            if (cachedInfo.locationAccurate === false) {
+                                                content += `<span title="Location may not be accurate (VPN/Proxy detected)">🔒</span>`;
+                                            }
                                         }
                                         if (cachedInfo.device) {
                                             const emoji = this.getDeviceEmoji(cachedInfo.device);
