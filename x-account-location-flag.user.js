@@ -541,9 +541,10 @@
             if (!deviceString) return null;
             const d = deviceString.toLowerCase();
             if (d.includes('android') || d.includes('iphone') || d.includes('mobile')) return '📱';
+            if (d.includes('ipad')) return '💻';
             if (d.includes('mac') || d.includes('linux') || d.includes('windows')) return '💻';
             if (d.includes('web')) return '🌐';
-            return '📱';
+            return '💻';
         }
 
         async processElement(element) {
