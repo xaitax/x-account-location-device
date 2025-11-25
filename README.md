@@ -43,13 +43,9 @@ The script extracts this official location and device data from X's GraphQL API,
 
 [![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-Install-blue?style=for-the-badge&logo=google-chrome)](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk)
 
-Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk)
-
 **Firefox:**
 
 [![Firefox Add-ons](https://img.shields.io/badge/Firefox%20Add--ons-Install-orange?style=for-the-badge&logo=firefox)](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/)
-
-Install from Firefox Add-ons *(Coming Soon)*
 
 ### Option 2: Tampermonkey Userscript
 **Alternative installation method for all browsers:**
