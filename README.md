@@ -8,7 +8,7 @@
 
 ---
 
-<img width="800" alt="X-Posed showing country flags and device icons on X timeline" src="https://github.com/user-attachments/assets/153ac39c-6813-4f26-ad6e-1961d2824751" />
+<img width="800" alt="X-Posed showing country flags and device icons on X timeline" src="https://github.com/user-attachments/assets/53c5c59f-a0f4-4cee-8582-275f9717c807" />
 
 </div>
 
