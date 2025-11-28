@@ -130,21 +130,21 @@ async function saveSettings(settings) {
  */
 function setupEventListeners() {
     // Main toggle
-    elements.toggleEnabled.addEventListener('change', async (e) => {
+    elements.toggleEnabled.addEventListener('change', async e => {
         await saveSettings({ enabled: e.target.checked });
         updateDisabledState(!e.target.checked);
     });
 
     // Display toggles
-    elements.toggleFlags.addEventListener('change', async (e) => {
+    elements.toggleFlags.addEventListener('change', async e => {
         await saveSettings({ showFlags: e.target.checked });
     });
 
-    elements.toggleDevices.addEventListener('change', async (e) => {
+    elements.toggleDevices.addEventListener('change', async e => {
         await saveSettings({ showDevices: e.target.checked });
     });
 
-    elements.toggleVpn.addEventListener('change', async (e) => {
+    elements.toggleVpn.addEventListener('change', async e => {
         await saveSettings({ showVpnIndicator: e.target.checked });
     });
 
@@ -170,17 +170,27 @@ function setupEventListeners() {
             
             elements.statCached.textContent = '0';
             
-            // Visual feedback
-            const originalText = elements.btnClearCache.innerHTML;
-            elements.btnClearCache.innerHTML = `
-                <svg viewBox="0 0 24 24" width="16" height="16">
-                    <path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                </svg>
-                Cleared!
-            `;
+            // Visual feedback - save original children
+            const originalChildren = Array.from(elements.btnClearCache.childNodes).map(node => node.cloneNode(true));
+            
+            // Create success content safely
+            elements.btnClearCache.textContent = '';
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.setAttribute('width', '16');
+            svg.setAttribute('height', '16');
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('fill', 'currentColor');
+            path.setAttribute('d', 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z');
+            svg.appendChild(path);
+            elements.btnClearCache.appendChild(svg);
+            elements.btnClearCache.appendChild(document.createTextNode(' Cleared!'));
             
             setTimeout(() => {
-                elements.btnClearCache.innerHTML = originalText;
+                elements.btnClearCache.textContent = '';
+                for (const child of originalChildren) {
+                    elements.btnClearCache.appendChild(child);
+                }
             }, TIMING.CACHE_CLEAR_FEEDBACK_MS);
         } catch (error) {
             console.error('Failed to clear cache:', error);
@@ -196,7 +206,7 @@ function setupEventListeners() {
     });
 
     // Privacy link
-    document.getElementById('link-privacy')?.addEventListener('click', (e) => {
+    document.getElementById('link-privacy')?.addEventListener('click', e => {
         e.preventDefault();
         window.open('https://github.com/xaitax/x-account-location-device/blob/main/PRIVACY.md');
     });

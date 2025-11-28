@@ -5,83 +5,7 @@
 
 import browserAPI from './browser-api.js';
 import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS } from './constants.js';
-
-/**
- * LRU Cache implementation for in-memory caching with eviction
- */
-class LRUCache {
-    constructor(maxSize = CACHE_CONFIG.MAX_ENTRIES) {
-        this.maxSize = maxSize;
-        this.cache = new Map();
-    }
-
-    get(key) {
-        if (!this.cache.has(key)) {
-            return undefined;
-        }
-        // Move to end (most recently used)
-        const value = this.cache.get(key);
-        this.cache.delete(key);
-        this.cache.set(key, value);
-        return value;
-    }
-
-    set(key, value) {
-        // Delete if exists to update position
-        if (this.cache.has(key)) {
-            this.cache.delete(key);
-        }
-        // Evict oldest if at capacity
-        if (this.cache.size >= this.maxSize) {
-            const firstKey = this.cache.keys().next().value;
-            this.cache.delete(firstKey);
-        }
-        this.cache.set(key, value);
-    }
-
-    has(key) {
-        return this.cache.has(key);
-    }
-
-    delete(key) {
-        return this.cache.delete(key);
-    }
-
-    clear() {
-        this.cache.clear();
-    }
-
-    get size() {
-        return this.cache.size;
-    }
-
-    entries() {
-        return this.cache.entries();
-    }
-
-    keys() {
-        return this.cache.keys();
-    }
-
-    values() {
-        return this.cache.values();
-    }
-
-    toObject() {
-        const obj = {};
-        for (const [key, value] of this.cache) {
-            obj[key] = value;
-        }
-        return obj;
-    }
-
-    fromObject(obj) {
-        this.clear();
-        for (const [key, value] of Object.entries(obj)) {
-            this.set(key, value);
-        }
-    }
-}
+import { LRUCache } from './lru-cache.js';
 
 /**
  * User cache data storage with per-entry expiry tracking
@@ -191,11 +115,11 @@ class UserCacheStorage {
         return result;
     }
 
-    clear() {
+    async clear() {
         this.cache.clear();
         this.expiryMap.clear();
         this.dirty = true;
-        return this.save(true);
+        await this.save(true);
     }
 
     get size() {

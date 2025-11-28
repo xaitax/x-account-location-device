@@ -244,96 +244,25 @@ Read the full [Privacy Policy](PRIVACY.md).
 
 ## 📝 Changelog
 
-### v2.0.2
+<table>
+<tr>
+<td>
 
-**🎨 Device Detection Overhaul**
-- New distinct device emojis: 🍎 iOS, 🤖 Android, 🌐 Web, ❓ Unknown
-- Removed misleading "Desktop" category (X API doesn't distinguish desktop from mobile web)
-- Statistics now show accurate platform breakdown
+### Latest: v2.0.3
 
-**🔒 Security Hardening**
-- Fixed XSS vulnerability in badge creation (now uses safe DOM methods)
-- Replaced remaining innerHTML with safe DOM methods in modal and evidence capture
-- Safe flag emoji handling with validated Twemoji images
-- Added input sanitization for cloud cache data
+🔒 **Security** — XSS prevention, input validation, content sanitization
+⚡ **Performance** — Throttled observers, combined selectors, memoization
+🧠 **Stability** — Memory leak fixes, race condition fixes, error boundaries
+🔧 **Build** — Smart version management from single source
 
-**⚡ Performance**
-- Intersection Observer for lazy element processing (only visible elements)
-- Reduced unnecessary API calls for off-screen content
-- Memoized country list filtering for improved rendering performance
+</td>
+<td width="200" align="center">
 
-**🧠 Memory Management**
-- Bounded pendingVisibility Map (500 max entries with LRU eviction)
-- Bounded RequestDeduplicator Map (200 max entries)
-- Periodic cleanup of expired notFoundCache entries
+[![Changelog](https://img.shields.io/badge/Full_Changelog-View-blue?style=for-the-badge)](CHANGELOG.md)
 
-**🔄 Stability**
-- Service Worker keep-alive prevents Chrome MV3 termination
-- Cache negative results (not found users) to avoid repeat API calls
-- Error boundary for element processing prevents cascade failures
-- Fixed memory leaks and async handling issues
-- Added retry logic with exponential backoff for transient failures
-
-**🔧 Code Quality**
-- Modernized APIs, centralized constants, improved accessibility
-- Added unified logging and JSDoc documentation
-
----
-
-### v2.0.1
-
-**🐛 Bug Fixes**
-- Fixed `getComputedStyle` → `window.getComputedStyle` for Zen/Firefox compatibility ([#4](https://github.com/xaitax/x-account-location-device/issues/4))
-- Fixed sidebar "Block Countries" breaking compact layout ([#3](https://github.com/xaitax/x-account-location-device/issues/3))
-
-**✨ Enhancements**
-- Toggle-able sidebar "Block Countries" link — can be hidden via Options ([#2](https://github.com/xaitax/x-account-location-device/issues/2))
-- Full country blocker UI in Options page — manage blocked countries without visiting X
-- Support for followers/following/verified followers pages
-- Sidebar link adapts automatically on window resize (compact ↔ normal mode)
-
----
-
-### v2.0.0
-
-**Architecture**
-- Modular TypeScript-ready codebase with Rollup
-- Cross-browser: Chrome MV3 + Firefox MV3
-- LRU cache with 50,000 entry limit
-
-**New Features**
-- Community Cloud Cache with Cloudflare Workers
-- Evidence Screenshot Generator — capture tweets with metadata overlay (location, device, VPN status, timestamp)
-- Statistics dashboard with analytics
-- Theme sync (Light/Dim/Dark)
-- Options page with full configuration
-- Bulk sync local cache to cloud
-
-**UI/UX**
-- Popup with quick toggles
-- Camera icon on badges for instant evidence capture
-- Light mode fully supported
-- Real-time theme detection
-
-<details>
-<summary>Previous versions</summary>
-
-### v1.5.1
-- Fixed sidebar navigation for all languages
-
-### v1.5.0
-- VPN/proxy indicator
-- Extended cache to 48 hours
-
-### v1.4.0
-- Country blocking feature
-- iPad detection
-
-### v1.3.0
-- Windows Twemoji support
-- Profile header support
-
-</details>
+</td>
+</tr>
+</table>
 
 ---
 

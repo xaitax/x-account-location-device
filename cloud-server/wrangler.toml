@@ -20,3 +20,5 @@ id = "c6b2771a3f214af2b118ac1a5d6154f3"
 
 [vars]
 ENVIRONMENT = "production"
+# ADMIN_SECRET should be set via `wrangler secret put ADMIN_SECRET` for production
+# For local dev, you can set it here or in .dev.vars

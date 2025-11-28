@@ -119,13 +119,15 @@ class RequestQueue {
 }
 
 /**
- * Active request deduplication with bounded size
+ * Active request deduplication with bounded size and timeout cleanup
  * Prevents unbounded memory growth from concurrent requests
  */
 class RequestDeduplicator {
-    constructor(maxSize = 200) {
+    constructor(maxSize = 200, timeoutMs = 30000) {
         this.pending = new Map();
+        this.timeouts = new Map(); // Track cleanup timeouts
         this.maxSize = maxSize;
+        this.timeoutMs = timeoutMs;
     }
 
     async dedupe(key, requestFn) {
@@ -139,19 +141,46 @@ class RequestDeduplicator {
         if (this.pending.size >= this.maxSize) {
             const firstKey = this.pending.keys().next().value;
             if (firstKey) {
-                this.pending.delete(firstKey);
+                this._cleanup(firstKey);
                 console.warn(`⚠️ RequestDeduplicator: Evicted oldest entry (${firstKey}), size was ${this.pending.size + 1}`);
             }
         }
 
-        // Create new promise
+        // Create new promise with proper cleanup
         const promise = requestFn()
             .finally(() => {
-                this.pending.delete(key);
+                this._cleanup(key);
             });
 
         this.pending.set(key, promise);
+        
+        // Set a cleanup timeout as a safety net in case finally doesn't run
+        // (e.g., if the promise is garbage collected before completion)
+        const timeoutId = setTimeout(() => {
+            if (this.pending.has(key)) {
+                console.warn(`⚠️ RequestDeduplicator: Timeout cleanup for ${key}`);
+                this._cleanup(key);
+            }
+        }, this.timeoutMs);
+        
+        this.timeouts.set(key, timeoutId);
+        
         return promise;
+    }
+
+    /**
+     * Clean up a pending request and its timeout
+     * @param {string} key - The request key to clean up
+     */
+    _cleanup(key) {
+        this.pending.delete(key);
+        
+        // Clear the timeout if it exists
+        const timeoutId = this.timeouts.get(key);
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+            this.timeouts.delete(key);
+        }
     }
 
     has(key) {
@@ -159,6 +188,11 @@ class RequestDeduplicator {
     }
 
     clear() {
+        // Clear all timeouts
+        for (const timeoutId of this.timeouts.values()) {
+            clearTimeout(timeoutId);
+        }
+        this.timeouts.clear();
         this.pending.clear();
     }
     

@@ -1,12 +1,20 @@
 /**
  * Rollup Configuration for X-Posed Extension
  * Builds both Chrome (MV3) and Firefox compatible versions
+ *
+ * VERSION MANAGEMENT:
+ * The single source of truth for version is package.json
+ * At build time, this version is injected into:
+ * - All bundled JS files via @rollup/plugin-replace
+ * - The manifest.json via transform
  */
 
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import terser from '@rollup/plugin-terser';
+import replace from '@rollup/plugin-replace';
 import copy from 'rollup-plugin-copy';
+import { readFileSync } from 'fs';
 
 const production = !process.env.ROLLUP_WATCH;
 const browser = process.env.BROWSER || 'chrome';
@@ -14,8 +22,27 @@ const isFirefox = browser === 'firefox';
 const outputDir = isFirefox ? 'dist/firefox' : 'dist/chrome';
 const manifestFile = isFirefox ? 'src/manifest.firefox.json' : 'src/manifest.chrome.json';
 
-// Common plugins
+// SINGLE SOURCE OF TRUTH: Read version from package.json
+const pkg = JSON.parse(readFileSync('package.json', 'utf-8'));
+const VERSION = pkg.version;
+
+console.log(`🚀 Building X-Posed v${VERSION} for ${browser}...`);
+
+// Version replacement plugin - injects VERSION into all bundles
+const versionReplace = replace({
+    preventAssignment: true,
+    values: {
+        // Replace the placeholder in constants.js and any other file
+        '__BUILD_VERSION__': VERSION,
+        // Also replace hardcoded version strings for safety
+        "'2.0.2'": `'${VERSION}'`,
+        '"2.0.2"': `"${VERSION}"`
+    }
+});
+
+// Common plugins applied to all bundles
 const plugins = [
+    versionReplace,
     resolve({
         browser: true
     }),
@@ -27,11 +54,20 @@ const plugins = [
     })
 ];
 
-// Copy static assets
+// Copy static assets with manifest version injection
 const copyPlugin = copy({
     targets: [
-        // Manifest (browser-specific)
-        { src: manifestFile, dest: outputDir, rename: 'manifest.json' },
+        // Manifest (browser-specific) - transform to inject version from package.json
+        {
+            src: manifestFile,
+            dest: outputDir,
+            rename: 'manifest.json',
+            transform: contents => {
+                const manifest = JSON.parse(contents.toString());
+                manifest.version = VERSION;
+                return JSON.stringify(manifest, null, 2);
+            }
+        },
         // Icons
         { src: 'icons/*', dest: `${outputDir}/icons` },
         // Styles
@@ -71,7 +107,7 @@ export default [
         plugins: [...plugins]
     },
 
-    // Page Script (MAIN world) - simple IIFE
+    // Page Script (MAIN world) - simple IIFE (uses common plugins with version replacement)
     {
         input: 'src/content/page-script.js',
         output: {

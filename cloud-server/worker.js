@@ -53,7 +53,7 @@ export default {
             }
             
             if (path === '/cleanup' && request.method === 'POST') {
-                return await handleCleanup(env);
+                return await handleCleanup(request, env);
             }
             
             if (path === '/health') {
@@ -194,16 +194,34 @@ async function handleContribute(request, env) {
             const accurate = data.a !== undefined ? data.a !== false :
                              data.locationAccurate !== undefined ? data.locationAccurate !== false : true;
 
-            // Validate location exists
+            // Validate location exists and is a string
             if (!location || typeof location !== 'string' || location.trim().length === 0) {
+                rejected++;
+                continue;
+            }
+
+            // SECURITY: Validate location length to prevent storage exhaustion/abuse
+            if (location.length > 100) {
+                rejected++;
+                continue;
+            }
+
+            // SECURITY: Basic XSS prevention (though client should also sanitize)
+            if (location.includes('<') || location.includes('>') || location.includes('javascript:')) {
+                rejected++;
+                continue;
+            }
+
+            // SECURITY: Validate device string length
+            if (device && (typeof device !== 'string' || device.length > 100)) {
                 rejected++;
                 continue;
             }
             
             const entry = {
-                l: String(location).substring(0, 100),    // location
-                d: String(device || '').substring(0, 50), // device
-                a: Boolean(accurate),                      // accurate
+                l: String(location).trim(),               // location
+                d: String(device || '').trim(),           // device
+                a: Boolean(accurate),                     // accurate
                 t: Math.floor(Date.now() / 1000)          // timestamp in seconds
             };
 
@@ -309,8 +327,15 @@ async function updateStats(env, newEntries) {
 
 /**
  * Handle cleanup of invalid/numeric keys
+ * Protected by ADMIN_SECRET
  */
-async function handleCleanup(env) {
+async function handleCleanup(request, env) {
+    // SECURITY: Require Admin Secret
+    const authHeader = request.headers.get('X-Admin-Secret');
+    if (!env.ADMIN_SECRET || authHeader !== env.ADMIN_SECRET) {
+        return jsonResponse({ error: 'Unauthorized' }, 401);
+    }
+
     try {
         let deleted = 0;
         let cursor = null;
@@ -325,7 +350,7 @@ async function handleCleanup(env) {
             
             for (const key of listResult.keys) {
                 const name = key.name;
-                // Delete keys that are purely numeric (0, 1, 2, etc.) or __stats__
+                // Delete keys that are purely numeric (0, 1, 2, etc.)
                 if (/^\d+$/.test(name)) {
                     invalidKeys.push(name);
                 }

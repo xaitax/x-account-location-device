@@ -5,7 +5,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, STORAGE_KEYS } from '../shared/constants.js';
+import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING } from '../shared/constants.js';
 import { userCache, blockedCountries, settings, headersStorage, initializeStorage } from '../shared/storage.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
@@ -19,13 +19,10 @@ let initialized = false;
 
 // Keep-alive interval for MV3 service workers (Chrome can kill them after 30s of inactivity)
 let keepAliveInterval = null;
-const KEEP_ALIVE_INTERVAL_MS = 20000; // 20 seconds
 
 // Cache for negative results (users not found) to avoid repeat API calls
 const notFoundCache = new Map();
-const NOT_FOUND_CACHE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 const NOT_FOUND_CACHE_MAX_SIZE = 1000;
-const NOT_FOUND_CLEANUP_INTERVAL_MS = 60000; // Cleanup every 60 seconds
 let notFoundCleanupInterval = null;
 
 /**
@@ -166,7 +163,7 @@ function cacheNotFound(screenName) {
     }
     
     notFoundCache.set(key, {
-        expiry: Date.now() + NOT_FOUND_CACHE_EXPIRY_MS
+        expiry: Date.now() + TIMING.NOT_FOUND_CACHE_EXPIRY_MS
     });
 }
 
@@ -624,11 +621,9 @@ function startKeepAlive() {
     // Set up periodic keep-alive
     keepAliveInterval = setInterval(() => {
         // Simple operation to keep service worker alive
-        const now = Date.now();
-        console.debug(`💓 Keep-alive ping at ${new Date(now).toISOString()}`);
-    }, KEEP_ALIVE_INTERVAL_MS);
-    
-    console.log('💓 Service worker keep-alive started');
+        // No logging to avoid console spam
+        void 0;
+    }, TIMING.KEEP_ALIVE_INTERVAL_MS);
     
     // Also start periodic cleanup for notFoundCache
     startNotFoundCacheCleanup();
@@ -670,9 +665,7 @@ function startNotFoundCacheCleanup() {
         if (cleanedCount > 0) {
             console.debug(`🧹 Cleaned ${cleanedCount} expired entries from notFoundCache, size: ${notFoundCache.size}`);
         }
-    }, NOT_FOUND_CLEANUP_INTERVAL_MS);
-    
-    console.log('🧹 notFoundCache cleanup started');
+    }, TIMING.NOT_FOUND_CLEANUP_INTERVAL_MS);
 }
 
 /**

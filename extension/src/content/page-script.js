@@ -46,6 +46,19 @@
     }
 
     /**
+     * Safe error logger - only logs in debug scenarios, never throws
+     * @param {string} context - Where the error occurred
+     * @param {Error} error - The error object
+     */
+    function logError(context, error) {
+        // In production, we don't want to spam the console
+        // But during development, this helps debugging
+        if (window.XPosedDebug) {
+            console.debug('X-Posed page script error:', context, error?.message || error);
+        }
+    }
+
+    /**
      * Intercept Fetch API
      */
     const originalFetch = window.fetch;
@@ -57,7 +70,8 @@
                 sendHeaders(init.headers);
             }
         } catch (e) {
-            // Silently ignore errors to avoid breaking page functionality
+            // Log errors in debug mode for troubleshooting
+            logError('fetch intercept', e);
         }
         
         return originalFetch.apply(this, arguments);
@@ -71,14 +85,22 @@
     const originalXHRSend = XMLHttpRequest.prototype.send;
 
     XMLHttpRequest.prototype.open = function(method, url) {
-        this._xPosedUrl = url;
-        this._xPosedHeaders = {};
+        try {
+            this._xPosedUrl = url;
+            this._xPosedHeaders = {};
+        } catch (e) {
+            logError('XHR open', e);
+        }
         return originalXHROpen.apply(this, arguments);
     };
 
     XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
-        if (this._xPosedHeaders) {
-            this._xPosedHeaders[name] = value;
+        try {
+            if (this._xPosedHeaders) {
+                this._xPosedHeaders[name] = value;
+            }
+        } catch (e) {
+            logError('XHR setRequestHeader', e);
         }
         return originalXHRSetHeader.apply(this, arguments);
     };
@@ -89,15 +111,19 @@
                 sendHeaders(this._xPosedHeaders);
             }
         } catch (e) {
-            // Silently ignore errors
+            logError('XHR send', e);
         }
         return originalXHRSend.apply(this, arguments);
     };
 
     /**
      * Expose public API for debugging
+     * NOTE: Version strings are replaced at build time by rollup.config.js
+     * to ensure consistency with constants.js
      */
     window.XPosed = {
+        // This version string is replaced at build time via @rollup/plugin-replace
+        // See rollup.config.js for the replacement configuration
         version: '2.0.2',
         
         // Check if headers are captured
@@ -109,12 +135,25 @@
             console.log('🔄 X-Posed: Headers reset - waiting for next API request');
         },
         
+        // Enable debug mode for error logging
+        enableDebug: () => {
+            window.XPosedDebug = true;
+            console.log('🔍 X-Posed: Debug mode enabled');
+        },
+        
+        // Disable debug mode
+        disableDebug: () => {
+            window.XPosedDebug = false;
+            console.log('🔍 X-Posed: Debug mode disabled');
+        },
+        
         // Debug info
         debug: () => {
             console.log('X-Posed Debug Info:', {
                 version: '2.0.2',
                 headersCaptured,
-                injected: true
+                injected: true,
+                debugMode: !!window.XPosedDebug
             });
         }
     };

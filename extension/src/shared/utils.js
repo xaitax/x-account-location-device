@@ -527,7 +527,7 @@ export class EventEmitter {
  * Generate unique ID
  */
 export function generateId() {
-    return `x-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `x-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
 /**

@@ -1,0 +1,133 @@
+# Changelog
+
+All notable changes to X-Posed will be documented in this file.
+
+## [2.0.3] - 2024-11-28
+
+### 🔒 Security
+- XSS prevention: All dynamic content now uses safe DOM methods instead of innerHTML
+- Fixed unsafe innerHTML in popup.js clear cache feedback
+- Fixed innerHTML SVG injection in sidebar "Block Countries" link
+- Fixed innerHTML SVG in toast close button
+- Input validation: Screen names validated (1-15 chars, alphanumeric + underscore)
+- Sanitized toast/modal content with strict character escaping
+
+### ⚡ Performance
+- Smart version management: Single source of truth in package.json, injected at build time
+- Throttled theme observer prevents excessive re-renders on theme changes
+- Combined DOM selectors reduce query overhead in MutationObserver
+- Cached combined selector at module level (avoids repeated string creation)
+- Memoized function creation in content script initialization
+- Removed keep-alive console spam in service worker
+
+### 🧠 Memory & Stability
+- New shared `lru-cache.js` module eliminates code duplication
+- Fixed memory leak in UI cleanup function registry (bounded Map with 1000 max entries)
+- Bounded processingQueue (200 max entries with LRU eviction)
+- Added 30-second cleanup timeout for stale RequestDeduplicator entries
+- Proper async error boundaries prevent cascade failures
+- Added error boundary for badge creation to prevent observer crashes
+- Fixed race conditions in processingQueue with deferred promise pattern
+- Fixed inconsistent async in storage clear() method
+
+### 🔧 Code Quality
+- Replaced deprecated `substr()` with `substring()` throughout codebase
+- ESLint auto-fix applied for consistent quote style
+- Removed unused function parameters in constants.js
+- Consolidated LRU cache: storage.js and observer.js now import from shared module
+- Magic numbers moved to TIMING constants (rate limit cooldown, keep-alive interval, etc.)
+
+### 🔧 Build System
+- Version now auto-syncs from package.json to manifest.json and all JS bundles
+- Added `@rollup/plugin-replace` for build-time constant injection
+- Separate CHANGELOG.md with nice README integration
+
+---
+
+## [2.0.2] - 2024-11-28
+
+### 🎨 Device Detection Overhaul
+- New distinct device emojis: 🍎 iOS, 🤖 Android, 🌐 Web, ❓ Unknown
+- Removed misleading "Desktop" category (X API doesn't distinguish desktop from mobile web)
+- Statistics now show accurate platform breakdown
+
+### 🔒 Security Hardening
+- Fixed XSS vulnerability in badge creation (now uses safe DOM methods)
+- Replaced remaining innerHTML with safe DOM methods in modal and evidence capture
+- Safe flag emoji handling with validated Twemoji images
+- Added input sanitization for cloud cache data
+
+### ⚡ Performance
+- Intersection Observer for lazy element processing (only visible elements)
+- Reduced unnecessary API calls for off-screen content
+- Memoized country list filtering for improved rendering performance
+
+### 🧠 Memory Management
+- Bounded pendingVisibility Map (500 max entries with LRU eviction)
+- Bounded RequestDeduplicator Map (200 max entries)
+- Periodic cleanup of expired notFoundCache entries
+
+### 🔄 Stability
+- Service Worker keep-alive prevents Chrome MV3 termination
+- Cache negative results (not found users) to avoid repeat API calls
+- Error boundary for element processing prevents cascade failures
+- Fixed memory leaks and async handling issues
+- Added retry logic with exponential backoff for transient failures
+
+### 🔧 Code Quality
+- Modernized APIs, centralized constants, improved accessibility
+- Added unified logging and JSDoc documentation
+
+---
+
+## [2.0.1] - 2024-11-28
+
+### 🐛 Bug Fixes
+- Fixed `getComputedStyle` → `window.getComputedStyle` for Zen/Firefox compatibility ([#4](https://github.com/xaitax/x-account-location-device/issues/4))
+- Fixed sidebar "Block Countries" breaking compact layout ([#3](https://github.com/xaitax/x-account-location-device/issues/3))
+
+### ✨ Enhancements
+- Toggle-able sidebar "Block Countries" link — can be hidden via Options ([#2](https://github.com/xaitax/x-account-location-device/issues/2))
+- Full country blocker UI in Options page — manage blocked countries without visiting X
+- Support for followers/following/verified followers pages
+- Sidebar link adapts automatically on window resize (compact ↔ normal mode)
+
+---
+
+## [2.0.0] - 2024-11-27
+
+### 🏗️ Architecture
+- Modular TypeScript-ready codebase with Rollup
+- Cross-browser: Chrome MV3 + Firefox MV3
+- LRU cache with 50,000 entry limit
+
+### ✨ New Features
+- Community Cloud Cache with Cloudflare Workers
+- Evidence Screenshot Generator — capture tweets with metadata overlay (location, device, VPN status, timestamp)
+- Statistics dashboard with analytics
+- Theme sync (Light/Dim/Dark)
+- Options page with full configuration
+- Bulk sync local cache to cloud
+
+### 🎨 UI/UX
+- Popup with quick toggles
+- Camera icon on badges for instant evidence capture
+- Light mode fully supported
+- Real-time theme detection
+
+---
+
+## [1.5.1]
+- Fixed sidebar navigation for all languages
+
+## [1.5.0]
+- VPN/proxy indicator
+- Extended cache to 48 hours
+
+## [1.4.0]
+- Country blocking feature
+- iPad detection
+
+## [1.3.0]
+- Windows Twemoji support
+- Profile header support
