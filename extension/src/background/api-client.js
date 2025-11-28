@@ -4,7 +4,7 @@
  */
 
 import { API_CONFIG, BEARER_TOKEN } from '../shared/constants.js';
-import { retry, sleep } from '../shared/utils.js';
+import { sleep } from '../shared/utils.js';
 
 /**
  * API Error with typed error codes
@@ -119,17 +119,29 @@ class RequestQueue {
 }
 
 /**
- * Active request deduplication
+ * Active request deduplication with bounded size
+ * Prevents unbounded memory growth from concurrent requests
  */
 class RequestDeduplicator {
-    constructor() {
+    constructor(maxSize = 200) {
         this.pending = new Map();
+        this.maxSize = maxSize;
     }
 
     async dedupe(key, requestFn) {
         // Return existing promise if request is in flight
         if (this.pending.has(key)) {
             return this.pending.get(key);
+        }
+
+        // Evict oldest entries if at capacity
+        // This shouldn't normally happen since requests complete quickly
+        if (this.pending.size >= this.maxSize) {
+            const firstKey = this.pending.keys().next().value;
+            if (firstKey) {
+                this.pending.delete(firstKey);
+                console.warn(`⚠️ RequestDeduplicator: Evicted oldest entry (${firstKey}), size was ${this.pending.size + 1}`);
+            }
         }
 
         // Create new promise
@@ -148,6 +160,10 @@ class RequestDeduplicator {
 
     clear() {
         this.pending.clear();
+    }
+    
+    get size() {
+        return this.pending.size;
     }
 }
 
@@ -218,9 +234,9 @@ export class XAPIClient {
     }
 
     /**
-     * Execute the actual API request
+     * Execute the actual API request with retry logic for transient failures
      */
-    async executeRequest(screenName, csrfToken = null) {
+    async executeRequest(screenName, csrfToken = null, retryCount = 0) {
         let headers = this.getHeaders();
 
         // Try fallback headers if no captured headers
@@ -262,6 +278,24 @@ export class XAPIClient {
             const data = await response.json();
             return this.parseResponse(data);
         } catch (error) {
+            if (error instanceof APIError) {
+                // Don't retry rate limits, auth errors, or not found
+                if (error.code === API_ERROR_CODES.RATE_LIMITED ||
+                    error.code === API_ERROR_CODES.UNAUTHORIZED ||
+                    error.code === API_ERROR_CODES.NOT_FOUND) {
+                    throw error;
+                }
+            }
+            
+            // Retry network errors with exponential backoff
+            if (retryCount < API_CONFIG.MAX_RETRIES) {
+                const delay = API_CONFIG.RETRY_DELAY_MS * Math.pow(2, retryCount);
+                console.warn(`⚠️ API request failed for @${screenName}, retrying in ${delay}ms (attempt ${retryCount + 1}/${API_CONFIG.MAX_RETRIES})`);
+                await sleep(delay);
+                return this.executeRequest(screenName, csrfToken, retryCount + 1);
+            }
+            
+            // All retries exhausted
             if (error instanceof APIError) {
                 throw error;
             }

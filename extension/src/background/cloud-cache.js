@@ -3,8 +3,9 @@
  * Handles communication with the Cloudflare Workers API for shared cache
  */
 
-import { STORAGE_KEYS, CLOUD_CACHE_CONFIG } from '../shared/constants.js';
+import { STORAGE_KEYS, CLOUD_CACHE_CONFIG, TIMING } from '../shared/constants.js';
 import browserAPI from '../shared/browser-api.js';
+import { debounce } from '../shared/utils.js';
 
 class CloudCacheClient {
     constructor() {
@@ -17,6 +18,8 @@ class CloudCacheClient {
         this.contributeTimeout = null;
         this.requestCount = 0;
         this.requestWindowStart = Date.now();
+        this.consecutiveFailures = 0; // Track failures for exponential backoff
+        this.backoffUntil = 0; // Timestamp until which we should back off
         this.stats = {
             lookups: 0,
             hits: 0,
@@ -24,6 +27,9 @@ class CloudCacheClient {
             contributions: 0,
             errors: 0
         };
+        
+        // Debounced stats saving to prevent excessive storage writes
+        this._debouncedSaveStats = debounce(() => this._saveStatsImmediate(), 5000);
     }
 
     /**
@@ -73,12 +79,30 @@ class CloudCacheClient {
     }
 
     /**
-     * Save statistics to storage
+     * Save statistics to storage (debounced)
      */
-    async saveStats() {
-        await browserAPI.storage.local.set({
-            [STORAGE_KEYS.CLOUD_STATS]: this.stats
-        });
+    saveStats() {
+        this._debouncedSaveStats();
+    }
+    
+    /**
+     * Save statistics immediately (internal use)
+     */
+    async _saveStatsImmediate() {
+        try {
+            await browserAPI.storage.local.set({
+                [STORAGE_KEYS.CLOUD_STATS]: this.stats
+            });
+        } catch (error) {
+            console.warn('☁️ Failed to save cloud stats:', error.message);
+        }
+    }
+    
+    /**
+     * Force save stats immediately (for shutdown scenarios)
+     */
+    async forceSaveStats() {
+        await this._saveStatsImmediate();
     }
 
     /**
@@ -116,7 +140,7 @@ class CloudCacheClient {
         }
 
         // Return batched promise - all callers share the same batch result
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             // Add this resolver to the list of waiting callers
             this.lookupBatchResolvers.push(resolve);
             
@@ -168,9 +192,48 @@ class CloudCacheClient {
     }
 
     /**
+     * Check if we should back off due to consecutive failures
+     */
+    shouldBackoff() {
+        return Date.now() < this.backoffUntil;
+    }
+    
+    /**
+     * Calculate backoff delay based on consecutive failures
+     */
+    getBackoffDelay() {
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+        const delay = Math.min(1000 * Math.pow(2, this.consecutiveFailures), 30000);
+        return delay;
+    }
+    
+    /**
+     * Record a successful request (reset backoff)
+     */
+    recordSuccess() {
+        this.consecutiveFailures = 0;
+        this.backoffUntil = 0;
+    }
+    
+    /**
+     * Record a failed request (increase backoff)
+     */
+    recordFailure() {
+        this.consecutiveFailures++;
+        this.backoffUntil = Date.now() + this.getBackoffDelay();
+        console.warn(`☁️ Cloud cache backing off for ${this.getBackoffDelay()}ms (${this.consecutiveFailures} failures)`);
+    }
+    
+    /**
      * Fetch lookup from cloud API
      */
     async fetchLookup(usernames) {
+        // Check backoff first
+        if (this.shouldBackoff()) {
+            console.warn('☁️ Cloud cache in backoff period, skipping lookup');
+            return new Map();
+        }
+        
         if (!this.checkRateLimit()) {
             console.warn('☁️ Cloud cache rate limited (client-side)');
             return new Map();
@@ -184,6 +247,9 @@ class CloudCacheClient {
         for (let i = 0; i < usernames.length; i += CLOUD_CACHE_CONFIG.BATCH_SIZE) {
             batches.push(usernames.slice(i, i + CLOUD_CACHE_CONFIG.BATCH_SIZE));
         }
+
+        let hasSuccess = false;
+        let hasFailure = false;
 
         for (const batch of batches) {
             try {
@@ -211,14 +277,24 @@ class CloudCacheClient {
                 }
 
                 const data = await response.json();
+                hasSuccess = true;
 
-                // Process results
+                // Process results with input validation
                 if (data.results) {
                     for (const [username, info] of Object.entries(data.results)) {
+                        // Validate and sanitize cloud data
+                        const sanitizedLocation = this.sanitizeInput(info.l);
+                        const sanitizedDevice = this.sanitizeInput(info.d);
+                        
+                        // Skip entries with suspiciously long or invalid data
+                        if (!sanitizedLocation && !sanitizedDevice) {
+                            continue;
+                        }
+                        
                         this.stats.hits++;
                         results.set(username.toLowerCase(), {
-                            location: info.l,
-                            device: info.d,
+                            location: sanitizedLocation,
+                            device: sanitizedDevice,
                             locationAccurate: info.a !== false,
                             fromCloud: true,
                             timestamp: info.t * 1000 // Convert seconds to ms
@@ -234,6 +310,7 @@ class CloudCacheClient {
                 }
 
             } catch (error) {
+                hasFailure = true;
                 if (error.name === 'AbortError') {
                     console.warn('☁️ Cloud lookup timed out');
                 } else {
@@ -243,7 +320,14 @@ class CloudCacheClient {
             }
         }
 
-        // Save stats periodically
+        // Update backoff state based on results
+        if (hasSuccess && !hasFailure) {
+            this.recordSuccess();
+        } else if (hasFailure) {
+            this.recordFailure();
+        }
+
+        // Save stats (debounced)
         this.saveStats();
 
         return results;
@@ -292,13 +376,30 @@ class CloudCacheClient {
             this.contributeTimeout = null;
         }
 
-        const entries = Object.fromEntries(this.contributionQueue);
-        this.contributionQueue.clear();
-
-        if (!this.checkRateLimit()) {
-            console.warn('☁️ Contribution rate limited (client-side)');
+        // Check backoff before attempting
+        if (this.shouldBackoff()) {
+            console.warn('☁️ Cloud cache in backoff period, deferring contributions');
+            // Re-schedule for after backoff period
+            const delay = this.backoffUntil - Date.now() + 1000;
+            this.contributeTimeout = setTimeout(() => {
+                this.flushContributions();
+            }, delay);
             return;
         }
+
+        // IMPORTANT: Check rate limit BEFORE clearing the queue
+        if (!this.checkRateLimit()) {
+            console.warn('☁️ Contribution rate limited (client-side), will retry');
+            // Re-schedule after rate limit window resets
+            this.contributeTimeout = setTimeout(() => {
+                this.flushContributions();
+            }, 60000); // Retry after 1 minute
+            return;
+        }
+
+        // NOW it's safe to extract and clear the queue
+        const entries = Object.fromEntries(this.contributionQueue);
+        this.contributionQueue.clear();
 
         try {
             const controller = new AbortController();
@@ -322,18 +423,70 @@ class CloudCacheClient {
                 const data = await response.json();
                 this.stats.contributions += data.accepted || Object.keys(entries).length;
                 console.log(`☁️ Contributed ${Object.keys(entries).length} entries to cloud`);
+                this.recordSuccess();
+            } else {
+                // Server error - restore entries for retry
+                console.warn(`☁️ Contribution failed with status ${response.status}, will retry`);
+                this._restoreContributions(entries);
+                this.recordFailure();
             }
 
         } catch (error) {
             if (error.name === 'AbortError') {
-                console.warn('☁️ Contribution timed out');
+                console.warn('☁️ Contribution timed out, will retry');
             } else {
                 console.error('☁️ Contribution failed:', error.message);
             }
             this.stats.errors++;
+            // Restore entries for retry
+            this._restoreContributions(entries);
+            this.recordFailure();
         }
 
         this.saveStats();
+    }
+    
+    /**
+     * Restore contributions to queue for retry (internal use)
+     */
+    _restoreContributions(entries) {
+        for (const [username, data] of Object.entries(entries)) {
+            // Only restore if not already in queue (avoid duplicates)
+            if (!this.contributionQueue.has(username)) {
+                this.contributionQueue.set(username, data);
+            }
+        }
+        
+        // Schedule retry with backoff
+        const delay = this.getBackoffDelay();
+        console.log(`☁️ Restored ${Object.keys(entries).length} contributions for retry in ${delay}ms`);
+        this.contributeTimeout = setTimeout(() => {
+            this.flushContributions();
+        }, delay);
+    }
+
+    /**
+     * Sanitize input from cloud cache to prevent XSS/injection
+     * @param {any} input - Input to sanitize
+     * @returns {string|null} - Sanitized string or null
+     */
+    sanitizeInput(input) {
+        if (!input || typeof input !== 'string') return null;
+        
+        // Remove any HTML/script tags
+        let sanitized = input.replace(/<[^>]*>/g, '');
+        
+        // Remove potential script injection patterns
+        sanitized = sanitized.replace(/javascript:/gi, '');
+        sanitized = sanitized.replace(/on\w+=/gi, '');
+        
+        // Limit length to prevent overflow attacks
+        sanitized = sanitized.substring(0, 100);
+        
+        // Trim whitespace
+        sanitized = sanitized.trim();
+        
+        return sanitized || null;
     }
 
     /**

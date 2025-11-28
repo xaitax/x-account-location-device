@@ -5,8 +5,8 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, SELECTORS, CSS_CLASSES, VERSION } from '../shared/constants.js';
-import { debounce, extractUsername, findInsertionPoint, getFlagEmoji, getDeviceEmoji } from '../shared/utils.js';
+import { MESSAGE_TYPES, SELECTORS, CSS_CLASSES, VERSION, TIMING } from '../shared/constants.js';
+import { extractUsername, findInsertionPoint, getFlagEmoji, getDeviceEmoji, debounce } from '../shared/utils.js';
 import { showModal } from './modal.js';
 import { captureEvidence } from './evidence-capture.js';
 
@@ -20,6 +20,15 @@ let themeObserver = null;
 const processingQueue = new Set();
 let stylesInjected = false;
 let debugMode = false;
+
+// Cleanup tracking for proper teardown
+let resizeHandler = null;
+let cleanupFunctions = [];
+
+// Intersection Observer for processing only visible elements
+let intersectionObserver = null;
+const pendingVisibility = new Map(); // element -> screenName
+const PENDING_VISIBILITY_MAX_SIZE = 500; // Prevent unbounded growth
 
 /**
  * Debug logger - only logs when debugMode is enabled
@@ -154,40 +163,58 @@ function setupPageScriptListener() {
  * Listen for messages from background script
  */
 function setupBackgroundListener() {
-    browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const messageHandler = (message, sender, sendResponse) => {
         const { type, payload } = message;
 
-        switch (type) {
-            case MESSAGE_TYPES.SETTINGS_UPDATED: {
-                const prevSettings = { ...settings };
-                settings = payload;
-                isEnabled = settings.enabled !== false;
-                debugMode = settings.debugMode === true;
-                debug('Settings updated:', settings);
-                if (!isEnabled) {
-                    // Remove existing badges if disabled
-                    document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
-                }
-                // Handle sidebar link toggle
-                if (prevSettings.showSidebarBlockerLink !== settings.showSidebarBlockerLink) {
-                    if (settings.showSidebarBlockerLink === false) {
-                        removeSidebarLink();
-                    } else {
-                        injectSidebarLink();
+        // Handle messages asynchronously
+        (async () => {
+            try {
+                switch (type) {
+                    case MESSAGE_TYPES.SETTINGS_UPDATED: {
+                        const prevSettings = { ...settings };
+                        settings = payload;
+                        isEnabled = settings.enabled !== false;
+                        debugMode = settings.debugMode === true;
+                        debug('Settings updated:', settings);
+                        if (!isEnabled) {
+                            // Remove existing badges if disabled
+                            document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
+                        }
+                        // Handle sidebar link toggle
+                        if (prevSettings.showSidebarBlockerLink !== settings.showSidebarBlockerLink) {
+                            if (settings.showSidebarBlockerLink === false) {
+                                removeSidebarLink();
+                            } else {
+                                injectSidebarLink();
+                            }
+                        }
+                        sendResponse({ success: true });
+                        break;
                     }
+
+                    case MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED:
+                        blockedCountries = new Set(payload);
+                        updateBlockedTweets();
+                        sendResponse({ success: true });
+                        break;
+
+                    default:
+                        sendResponse({ success: false, error: 'Unknown message type' });
                 }
-                sendResponse({ success: true });
-                break;
+            } catch (error) {
+                console.error('X-Posed: Message handler error:', error);
+                sendResponse({ success: false, error: error.message });
             }
+        })();
 
-            case MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED:
-                blockedCountries = new Set(payload);
-                updateBlockedTweets();
-                sendResponse({ success: true });
-                break;
-        }
+        return true; // Keep message channel open for async response
+    };
 
-        return true;
+    browserAPI.runtime.onMessage.addListener(messageHandler);
+    
+    // Track for cleanup
+    cleanupFunctions.push(() => {
+        browserAPI.runtime.onMessage.removeListener(messageHandler);
     });
 }
 
@@ -243,6 +270,8 @@ function detectAndApplyTheme() {
  * Detect X's current theme from the page
  */
 function detectXTheme() {
+    if (typeof document === 'undefined') return 'dark';
+
     // Check CSS variable first
     const bgColor = window.getComputedStyle(document.documentElement).getPropertyValue('--background-color').trim();
     
@@ -313,10 +342,81 @@ function startThemeObserver() {
 }
 
 /**
+ * Start Intersection Observer for lazy processing of visible elements
+ */
+function startIntersectionObserver() {
+    if (intersectionObserver) return;
+    
+    intersectionObserver = new IntersectionObserver(
+        entries => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) {
+                    const element = entry.target;
+                    
+                    // Stop observing this element
+                    intersectionObserver.unobserve(element);
+                    pendingVisibility.delete(element);
+                    
+                    // Process the element now that it's visible (with error boundary)
+                    processElementSafe(element);
+                }
+            }
+        },
+        {
+            // Start processing when element is within 200px of viewport
+            rootMargin: '200px',
+            threshold: 0
+        }
+    );
+    
+    // Track for cleanup
+    cleanupFunctions.push(() => {
+        if (intersectionObserver) {
+            intersectionObserver.disconnect();
+            intersectionObserver = null;
+        }
+        pendingVisibility.clear();
+    });
+}
+
+/**
+ * Queue element for processing when visible
+ * Implements bounds checking to prevent unbounded memory growth
+ */
+function queueForVisibility(element) {
+    if (!intersectionObserver) {
+        // Fallback: process immediately if Intersection Observer not available
+        processElementSafe(element);
+        return;
+    }
+    
+    // Don't queue if already queued or processed
+    if (pendingVisibility.has(element) || element.dataset.xProcessed) {
+        return;
+    }
+    
+    // Evict oldest entries if at capacity (LRU-style)
+    if (pendingVisibility.size >= PENDING_VISIBILITY_MAX_SIZE) {
+        const firstKey = pendingVisibility.keys().next().value;
+        if (firstKey) {
+            intersectionObserver.unobserve(firstKey);
+            pendingVisibility.delete(firstKey);
+            debug(`Evicted oldest pending visibility entry, queue size: ${pendingVisibility.size}`);
+        }
+    }
+    
+    pendingVisibility.set(element, true);
+    intersectionObserver.observe(element);
+}
+
+/**
  * Start MutationObserver for DOM changes
  */
 function startObserver() {
     if (observer) return;
+    
+    // Start Intersection Observer for visibility-based processing
+    startIntersectionObserver();
 
     // Collect elements without debounce to not lose mutations
     let pendingElements = new Set();
@@ -328,7 +428,10 @@ function startObserver() {
         const elements = Array.from(pendingElements);
         pendingElements = new Set();
         
-        processElementsBatch(elements);
+        // Queue elements for visibility-based processing
+        for (const element of elements) {
+            queueForVisibility(element);
+        }
     };
 
     const scheduleProcessing = () => {
@@ -420,33 +523,68 @@ function scanPage() {
 
 /**
  * Process elements in batches using requestIdleCallback
+ * Note: With Intersection Observer, this is now primarily used for initial scan
  */
 function processElementsBatch(elements) {
     if (elements.length === 0) return;
 
-    const processNext = deadline => {
-        while (elements.length > 0 && (deadline.timeRemaining() > 0 || deadline.didTimeout)) {
-            const element = elements.shift();
-            processElement(element);
-        }
-
-        if (elements.length > 0) {
-            requestIdleCallback(processNext, { timeout: 100 });
-        }
-    };
-
-    if (typeof requestIdleCallback !== 'undefined') {
-        requestIdleCallback(processNext, { timeout: 100 });
-    } else {
-        // Fallback for browsers without requestIdleCallback
-        elements.forEach(el => processElement(el));
+    // Queue all elements for visibility-based processing
+    for (const element of elements) {
+        queueForVisibility(element);
     }
 }
 
 /**
- * Cache for user info to avoid repeated API calls
+ * LRU Cache for user info to avoid repeated API calls.
+ * Limited size to prevent unbounded memory growth on pages with many users.
  */
-const userInfoCache = new Map();
+const USER_INFO_CACHE_MAX_SIZE = 1000;
+
+class LRUUserInfoCache {
+    constructor(maxSize) {
+        this.maxSize = maxSize;
+        this.cache = new Map();
+    }
+    
+    get(key) {
+        if (!this.cache.has(key)) {
+            return undefined;
+        }
+        // Move to end (most recently used)
+        const value = this.cache.get(key);
+        this.cache.delete(key);
+        this.cache.set(key, value);
+        return value;
+    }
+    
+    set(key, value) {
+        // Delete if exists to update position
+        if (this.cache.has(key)) {
+            this.cache.delete(key);
+        }
+        // Evict oldest if at capacity
+        if (this.cache.size >= this.maxSize) {
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+            debug(`LRU eviction: removed oldest entry, cache size: ${this.cache.size}`);
+        }
+        this.cache.set(key, value);
+    }
+    
+    has(key) {
+        return this.cache.has(key);
+    }
+    
+    clear() {
+        this.cache.clear();
+    }
+    
+    get size() {
+        return this.cache.size;
+    }
+}
+
+const userInfoCache = new LRUUserInfoCache(USER_INFO_CACHE_MAX_SIZE);
 
 /**
  * Extract username from a UserCell element
@@ -502,6 +640,27 @@ function findUserCellInsertionPoint(userCell, screenName) {
     }
     
     return null;
+}
+
+/**
+ * Safe wrapper for processElement with error boundary
+ * Prevents a single element error from breaking the entire processing loop
+ */
+function processElementSafe(element) {
+    try {
+        processElement(element).catch(error => {
+            console.error('X-Posed: Error processing element:', error.message);
+            // Mark as processed to prevent retry loops
+            if (element && element.dataset) {
+                element.dataset.xProcessed = 'error';
+            }
+        });
+    } catch (error) {
+        console.error('X-Posed: Sync error processing element:', error.message);
+        if (element && element.dataset) {
+            element.dataset.xProcessed = 'error';
+        }
+    }
 }
 
 /**
@@ -597,6 +756,14 @@ async function processElement(element) {
 
     processingQueue.add(screenName);
     
+    // Set a timeout to clean up stale processing entries (in case of network failure)
+    const processingTimeout = setTimeout(() => {
+        if (processingQueue.has(screenName)) {
+            debug(`Cleaning up stale processing entry for @${screenName}`);
+            processingQueue.delete(screenName);
+        }
+    }, 30000); // 30 second timeout for stale entries
+    
     // Only show shimmer in debug mode to reduce DOM overhead
     let shimmer = null;
     if (debugMode) {
@@ -679,12 +846,28 @@ async function processElement(element) {
     } catch (error) {
         userInfoCache.set(screenName, null);
     } finally {
+        clearTimeout(processingTimeout);
         processingQueue.delete(screenName);
     }
 }
 
 /**
+ * Sanitize text for safe display (prevents XSS)
+ * @param {string} text - Text to sanitize
+ * @returns {string} - Sanitized text
+ */
+function sanitizeText(text) {
+    if (!text || typeof text !== 'string') return '';
+    // Remove any HTML tags and limit length
+    return text.replace(/[<>&"']/g, char => {
+        const entities = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' };
+        return entities[char] || char;
+    }).substring(0, 100); // Limit to 100 chars for safety
+}
+
+/**
  * Create info badge for a user
+ * Uses safe DOM methods to prevent XSS attacks
  */
 function createBadge(element, screenName, info, isUserCell = false) {
     // Check if badge already exists
@@ -694,56 +877,87 @@ function createBadge(element, screenName, info, isUserCell = false) {
 
     const badge = document.createElement('span');
     badge.className = CSS_CLASSES.INFO_BADGE;
+    
+    let hasContent = false;
 
-    let content = '';
-
-    // Add flag
+    // Add flag (using safe DOM methods)
     if (info.location && settings.showFlags !== false) {
         const flag = getFlagEmoji(info.location);
         if (flag) {
-            content += `<span class="x-flag" title="${info.location}">${flag}</span>`;
+            const flagSpan = document.createElement('span');
+            flagSpan.className = 'x-flag';
+            flagSpan.title = sanitizeText(info.location);
+            // Flag emoji could be an img tag (Twemoji) or text emoji
+            if (typeof flag === 'string' && flag.startsWith('<img')) {
+                flagSpan.innerHTML = flag; // Twemoji img is safe (generated internally)
+            } else {
+                flagSpan.textContent = flag;
+            }
+            badge.appendChild(flagSpan);
+            hasContent = true;
         }
 
         // Add VPN indicator
         if (info.locationAccurate === false && settings.showVpnIndicator !== false) {
-            content += '<span class="x-vpn" title="Location may not be accurate (VPN/Proxy detected)">🔒</span>';
+            const vpnSpan = document.createElement('span');
+            vpnSpan.className = 'x-vpn';
+            vpnSpan.title = 'Location may not be accurate (VPN/Proxy detected)';
+            vpnSpan.textContent = '🔒';
+            badge.appendChild(vpnSpan);
         }
     }
 
-    // Add device
+    // Add device (using safe DOM methods)
     if (info.device && settings.showDevices !== false) {
         const emoji = getDeviceEmoji(info.device);
-        content += `<span class="x-device" title="Connected via: ${info.device}">${emoji}</span>`;
+        const deviceSpan = document.createElement('span');
+        deviceSpan.className = 'x-device';
+        deviceSpan.title = 'Connected via: ' + sanitizeText(info.device);
+        deviceSpan.textContent = emoji;
+        badge.appendChild(deviceSpan);
+        hasContent = true;
     }
 
-    if (!content) return;
+    if (!hasContent) return;
 
-    // Add camera capture button (reveals on hover)
-    content += `<button class="x-capture-btn" title="Capture evidence screenshot" aria-label="Capture evidence">
-        <svg viewBox="0 0 24 24" width="14" height="14">
-            <path fill="currentColor" d="M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/>
-            <path fill="currentColor" d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z"/>
-        </svg>
-    </button>`;
-
-    badge.innerHTML = content;
+    // Add camera capture button (using safe DOM methods)
+    const captureBtn = document.createElement('button');
+    captureBtn.className = 'x-capture-btn';
+    captureBtn.title = 'Capture evidence screenshot';
+    captureBtn.setAttribute('aria-label', 'Capture evidence');
+    
+    // Create SVG safely
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    
+    const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path1.setAttribute('fill', 'currentColor');
+    path1.setAttribute('d', 'M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z');
+    
+    const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path2.setAttribute('fill', 'currentColor');
+    path2.setAttribute('d', 'M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z');
+    
+    svg.appendChild(path1);
+    svg.appendChild(path2);
+    captureBtn.appendChild(svg);
+    badge.appendChild(captureBtn);
 
     // Add click handler for capture button
-    const captureBtn = badge.querySelector('.x-capture-btn');
-    if (captureBtn) {
-        captureBtn.addEventListener('click', e => {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            // Find the tweet article
-            const tweet = element.closest(SELECTORS.TWEET);
-            if (tweet) {
-                captureEvidence(tweet, info, screenName);
-            } else {
-                console.warn('X-Posed: Could not find tweet to capture');
-            }
-        });
-    }
+    captureBtn.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Find the tweet article
+        const tweet = element.closest(SELECTORS.TWEET);
+        if (tweet) {
+            captureEvidence(tweet, info, screenName);
+        } else {
+            console.warn('X-Posed: Could not find tweet to capture');
+        }
+    });
 
     // Find insertion point based on element type and insert
     const insertionPoint = isUserCell
@@ -764,6 +978,11 @@ function createBadge(element, screenName, info, isUserCell = false) {
 let sidebarObserver = null;
 let currentNav = null;
 let resizeTimeout = null;
+let sidebarModifying = false; // Flag to prevent infinite loop
+
+// Track sidebar check interval for cleanup
+let sidebarCheckInterval = null;
+let sidebarCheckTimeout = null;
 
 /**
  * Inject sidebar link for country blocker
@@ -775,8 +994,18 @@ function injectSidebarLink() {
         return;
     }
     
+    // Clear any existing interval/timeout
+    if (sidebarCheckInterval) {
+        clearInterval(sidebarCheckInterval);
+        sidebarCheckInterval = null;
+    }
+    if (sidebarCheckTimeout) {
+        clearTimeout(sidebarCheckTimeout);
+        sidebarCheckTimeout = null;
+    }
+    
     // Wait for sidebar to load
-    const checkSidebar = setInterval(() => {
+    sidebarCheckInterval = setInterval(() => {
         let nav = document.querySelector(SELECTORS.PRIMARY_NAV);
 
         if (!nav) {
@@ -801,16 +1030,41 @@ function injectSidebarLink() {
         }
 
         if (nav) {
-            clearInterval(checkSidebar);
+            // Found nav - clear interval immediately
+            clearInterval(sidebarCheckInterval);
+            sidebarCheckInterval = null;
+            if (sidebarCheckTimeout) {
+                clearTimeout(sidebarCheckTimeout);
+                sidebarCheckTimeout = null;
+            }
+            
             currentNav = nav;
             addBlockerLink(nav);
             observeSidebarChanges(nav);
             setupResizeHandler();
         }
-    }, 500);
+    }, TIMING.SIDEBAR_CHECK_MS);
 
-    // Stop after 10 seconds
-    setTimeout(() => clearInterval(checkSidebar), 10000);
+    // Stop after timeout and clear interval
+    sidebarCheckTimeout = setTimeout(() => {
+        if (sidebarCheckInterval) {
+            clearInterval(sidebarCheckInterval);
+            sidebarCheckInterval = null;
+            debug('Sidebar check timed out');
+        }
+    }, TIMING.SIDEBAR_TIMEOUT_MS);
+    
+    // Track for cleanup
+    cleanupFunctions.push(() => {
+        if (sidebarCheckInterval) {
+            clearInterval(sidebarCheckInterval);
+            sidebarCheckInterval = null;
+        }
+        if (sidebarCheckTimeout) {
+            clearTimeout(sidebarCheckTimeout);
+            sidebarCheckTimeout = null;
+        }
+    });
 }
 
 /**
@@ -822,6 +1076,9 @@ function observeSidebarChanges(nav) {
     }
 
     sidebarObserver = new MutationObserver(() => {
+        // Skip if we're currently modifying the sidebar (prevents infinite loop)
+        if (sidebarModifying) return;
+        
         // Check if our link still exists
         const ourLink = document.getElementById('x-country-blocker-link');
         const profileLink = nav.querySelector(SELECTORS.PROFILE_LINK);
@@ -829,7 +1086,20 @@ function observeSidebarChanges(nav) {
         if (!ourLink && profileLink && settings.showSidebarBlockerLink !== false) {
             // Our link was removed (React re-render), re-inject it
             debug('Sidebar link removed, re-injecting...');
+            
+            // Temporarily disconnect observer to prevent infinite loop
+            sidebarObserver.disconnect();
             addBlockerLink(nav);
+            
+            // Re-observe after a short delay
+            setTimeout(() => {
+                if (sidebarObserver && nav.isConnected) {
+                    sidebarObserver.observe(nav, {
+                        childList: true,
+                        subtree: true
+                    });
+                }
+            }, 100);
         }
     });
 
@@ -837,31 +1107,56 @@ function observeSidebarChanges(nav) {
         childList: true,
         subtree: true
     });
+    
+    // Track for cleanup
+    cleanupFunctions.push(() => {
+        if (sidebarObserver) {
+            sidebarObserver.disconnect();
+            sidebarObserver = null;
+        }
+    });
 }
 
 /**
  * Handle window resize to refresh sidebar link for mode changes
  */
 function setupResizeHandler() {
-    window.addEventListener('resize', () => {
-        if (resizeTimeout) {
-            clearTimeout(resizeTimeout);
+    // Remove previous handler if it exists
+    if (resizeHandler) {
+        window.removeEventListener('resize', resizeHandler);
+    }
+    
+    // Create debounced resize handler
+    resizeHandler = debounce(() => {
+        if (!currentNav || settings.showSidebarBlockerLink === false) return;
+        
+        // Set flag to prevent observer from triggering
+        sidebarModifying = true;
+        
+        // Remove existing link and re-add with fresh clone
+        const existingLink = document.getElementById('x-country-blocker-link');
+        if (existingLink) {
+            existingLink.remove();
         }
         
-        // Debounce: wait for resize to finish
-        resizeTimeout = setTimeout(() => {
-            if (!currentNav || settings.showSidebarBlockerLink === false) return;
-            
-            // Remove existing link and re-add with fresh clone
-            const existingLink = document.getElementById('x-country-blocker-link');
-            if (existingLink) {
-                existingLink.remove();
-            }
-            
-            // Re-inject with fresh clone from current Profile link state
-            addBlockerLink(currentNav);
-            debug('Sidebar link refreshed after resize');
-        }, 300);
+        // Re-inject with fresh clone from current Profile link state
+        addBlockerLink(currentNav);
+        debug('Sidebar link refreshed after resize');
+        
+        // Clear flag after a short delay
+        setTimeout(() => {
+            sidebarModifying = false;
+        }, 50);
+    }, TIMING.RESIZE_DEBOUNCE_MS);
+    
+    window.addEventListener('resize', resizeHandler);
+    
+    // Track for cleanup
+    cleanupFunctions.push(() => {
+        if (resizeHandler) {
+            window.removeEventListener('resize', resizeHandler);
+            resizeHandler = null;
+        }
     });
 }
 
@@ -884,6 +1179,9 @@ function addBlockerLink(nav) {
 
     const profileLink = nav.querySelector(SELECTORS.PROFILE_LINK);
     if (!profileLink) return;
+    
+    // Set modifying flag
+    sidebarModifying = true;
 
     // Deep clone the profile link to get exact same structure and classes
     const link = profileLink.cloneNode(true);
@@ -933,7 +1231,54 @@ function addBlockerLink(nav) {
     };
 
     profileLink.parentElement.insertBefore(link, profileLink.nextSibling);
+    
+    // Clear modifying flag after insertion
+    setTimeout(() => {
+        sidebarModifying = false;
+    }, 50);
 }
+
+/**
+ * Cleanup all resources (for extension unload/reload)
+ */
+function cleanup() {
+    debug('Cleaning up X-Posed resources...');
+    
+    // Run all cleanup functions
+    for (const cleanupFn of cleanupFunctions) {
+        try {
+            cleanupFn();
+        } catch (error) {
+            console.error('X-Posed: Cleanup error:', error);
+        }
+    }
+    cleanupFunctions = [];
+    
+    // Clear observers
+    if (observer) {
+        observer.disconnect();
+        observer = null;
+    }
+    if (themeObserver) {
+        themeObserver.disconnect();
+        themeObserver = null;
+    }
+    
+    // Clear timeouts
+    if (resizeTimeout) {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = null;
+    }
+    
+    // Clear processing queue and cache
+    processingQueue.clear();
+    userInfoCache.clear();
+    
+    debug('Cleanup complete');
+}
+
+// Handle page unload for cleanup
+window.addEventListener('beforeunload', cleanup);
 
 /**
  * Show the country blocker modal

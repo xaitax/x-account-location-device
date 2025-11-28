@@ -4,7 +4,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION } from '../shared/constants.js';
+import { MESSAGE_TYPES, VERSION, TIMING } from '../shared/constants.js';
 import { applyTheme } from '../shared/utils.js';
 
 // DOM Elements
@@ -148,8 +148,17 @@ function setupEventListeners() {
         await saveSettings({ showVpnIndicator: e.target.checked });
     });
 
-    // Clear cache button
+    // Clear cache button with confirmation
     elements.btnClearCache.addEventListener('click', async () => {
+        // Get current cache size for confirmation message
+        const cachedCount = elements.statCached.textContent;
+        
+        // Confirm before clearing
+        if (cachedCount !== '0' && cachedCount !== '-') {
+            const confirmed = confirm(`Are you sure you want to clear ${cachedCount} cached users?\n\nThis will require re-fetching data for all users.`);
+            if (!confirmed) return;
+        }
+        
         elements.btnClearCache.classList.add('loading');
         
         try {
@@ -172,7 +181,7 @@ function setupEventListeners() {
             
             setTimeout(() => {
                 elements.btnClearCache.innerHTML = originalText;
-            }, 2000);
+            }, TIMING.CACHE_CLEAR_FEEDBACK_MS);
         } catch (error) {
             console.error('Failed to clear cache:', error);
         } finally {

@@ -84,11 +84,12 @@ class LRUCache {
 }
 
 /**
- * User cache data storage
+ * User cache data storage with per-entry expiry tracking
  */
 class UserCacheStorage {
     constructor() {
         this.cache = new LRUCache(CACHE_CONFIG.MAX_ENTRIES);
+        this.expiryMap = new Map(); // Track individual entry expiry times
         this.dirty = false;
         this.loaded = false;
         this.saveTimeoutId = null;
@@ -102,16 +103,20 @@ class UserCacheStorage {
             if (stored && typeof stored === 'object') {
                 const now = Date.now();
                 let loadedCount = 0;
+                let expiredCount = 0;
                 
-                // Load non-expired entries
+                // Load non-expired entries with their original expiry times
                 for (const [key, data] of Object.entries(stored)) {
                     if (data && data.expiry > now && data.value) {
                         this.cache.set(key, data.value);
+                        this.expiryMap.set(key, data.expiry); // Preserve original expiry
                         loadedCount++;
+                    } else if (data && data.expiry <= now) {
+                        expiredCount++;
                     }
                 }
                 
-                console.log(`📦 Loaded ${loadedCount} cached user entries`);
+                console.log(`📦 Loaded ${loadedCount} cached user entries (${expiredCount} expired)`);
             }
             
             this.loaded = true;
@@ -132,10 +137,12 @@ class UserCacheStorage {
 
         try {
             const now = Date.now();
-            const expiry = now + CACHE_CONFIG.EXPIRY_MS;
+            const defaultExpiry = now + CACHE_CONFIG.EXPIRY_MS;
             const exportData = {};
             
             for (const [key, value] of this.cache.entries()) {
+                // Use existing expiry if available, otherwise use default
+                const expiry = this.expiryMap.get(key) || defaultExpiry;
                 exportData[key] = { value, expiry };
             }
             
@@ -164,6 +171,8 @@ class UserCacheStorage {
 
     set(screenName, data) {
         this.cache.set(screenName, data);
+        // Set fresh expiry for new/updated entries
+        this.expiryMap.set(screenName, Date.now() + CACHE_CONFIG.EXPIRY_MS);
         this.dirty = true;
         this.scheduleSave();
     }
@@ -175,6 +184,7 @@ class UserCacheStorage {
     delete(screenName) {
         const result = this.cache.delete(screenName);
         if (result) {
+            this.expiryMap.delete(screenName);
             this.dirty = true;
             this.scheduleSave();
         }
@@ -183,6 +193,7 @@ class UserCacheStorage {
 
     clear() {
         this.cache.clear();
+        this.expiryMap.clear();
         this.dirty = true;
         return this.save(true);
     }

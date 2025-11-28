@@ -3,10 +3,14 @@
  * Provides UI for blocking/unblocking countries
  */
 
-import { COUNTRY_FLAGS, COUNTRY_LIST, CSS_CLASSES } from '../shared/constants.js';
-import { getFlagEmoji, formatCountryName, createElement } from '../shared/utils.js';
+import { COUNTRY_FLAGS, COUNTRY_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
+import { getFlagEmoji, formatCountryName, createElement, debounce } from '../shared/utils.js';
 
 let currentModal = null;
+
+// Memoized country filtering for performance
+let cachedFilteredCountries = null;
+let cachedFilter = '';
 
 /**
  * Show the country blocker modal
@@ -57,14 +61,19 @@ export function showModal(blockedCountries, onAction) {
         }
     });
 
-    // Close on Escape key
+    // Close on Escape key (with proper cleanup)
     const handleKeydown = (e) => {
         if (e.key === 'Escape') {
-            overlay.remove();
-            currentModal = null;
-            document.removeEventListener('keydown', handleKeydown);
+            closeModal();
         }
     };
+    
+    const closeModal = () => {
+        document.removeEventListener('keydown', handleKeydown);
+        overlay.remove();
+        currentModal = null;
+    };
+    
     document.addEventListener('keydown', handleKeydown);
 
     // Add to page
@@ -79,26 +88,54 @@ export function showModal(blockedCountries, onAction) {
 }
 
 /**
- * Create modal header
+ * Create modal header using safe DOM methods
  */
 function createHeader(onClose) {
     const header = createElement('div', { className: 'x-blocker-header' });
 
-    header.innerHTML = `
-        <h2 class="x-blocker-title">
-            <svg viewBox="0 0 24 24" width="24" height="24" style="display: inline-block; vertical-align: middle; margin-right: 8px;">
-                <g><path fill="currentColor" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78zm-9-1.04l-1.41 1.41L10.5 14.5l6-6-1.41-1.41-4.59 4.58z"></path></g>
-            </svg>
-            Block Countries
-        </h2>
-        <button class="x-blocker-close" aria-label="Close">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-                <g><path fill="currentColor" d="M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z"></path></g>
-            </svg>
-        </button>
-    `;
+    // Create title with shield icon
+    const title = createElement('h2', { className: 'x-blocker-title' });
+    
+    // Create SVG using DOM methods (safe)
+    const titleSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    titleSvg.setAttribute('viewBox', '0 0 24 24');
+    titleSvg.setAttribute('width', '24');
+    titleSvg.setAttribute('height', '24');
+    titleSvg.style.cssText = 'display: inline-block; vertical-align: middle; margin-right: 8px;';
+    
+    const titleG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const titlePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    titlePath.setAttribute('fill', 'currentColor');
+    titlePath.setAttribute('d', 'M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78zm-9-1.04l-1.41 1.41L10.5 14.5l6-6-1.41-1.41-4.59 4.58z');
+    titleG.appendChild(titlePath);
+    titleSvg.appendChild(titleG);
+    
+    title.appendChild(titleSvg);
+    title.appendChild(document.createTextNode('Block Countries'));
 
-    header.querySelector('.x-blocker-close').addEventListener('click', onClose);
+    // Create close button
+    const closeBtn = createElement('button', {
+        className: 'x-blocker-close',
+        'aria-label': 'Close'
+    });
+    
+    const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    closeSvg.setAttribute('viewBox', '0 0 24 24');
+    closeSvg.setAttribute('width', '20');
+    closeSvg.setAttribute('height', '20');
+    
+    const closeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    closePath.setAttribute('fill', 'currentColor');
+    closePath.setAttribute('d', 'M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z');
+    closeG.appendChild(closePath);
+    closeSvg.appendChild(closeG);
+    closeBtn.appendChild(closeSvg);
+    
+    closeBtn.addEventListener('click', onClose);
+
+    header.appendChild(title);
+    header.appendChild(closeBtn);
 
     return header;
 }
@@ -130,14 +167,24 @@ function createBody(blockedCountries, onAction) {
 
     let currentFilter = '';
 
-    // Render countries function
+    // Render countries function with memoized filtering
     const renderCountries = (filter = currentFilter) => {
         currentFilter = filter;
         countriesContainer.innerHTML = '';
 
-        const filteredCountries = COUNTRY_LIST.filter(country =>
-            country.includes(filter.toLowerCase())
-        );
+        // Use memoized results if filter hasn't changed
+        const filterLower = filter.toLowerCase();
+        let filteredCountries;
+        
+        if (cachedFilter === filterLower && cachedFilteredCountries) {
+            filteredCountries = cachedFilteredCountries;
+        } else {
+            filteredCountries = COUNTRY_LIST.filter(country =>
+                country.includes(filterLower)
+            );
+            cachedFilter = filterLower;
+            cachedFilteredCountries = filteredCountries;
+        }
 
         // Use document fragment for better performance
         const fragment = document.createDocumentFragment();
@@ -150,16 +197,20 @@ function createBody(blockedCountries, onAction) {
         countriesContainer.appendChild(fragment);
     };
 
-    // Search functionality
+    // Search functionality with debouncing
+    const debouncedRender = debounce((value) => {
+        renderCountries(value);
+    }, TIMING.SEARCH_DEBOUNCE_MS);
+    
     search.addEventListener('input', (e) => {
-        renderCountries(e.target.value);
+        debouncedRender(e.target.value);
     });
 
     return { body, renderCountries, searchInput: search };
 }
 
 /**
- * Create a single country item
+ * Create a single country item using safe DOM methods
  */
 function createCountryItem(country, blockedCountries, onAction, renderCountries) {
     const isBlocked = blockedCountries.has(country);
@@ -168,11 +219,20 @@ function createCountryItem(country, blockedCountries, onAction, renderCountries)
         className: `x-country-item${isBlocked ? ' blocked' : ''}`
     });
 
-    // Flag
+    // Flag - using safe DOM methods
     const flagSpan = createElement('span', { className: 'x-country-flag' });
     const flag = getFlagEmoji(country);
     if (typeof flag === 'string' && flag.startsWith('<img')) {
-        flagSpan.innerHTML = flag;
+        // Parse the img tag safely by creating a temporary container
+        // The Twemoji img is safe since it's generated internally with trusted source
+        const temp = document.createElement('div');
+        temp.innerHTML = flag;
+        const imgEl = temp.firstChild;
+        if (imgEl && imgEl.tagName === 'IMG') {
+            flagSpan.appendChild(imgEl);
+        } else {
+            flagSpan.textContent = '🌍';
+        }
     } else {
         flagSpan.textContent = flag || '🌍';
     }
@@ -193,18 +253,26 @@ function createCountryItem(country, blockedCountries, onAction, renderCountries)
     item.appendChild(name);
     item.appendChild(status);
 
-    // Click handler
+    // Click handler - update only this item's visual state instead of full re-render
     item.addEventListener('click', async () => {
         const response = await onAction('toggle', country);
         
         if (response?.success) {
-            // Update local state and re-render
-            if (blockedCountries.has(country)) {
+            // Update local state
+            const wasBlocked = blockedCountries.has(country);
+            if (wasBlocked) {
                 blockedCountries.delete(country);
             } else {
                 blockedCountries.add(country);
             }
-            renderCountries();
+            
+            // Update this item's visual state only (avoid full re-render)
+            item.classList.toggle('blocked', !wasBlocked);
+            const statusEl = item.querySelector('.x-country-status');
+            if (statusEl) {
+                statusEl.textContent = wasBlocked ? '' : 'BLOCKED';
+            }
+            
             updateStats(blockedCountries.size);
         }
     });

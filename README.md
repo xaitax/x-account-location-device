@@ -27,7 +27,7 @@ If you find this research valuable, I’d appreciate a coffee:
 Real location data from X's official API displayed as flag emojis next to every username.
 
 ### 📱 Device Detection
-See if users are on mobile (📱), desktop (💻), or web (🌐) at a glance.
+See if users are on iOS (🍎), Android (🤖), or web (🌐) at a glance.
 
 ### 🔒 VPN Indicator
 Know when X detects a VPN or proxy — the 🔒 icon appears when location might not be accurate.
@@ -243,6 +243,42 @@ Read the full [Privacy Policy](PRIVACY.md).
 ---
 
 ## 📝 Changelog
+
+### v2.0.2
+
+**🎨 Device Detection Overhaul**
+- New distinct device emojis: 🍎 iOS, 🤖 Android, 🌐 Web, ❓ Unknown
+- Removed misleading "Desktop" category (X API doesn't distinguish desktop from mobile web)
+- Statistics now show accurate platform breakdown
+
+**🔒 Security Hardening**
+- Fixed XSS vulnerability in badge creation (now uses safe DOM methods)
+- Replaced remaining innerHTML with safe DOM methods in modal and evidence capture
+- Safe flag emoji handling with validated Twemoji images
+- Added input sanitization for cloud cache data
+
+**⚡ Performance**
+- Intersection Observer for lazy element processing (only visible elements)
+- Reduced unnecessary API calls for off-screen content
+- Memoized country list filtering for improved rendering performance
+
+**🧠 Memory Management**
+- Bounded pendingVisibility Map (500 max entries with LRU eviction)
+- Bounded RequestDeduplicator Map (200 max entries)
+- Periodic cleanup of expired notFoundCache entries
+
+**🔄 Stability**
+- Service Worker keep-alive prevents Chrome MV3 termination
+- Cache negative results (not found users) to avoid repeat API calls
+- Error boundary for element processing prevents cascade failures
+- Fixed memory leaks and async handling issues
+- Added retry logic with exponential backoff for transient failures
+
+**🔧 Code Quality**
+- Modernized APIs, centralized constants, improved accessibility
+- Added unified logging and JSDoc documentation
+
+---
 
 ### v2.0.1
 

@@ -3,7 +3,7 @@
  * Centralized configuration for cross-browser compatibility
  */
 
-export const VERSION = '2.0.1';
+export const VERSION = '2.0.2';
 
 // Storage keys
 export const STORAGE_KEYS = {
@@ -42,6 +42,29 @@ export const CLOUD_CACHE_CONFIG = {
     
     // Feature flags
     ENABLED_BY_DEFAULT: false    // Opt-in only
+};
+
+// Z-index layering (ensures consistent stacking order)
+export const Z_INDEX = {
+    BADGE: 1,                    // Info badges on tweets
+    MODAL_OVERLAY: 999999,       // Country blocker modal backdrop
+    MODAL: 1000000,              // Modal dialog
+    EVIDENCE_MODAL: 1000000,     // Evidence capture modal
+    TOAST: 1000001               // Toast notifications (always on top)
+};
+
+// Timing configuration (in milliseconds)
+export const TIMING = {
+    BATCH_PROCESS_MS: 50,           // Delay for batching element processing
+    RETRY_DELAY_MS: 150,            // Delay before retrying cache check
+    RESIZE_DEBOUNCE_MS: 300,        // Debounce for window resize events
+    SEARCH_DEBOUNCE_MS: 200,        // Debounce for search input
+    SIDEBAR_CHECK_MS: 500,          // Interval for sidebar check
+    SIDEBAR_TIMEOUT_MS: 10000,      // Max time to wait for sidebar
+    DELAYED_SCAN_MS: 2000,          // Delay for secondary page scan
+    OBSERVER_RECONNECT_MS: 100,     // Delay before reconnecting observers
+    SAVE_STATUS_DISPLAY_MS: 2000,   // How long to show save status
+    CACHE_CLEAR_FEEDBACK_MS: 2000   // How long to show cache cleared feedback
 };
 
 // Cache configuration

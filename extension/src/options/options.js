@@ -4,8 +4,8 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, STORAGE_KEYS } from '../shared/constants.js';
-import { getFlagEmoji, formatCountryName, applyTheme } from '../shared/utils.js';
+import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, STORAGE_KEYS, TIMING } from '../shared/constants.js';
+import { getFlagEmoji, formatCountryName, applyTheme, debounce } from '../shared/utils.js';
 
 // DOM Elements
 const elements = {
@@ -194,6 +194,12 @@ function renderCountryGrid(filter = '') {
     const filteredCountries = COUNTRY_LIST.filter(country =>
         country.toLowerCase().includes(filterLower)
     );
+    
+    // Show empty result message
+    if (filteredCountries.length === 0) {
+        elements.countryGrid.innerHTML = '<div class="empty-state">No countries match your search</div>';
+        return;
+    }
     
     elements.countryGrid.innerHTML = '';
     
@@ -506,15 +512,15 @@ function renderStatistics(stats) {
     `).join('');
     
     const deviceColorsMap = {
-        'Mobile': '#1d9bf0',
-        'Desktop': '#00ba7c',
+        'iOS': '#1d9bf0',
+        'Android': '#00ba7c',
         'Web': '#f4212e',
-        'Other': '#71767b'
+        'Unknown': '#71767b'
     };
     
     const deviceStatsHtml = stats.topDevices.map(d => `
         <div class="device-stat">
-            <span class="device-icon">${d.device === 'Mobile' ? '📱' : d.device === 'Desktop' ? '💻' : d.device === 'Web' ? '🌐' : '❓'}</span>
+            <span class="device-icon">${d.device === 'iOS' ? '🍎' : d.device === 'Android' ? '🤖' : d.device === 'Web' ? '🌐' : '❓'}</span>
             <span class="device-name">${d.device}</span>
             <span class="device-count">${d.count} (${d.percentage}%)</span>
         </div>
@@ -689,10 +695,14 @@ function setupEventListeners() {
         });
     }
 
-    // Country search
+    // Country search with debouncing
     if (elements.countrySearch) {
-        elements.countrySearch.addEventListener('input', (e) => {
-            renderCountryGrid(e.target.value);
+        const debouncedSearch = debounce(value => {
+            renderCountryGrid(value);
+        }, TIMING.SEARCH_DEBOUNCE_MS);
+        
+        elements.countrySearch.addEventListener('input', e => {
+            debouncedSearch(e.target.value);
         });
     }
 
@@ -722,11 +732,19 @@ function setupEventListeners() {
         });
     }
 
-    // Clear cache
+    // Clear cache with confirmation
     elements.btnClearCache.addEventListener('click', async () => {
+        // Get current cache size for confirmation
+        const cacheCount = elements.cacheSize.textContent;
+        
+        // Confirm before clearing
+        if (cacheCount !== '0' && cacheCount !== '-') {
+            const confirmed = confirm(`Are you sure you want to clear ${cacheCount} cached users?\n\nThis will require re-fetching data for all users.`);
+            if (!confirmed) return;
+        }
+        
         try {
-            // For now, we reset the stat display
-            // The actual cache clear would be handled by background
+            // The actual cache clear is handled by background
             await browserAPI.runtime.sendMessage({
                 type: MESSAGE_TYPES.SET_CACHE,
                 payload: { action: 'clear' }

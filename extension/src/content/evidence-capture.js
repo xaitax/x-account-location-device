@@ -4,7 +4,8 @@
  * Uses native Canvas API with image loading for profile pics and media
  */
 
-import { VERSION, COUNTRY_FLAGS } from '../shared/constants.js';
+import { VERSION, Z_INDEX } from '../shared/constants.js';
+import { getCountryCode } from '../shared/utils.js';
 
 /**
  * Capture a tweet as evidence with metadata overlay
@@ -57,7 +58,7 @@ export async function captureEvidence(tweetElement, userInfo, screenName) {
 }
 
 /**
- * Show loading toast
+ * Show loading toast using safe DOM methods
  */
 function showLoadingToast(message) {
     const toast = document.createElement('div');
@@ -71,16 +72,22 @@ function showLoadingToast(message) {
         border-radius: 8px;
         font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         font-size: 14px;
-        z-index: 1000001;
+        z-index: ${Z_INDEX.TOAST};
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         display: flex;
         align-items: center;
         gap: 10px;
     `;
-    toast.innerHTML = `
-        <div style="width: 16px; height: 16px; border: 2px solid white; border-top-color: transparent; border-radius: 50%; animation: x-spin 1s linear infinite;"></div>
-        ${message}
-    `;
+    
+    // Create spinner using safe DOM methods
+    const spinner = document.createElement('div');
+    spinner.style.cssText = 'width: 16px; height: 16px; border: 2px solid white; border-top-color: transparent; border-radius: 50%; animation: x-spin 1s linear infinite;';
+    
+    // Create text node for message (safe)
+    const messageText = document.createTextNode(message);
+    
+    toast.appendChild(spinner);
+    toast.appendChild(messageText);
     
     // Add keyframes if not exists
     if (!document.getElementById('x-evidence-keyframes')) {
@@ -194,40 +201,6 @@ function loadImage(src) {
         img.onerror = () => reject(new Error('Failed to load image'));
         img.src = src;
     });
-}
-
-/**
- * Get country code (2 letter) for display on canvas
- * Emojis don't render well on all systems, so we use country codes
- */
-function getCountryCode(location) {
-    if (!location) return '';
-    
-    // Map common countries to codes
-    const codes = {
-        'united states': 'US', 'usa': 'US', 'us': 'US',
-        'united kingdom': 'UK', 'uk': 'UK', 'britain': 'UK', 'great britain': 'UK', 'england': 'UK',
-        'germany': 'DE', 'france': 'FR', 'spain': 'ES', 'italy': 'IT',
-        'russia': 'RU', 'russian federation': 'RU',
-        'china': 'CN', 'japan': 'JP', 'india': 'IN', 'brazil': 'BR',
-        'canada': 'CA', 'australia': 'AU', 'mexico': 'MX',
-        'netherlands': 'NL', 'belgium': 'BE', 'switzerland': 'CH',
-        'sweden': 'SE', 'norway': 'NO', 'denmark': 'DK', 'finland': 'FI',
-        'poland': 'PL', 'ukraine': 'UA', 'turkey': 'TR', 'türkiye': 'TR',
-        'south korea': 'KR', 'korea': 'KR', 'north korea': 'KP',
-        'israel': 'IL', 'iran': 'IR', 'iraq': 'IQ', 'saudi arabia': 'SA',
-        'egypt': 'EG', 'south africa': 'ZA', 'nigeria': 'NG',
-        'argentina': 'AR', 'chile': 'CL', 'colombia': 'CO', 'peru': 'PE',
-        'indonesia': 'ID', 'thailand': 'TH', 'vietnam': 'VN', 'viet nam': 'VN',
-        'philippines': 'PH', 'malaysia': 'MY', 'singapore': 'SG',
-        'pakistan': 'PK', 'bangladesh': 'BD', 'sri lanka': 'LK',
-        'portugal': 'PT', 'greece': 'GR', 'ireland': 'IE', 'austria': 'AT',
-        'czech republic': 'CZ', 'czechia': 'CZ', 'romania': 'RO', 'hungary': 'HU',
-        'africa': 'AF', 'europe': 'EU', 'asia': 'AS'
-    };
-    
-    const key = location.trim().toLowerCase();
-    return codes[key] || location.substring(0, 2).toUpperCase();
 }
 
 /**
@@ -626,20 +599,38 @@ function showEvidencePreview(canvas, info) {
     const modal = document.createElement('div');
     modal.className = 'x-evidence-modal';
     
-    // Header
+    // Header - using safe DOM methods
     const header = document.createElement('div');
     header.className = 'x-evidence-header';
-    header.innerHTML = `
-        <h2 class="x-evidence-title">
-            <span style="margin-right: 8px;">📸</span>
-            Evidence Captured
-        </h2>
-        <button class="x-evidence-close" aria-label="Close">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-                <path fill="currentColor" d="M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z"></path>
-            </svg>
-        </button>
-    `;
+    
+    // Create title
+    const title = document.createElement('h2');
+    title.className = 'x-evidence-title';
+    
+    const titleIcon = document.createElement('span');
+    titleIcon.style.marginRight = '8px';
+    titleIcon.textContent = '📸';
+    title.appendChild(titleIcon);
+    title.appendChild(document.createTextNode('Evidence Captured'));
+    
+    // Create close button
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'x-evidence-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    
+    const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    closeSvg.setAttribute('viewBox', '0 0 24 24');
+    closeSvg.setAttribute('width', '20');
+    closeSvg.setAttribute('height', '20');
+    
+    const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    closePath.setAttribute('fill', 'currentColor');
+    closePath.setAttribute('d', 'M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z');
+    closeSvg.appendChild(closePath);
+    closeBtn.appendChild(closeSvg);
+    
+    header.appendChild(title);
+    header.appendChild(closeBtn);
     
     // Body with preview
     const body = document.createElement('div');
@@ -672,8 +663,10 @@ function showEvidencePreview(canvas, info) {
     
     const saveBtn = document.createElement('button');
     saveBtn.className = 'x-evidence-btn x-evidence-btn-primary';
-    saveBtn.innerHTML = '💾 Save as PNG';
-    saveBtn.onclick = () => {
+    saveBtn.innerHTML = '💾 Save as PNG <kbd style="opacity:0.7;font-size:11px;margin-left:4px">↵</kbd>';
+    saveBtn.title = 'Save image (Enter)';
+    
+    const performSave = () => {
         const link = document.createElement('a');
         link.download = filename;
         link.href = canvas.toDataURL('image/png');
@@ -682,10 +675,12 @@ function showEvidencePreview(canvas, info) {
         saveBtn.innerHTML = '✓ Saved!';
         saveBtn.style.background = '#00ba7c';
         setTimeout(() => {
-            saveBtn.innerHTML = '💾 Save as PNG';
+            saveBtn.innerHTML = '💾 Save as PNG <kbd style="opacity:0.7;font-size:11px;margin-left:4px">↵</kbd>';
             saveBtn.style.background = '';
         }, 2000);
     };
+    
+    saveBtn.onclick = performSave;
     
     buttonContainer.appendChild(saveBtn);
     
@@ -699,19 +694,22 @@ function showEvidencePreview(canvas, info) {
     overlay.appendChild(modal);
     
     // Event listeners
-    header.querySelector('.x-evidence-close').onclick = () => overlay.remove();
+    closeBtn.onclick = () => overlay.remove();
     overlay.onclick = e => {
         if (e.target === overlay) overlay.remove();
     };
     
-    // Escape key to close
-    const escHandler = e => {
+    // Keyboard shortcuts: Escape to close, Enter to save
+    const keyHandler = e => {
         if (e.key === 'Escape') {
             overlay.remove();
-            document.removeEventListener('keydown', escHandler);
+            document.removeEventListener('keydown', keyHandler);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            performSave();
         }
     };
-    document.addEventListener('keydown', escHandler);
+    document.addEventListener('keydown', keyHandler);
     
     // Add to page
     document.body.appendChild(overlay);
@@ -742,7 +740,7 @@ function showErrorNotification(message) {
         border-radius: 8px;
         font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         font-size: 14px;
-        z-index: 1000001;
+        z-index: ${Z_INDEX.TOAST};
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     `;
     notification.textContent = message;

@@ -17,6 +17,17 @@ const WHATS_NEW_VERSION = '2.0';
 // Track initialization state
 let initialized = false;
 
+// Keep-alive interval for MV3 service workers (Chrome can kill them after 30s of inactivity)
+let keepAliveInterval = null;
+const KEEP_ALIVE_INTERVAL_MS = 20000; // 20 seconds
+
+// Cache for negative results (users not found) to avoid repeat API calls
+const notFoundCache = new Map();
+const NOT_FOUND_CACHE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+const NOT_FOUND_CACHE_MAX_SIZE = 1000;
+const NOT_FOUND_CLEANUP_INTERVAL_MS = 60000; // Cleanup every 60 seconds
+let notFoundCleanupInterval = null;
+
 /**
  * Initialize the background worker
  */
@@ -40,6 +51,9 @@ async function initialize() {
         
         initialized = true;
         console.log('✅ Background worker initialized');
+        
+        // Start keep-alive mechanism for MV3 service workers
+        startKeepAlive();
     } catch (error) {
         console.error('❌ Background worker initialization failed:', error);
     }
@@ -122,9 +136,54 @@ async function handleMessage(message, sender) {
 }
 
 /**
+ * Check if a user is in the "not found" cache
+ */
+function isNotFoundCached(screenName) {
+    const key = screenName.toLowerCase();
+    const entry = notFoundCache.get(key);
+    
+    if (!entry) return false;
+    
+    // Check if expired
+    if (Date.now() > entry.expiry) {
+        notFoundCache.delete(key);
+        return false;
+    }
+    
+    return true;
+}
+
+/**
+ * Add a user to the "not found" cache
+ */
+function cacheNotFound(screenName) {
+    const key = screenName.toLowerCase();
+    
+    // Evict oldest entries if at capacity
+    if (notFoundCache.size >= NOT_FOUND_CACHE_MAX_SIZE) {
+        const firstKey = notFoundCache.keys().next().value;
+        notFoundCache.delete(firstKey);
+    }
+    
+    notFoundCache.set(key, {
+        expiry: Date.now() + NOT_FOUND_CACHE_EXPIRY_MS
+    });
+}
+
+/**
  * Fetch user info handler
  */
 async function handleFetchUserInfo({ screenName, csrfToken }) {
+    // 0. Check not-found cache first (avoid repeat API calls for non-existent users)
+    if (isNotFoundCached(screenName)) {
+        return {
+            success: false,
+            error: 'User not found (cached)',
+            code: API_ERROR_CODES.NOT_FOUND,
+            cached: true
+        };
+    }
+
     // 1. Check local cache first
     if (userCache.has(screenName)) {
         const cached = userCache.get(screenName);
@@ -180,6 +239,11 @@ async function handleFetchUserInfo({ screenName, csrfToken }) {
     } catch (error) {
         // Log the error for debugging
         console.warn(`❌ API error for @${screenName}:`, error.message, 'code:', error.code);
+        
+        // Cache NOT_FOUND errors to avoid repeat lookups
+        if (error.code === API_ERROR_CODES.NOT_FOUND) {
+            cacheNotFound(screenName);
+        }
         
         // Return specific error information
         return {
@@ -545,6 +609,80 @@ async function handleInstalled(details) {
 function handleStartup() {
     console.log('🌅 Browser startup - initializing...');
     initialize();
+}
+
+/**
+ * Start keep-alive mechanism for MV3 service workers
+ * Chrome can terminate service workers after ~30s of inactivity
+ */
+function startKeepAlive() {
+    // Clear any existing interval
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+    }
+    
+    // Set up periodic keep-alive
+    keepAliveInterval = setInterval(() => {
+        // Simple operation to keep service worker alive
+        const now = Date.now();
+        console.debug(`💓 Keep-alive ping at ${new Date(now).toISOString()}`);
+    }, KEEP_ALIVE_INTERVAL_MS);
+    
+    console.log('💓 Service worker keep-alive started');
+    
+    // Also start periodic cleanup for notFoundCache
+    startNotFoundCacheCleanup();
+}
+
+/**
+ * Stop keep-alive mechanism
+ */
+function stopKeepAlive() {
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+        keepAliveInterval = null;
+        console.log('💓 Service worker keep-alive stopped');
+    }
+    stopNotFoundCacheCleanup();
+}
+
+/**
+ * Start periodic cleanup of expired entries in notFoundCache
+ * This prevents stale entries from accumulating over time
+ */
+function startNotFoundCacheCleanup() {
+    // Clear any existing interval
+    if (notFoundCleanupInterval) {
+        clearInterval(notFoundCleanupInterval);
+    }
+    
+    notFoundCleanupInterval = setInterval(() => {
+        const now = Date.now();
+        let cleanedCount = 0;
+        
+        for (const [key, entry] of notFoundCache.entries()) {
+            if (now > entry.expiry) {
+                notFoundCache.delete(key);
+                cleanedCount++;
+            }
+        }
+        
+        if (cleanedCount > 0) {
+            console.debug(`🧹 Cleaned ${cleanedCount} expired entries from notFoundCache, size: ${notFoundCache.size}`);
+        }
+    }, NOT_FOUND_CLEANUP_INTERVAL_MS);
+    
+    console.log('🧹 notFoundCache cleanup started');
+}
+
+/**
+ * Stop notFoundCache cleanup
+ */
+function stopNotFoundCacheCleanup() {
+    if (notFoundCleanupInterval) {
+        clearInterval(notFoundCleanupInterval);
+        notFoundCleanupInterval = null;
+    }
 }
 
 // Set up message listener

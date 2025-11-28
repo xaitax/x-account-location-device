@@ -98,7 +98,7 @@
      * Expose public API for debugging
      */
     window.XPosed = {
-        version: '2.0.1',
+        version: '2.0.2',
         
         // Check if headers are captured
         hasHeaders: () => headersCaptured,
@@ -112,7 +112,7 @@
         // Debug info
         debug: () => {
             console.log('X-Posed Debug Info:', {
-                version: '2.0.1',
+                version: '2.0.2',
                 headersCaptured,
                 injected: true
             });

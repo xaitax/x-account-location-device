@@ -1,13 +1,43 @@
 /**
  * Utility Functions
  * Common helpers used across the extension
+ * @module utils
  */
 
 import { COUNTRY_FLAGS } from './constants.js';
 
 /**
+ * Unified logging utility with consistent formatting.
+ * Provides debug, info, warn, error levels with extension prefix.
+ * @type {{
+ *   debug: (...args: any[]) => void,
+ *   info: (...args: any[]) => void,
+ *   warn: (...args: any[]) => void,
+ *   error: (...args: any[]) => void,
+ *   setDebugMode: (enabled: boolean) => void
+ * }}
+ */
+export const logger = (() => {
+    let debugEnabled = false;
+    const PREFIX = 'X-Posed:';
+    
+    return {
+        setDebugMode: enabled => { debugEnabled = enabled; },
+        debug: (...args) => { if (debugEnabled) console.log('🔍', PREFIX, ...args); },
+        info: (...args) => { console.log('ℹ️', PREFIX, ...args); },
+        warn: (...args) => { console.warn('⚠️', PREFIX, ...args); },
+        error: (...args) => { console.error('❌', PREFIX, ...args); }
+    };
+})();
+
+/**
  * Debounce function - delays execution until after wait milliseconds have elapsed
- * since the last time the debounced function was invoked
+ * since the last time the debounced function was invoked.
+ * @template {Function} T
+ * @param {T} func - The function to debounce
+ * @param {number} wait - The number of milliseconds to delay
+ * @param {boolean} [immediate=false] - If true, trigger the function on the leading edge instead of trailing
+ * @returns {T & {cancel: () => void}} - The debounced function with a cancel method
  */
 export function debounce(func, wait, immediate = false) {
     let timeout;
@@ -25,7 +55,11 @@ export function debounce(func, wait, immediate = false) {
 }
 
 /**
- * Throttle function - ensures function is called at most once per wait period
+ * Throttle function - ensures function is called at most once per wait period.
+ * @template {Function} T
+ * @param {T} func - The function to throttle
+ * @param {number} wait - The minimum time between function calls in milliseconds
+ * @returns {T} - The throttled function
  */
 export function throttle(func, wait) {
     let lastCall = 0;
@@ -54,17 +88,23 @@ export function throttle(func, wait) {
 
 /**
  * Request idle callback with fallback
+ * @param {IdleRequestCallback} callback - Function to call when idle
+ * @param {{timeout?: number}} [options] - Options with optional timeout
+ * @returns {number} - Handle for cancellation
  */
 export function requestIdleCallback(callback, options = {}) {
     if (typeof window !== 'undefined' && window.requestIdleCallback) {
         return window.requestIdleCallback(callback, options);
     }
-    // Fallback for browsers without requestIdleCallback
+    // Fallback for browsers without requestIdleCallback (Safari, older Firefox)
     const timeout = options.timeout || 50;
-    return setTimeout(() => callback({ 
-        didTimeout: false, 
-        timeRemaining: () => Math.max(0, 50) 
-    }), 1);
+    const start = Date.now();
+    return setTimeout(() => {
+        callback({
+            didTimeout: Date.now() - start >= timeout,
+            timeRemaining: () => Math.max(0, timeout - (Date.now() - start))
+        });
+    }, 1);
 }
 
 /**
@@ -107,8 +147,27 @@ export async function processBatch(items, processor, batchSize = 10) {
 }
 
 /**
+ * Detect if the current platform is Windows
+ * Uses modern userAgentData API with fallback to userAgent parsing
+ * @returns {boolean}
+ */
+function isWindowsPlatform() {
+    if (typeof navigator === 'undefined') return false;
+    
+    // Modern API (Chrome 90+, Edge 90+)
+    if (navigator.userAgentData?.platform) {
+        return navigator.userAgentData.platform === 'Windows';
+    }
+    
+    // Fallback to userAgent parsing
+    return /Windows|Win32|Win64|WOW64/.test(navigator.userAgent);
+}
+
+/**
  * Get flag emoji for a country name
- * Returns HTML img tag for Windows (which doesn't render flag emojis)
+ * Returns HTML img tag for Windows (which doesn't render flag emojis well)
+ * @param {string} countryName - The country name to get flag for
+ * @returns {string|null} - Flag emoji, HTML img tag, or null
  */
 export function getFlagEmoji(countryName) {
     if (!countryName) return null;
@@ -117,11 +176,7 @@ export function getFlagEmoji(countryName) {
     const emoji = COUNTRY_FLAGS[normalized] || '🌍';
     
     // Check if we are on Windows (which doesn't support flag emojis well)
-    const isWindows = typeof navigator !== 'undefined' && 
-                      navigator.platform && 
-                      navigator.platform.indexOf('Win') > -1;
-    
-    if (isWindows && emoji !== '🌍') {
+    if (isWindowsPlatform() && emoji !== '🌍') {
         // Convert emoji to Twemoji URL
         const codePoints = Array.from(emoji)
             .map(c => c.codePointAt(0).toString(16))
@@ -136,30 +191,69 @@ export function getFlagEmoji(countryName) {
     return emoji;
 }
 
+// Country code mappings for evidence capture and display
+const COUNTRY_CODES = {
+    'united states': 'US', 'usa': 'US', 'us': 'US',
+    'united kingdom': 'UK', 'uk': 'UK', 'britain': 'UK', 'great britain': 'UK', 'england': 'UK',
+    'germany': 'DE', 'france': 'FR', 'spain': 'ES', 'italy': 'IT',
+    'russia': 'RU', 'russian federation': 'RU',
+    'china': 'CN', 'japan': 'JP', 'india': 'IN', 'brazil': 'BR',
+    'canada': 'CA', 'australia': 'AU', 'mexico': 'MX',
+    'netherlands': 'NL', 'belgium': 'BE', 'switzerland': 'CH',
+    'sweden': 'SE', 'norway': 'NO', 'denmark': 'DK', 'finland': 'FI',
+    'poland': 'PL', 'ukraine': 'UA', 'turkey': 'TR', 'türkiye': 'TR',
+    'south korea': 'KR', 'korea': 'KR', 'north korea': 'KP',
+    'israel': 'IL', 'iran': 'IR', 'iraq': 'IQ', 'saudi arabia': 'SA',
+    'egypt': 'EG', 'south africa': 'ZA', 'nigeria': 'NG',
+    'argentina': 'AR', 'chile': 'CL', 'colombia': 'CO', 'peru': 'PE',
+    'indonesia': 'ID', 'thailand': 'TH', 'vietnam': 'VN', 'viet nam': 'VN',
+    'philippines': 'PH', 'malaysia': 'MY', 'singapore': 'SG',
+    'pakistan': 'PK', 'bangladesh': 'BD', 'sri lanka': 'LK',
+    'portugal': 'PT', 'greece': 'GR', 'ireland': 'IE', 'austria': 'AT',
+    'czech republic': 'CZ', 'czechia': 'CZ', 'romania': 'RO', 'hungary': 'HU',
+    'africa': 'AF', 'europe': 'EU', 'asia': 'AS'
+};
+
 /**
- * Get device emoji based on device string
+ * Get ISO country code from country name.
+ * Used for evidence capture and compact display.
+ * @param {string|null|undefined} location - The country/location name
+ * @returns {string} - 2-letter country code or first 2 chars of location
+ */
+export function getCountryCode(location) {
+    if (!location) return '';
+    const key = location.trim().toLowerCase();
+    return COUNTRY_CODES[key] || location.substring(0, 2).toUpperCase();
+}
+
+/**
+ * Get device emoji based on device string.
+ * Categories: iOS (🍎), Android (🤖), Web (🌐), Unknown (❓)
+ * @param {string|null|undefined} deviceString - The device/client string from X API
+ * @returns {string|null} - Device emoji or null if no device string
  */
 export function getDeviceEmoji(deviceString) {
     if (!deviceString) return null;
     
     const d = deviceString.toLowerCase();
     
-    // App stores are always mobile
-    if (d.includes('app store')) return '📱';
-    // Explicit mobile devices
-    if (d.includes('android') || d.includes('iphone') || d.includes('mobile')) return '📱';
-    // Tablets treated as computers
-    if (d.includes('ipad')) return '💻';
-    // Desktop OS
-    if (d.includes('mac') || d.includes('linux') || d.includes('windows')) return '💻';
-    // Web clients
-    if (d.includes('web')) return '🌐';
-    // Unknown = assume mobile (more common for unknown strings)
-    return '📱';
+    // iOS devices (App Store = iPhone/iPad)
+    if (d.includes('app store')) return '🍎';
+    
+    // Android devices
+    if (d.includes('android')) return '🤖';
+    
+    // Web clients (could be desktop or mobile browser - we can't distinguish)
+    if (d.includes('web') || d === 'x' || d === 'twitter') return '🌐';
+    
+    // Unknown device type
+    return '❓';
 }
 
 /**
- * Format country name for display (title case)
+ * Format country name for display (title case).
+ * @param {string|null|undefined} country - The country name to format
+ * @returns {string} - Formatted country name with first letter of each word capitalized
  */
 export function formatCountryName(country) {
     if (!country) return '';
@@ -169,7 +263,10 @@ export function formatCountryName(country) {
 }
 
 /**
- * Extract username from various element structures
+ * Extract username from various X DOM element structures.
+ * Handles both timeline/feed elements and profile header elements.
+ * @param {HTMLElement} element - The DOM element containing username info
+ * @returns {string|null} - The extracted username (without @) or null if not found
  */
 export function extractUsername(element) {
     // 1. Try to find the username link (Timeline/Feed)
@@ -201,7 +298,11 @@ export function extractUsername(element) {
 }
 
 /**
- * Find the best insertion point for badge in a username element
+ * Find the best insertion point for badge in a username element.
+ * Handles various X DOM structures including profile headers and timeline items.
+ * @param {HTMLElement} container - The container element to search in
+ * @param {string} screenName - The username to look for (without @)
+ * @returns {{target: HTMLElement, ref: Node|null}|null} - Insertion point or null if not found
  */
 export function findInsertionPoint(container, screenName) {
     // 1. Profile Header Specific Logic
@@ -268,7 +369,12 @@ export function findInsertionPoint(container, screenName) {
 }
 
 /**
- * Create DOM element with attributes and children
+ * Create DOM element with attributes and children.
+ * Supports className, style objects, dataset, event handlers, and nested children.
+ * @param {string} tag - HTML tag name
+ * @param {Object} [attributes={}] - Attributes to apply (className, style, dataset, on*, innerHTML, textContent, or standard attributes)
+ * @param {Array<string|Node>} [children=[]] - Child nodes or text content
+ * @returns {HTMLElement} - The created element
  */
 export function createElement(tag, attributes = {}, children = []) {
     const element = document.createElement(tag);
@@ -304,7 +410,11 @@ export function createElement(tag, attributes = {}, children = []) {
 }
 
 /**
- * Wait for an element to appear in the DOM
+ * Wait for an element to appear in the DOM using MutationObserver.
+ * @param {string} selector - CSS selector for the element
+ * @param {number} [timeout=10000] - Maximum time to wait in milliseconds
+ * @param {Document|HTMLElement} [parent=document] - Parent element to search in
+ * @returns {Promise<HTMLElement>} - Resolves with the element or rejects on timeout
  */
 export function waitForElement(selector, timeout = 10000, parent = document) {
     return new Promise((resolve, reject) => {
@@ -335,14 +445,22 @@ export function waitForElement(selector, timeout = 10000, parent = document) {
 }
 
 /**
- * Sleep helper
+ * Sleep helper - returns a Promise that resolves after the specified time.
+ * @param {number} ms - Time to sleep in milliseconds
+ * @returns {Promise<void>}
  */
 export function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
- * Retry a function with exponential backoff
+ * Retry a function with exponential backoff.
+ * @template T
+ * @param {() => Promise<T>} fn - The async function to retry
+ * @param {number} [maxRetries=3] - Maximum number of retry attempts
+ * @param {number} [baseDelay=1000] - Base delay in ms (doubles each retry)
+ * @returns {Promise<T>} - The function result
+ * @throws {Error} - The last error if all retries fail
  */
 export async function retry(fn, maxRetries = 3, baseDelay = 1000) {
     let lastError;
@@ -493,7 +611,16 @@ export function observeThemeChanges(callback) {
 }
 
 /**
- * Calculate statistics from cache data
+ * Calculate statistics from cache data.
+ * @param {Array<{location?: string, device?: string, locationAccurate?: boolean}>} cacheEntries - Array of cache entries
+ * @returns {{
+ *   totalUsers: number,
+ *   countryCounts: Object<string, number>,
+ *   deviceCounts: Object<string, number>,
+ *   vpnCount: number,
+ *   topCountries: Array<{country: string, count: number, percentage: number}>,
+ *   topDevices: Array<{device: string, count: number, percentage: number}>
+ * }} - Statistics object
  */
 export function calculateStatistics(cacheEntries) {
     const stats = {
@@ -553,21 +680,24 @@ export function calculateStatistics(cacheEntries) {
 }
 
 /**
- * Get device category from device string
+ * Get device category from device string.
+ * Categories: iOS, Android, Web, Unknown
+ * @param {string|null|undefined} deviceString - The device/client string from X API
+ * @returns {string} - Device category name
  */
 function getDeviceCategory(deviceString) {
     if (!deviceString) return 'Unknown';
     
     const d = deviceString.toLowerCase();
     
-    if (d.includes('android') || d.includes('iphone') || d.includes('mobile') || d.includes('app store')) {
-        return 'Mobile';
-    }
-    if (d.includes('ipad') || d.includes('mac') || d.includes('linux') || d.includes('windows')) {
-        return 'Desktop';
-    }
-    if (d.includes('web')) {
-        return 'Web';
-    }
-    return 'Other';
+    // iOS devices (App Store = iPhone/iPad)
+    if (d.includes('app store')) return 'iOS';
+    
+    // Android devices
+    if (d.includes('android')) return 'Android';
+    
+    // Web clients (desktop or mobile browser)
+    if (d.includes('web') || d === 'x' || d === 'twitter') return 'Web';
+    
+    return 'Unknown';
 }
