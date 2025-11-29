@@ -2,6 +2,24 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [2.1.0] - 2024-11-29
+
+### ✨ New Features
+- **Show VPN Users Toggle** — New option (default ON) to show/hide tweets from users detected as using VPN/proxy
+  - Available in both popup and options page
+  - Instantly hides/shows VPN user tweets without reload
+- **Enhanced Export/Import** — Full configuration backup and restore
+  - Export now includes: settings, blocked countries, cache with metadata (version, timestamp)
+  - New Import function to restore configurations across devices or browsers
+  - JSON format with validation and confirmation dialog
+- **Enhanced VPN/Proxy Statistics** — Statistics now show VPN user count with percentage (e.g., `🔒 VPN/Proxy (17%)`)
+- **Rate Limit Status Indicator** — Real-time display in popup and options page showing API rate limit status
+
+### 🔧 Code Quality
+- Fixed all ESLint warnings (13 → 0)
+- Removed unused imports and variables across codebase
+- Improved code consistency with underscore-prefixed unused parameters
+
 ## [2.0.3] - 2024-11-28
 
 ### 🔒 Security

@@ -3,7 +3,7 @@
  * Provides UI for blocking/unblocking countries
  */
 
-import { COUNTRY_FLAGS, COUNTRY_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
+import { COUNTRY_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
 import { getFlagEmoji, formatCountryName, createElement, debounce } from '../shared/utils.js';
 
 let currentModal = null;
@@ -54,7 +54,7 @@ export function showModal(blockedCountries, onAction) {
     overlay.appendChild(modal);
 
     // Close on overlay click
-    overlay.addEventListener('click', (e) => {
+    overlay.addEventListener('click', e => {
         if (e.target === overlay) {
             overlay.remove();
             currentModal = null;
@@ -62,7 +62,7 @@ export function showModal(blockedCountries, onAction) {
     });
 
     // Close on Escape key (with proper cleanup)
-    const handleKeydown = (e) => {
+    const handleKeydown = e => {
         if (e.key === 'Escape') {
             closeModal();
         }
@@ -198,11 +198,11 @@ function createBody(blockedCountries, onAction) {
     };
 
     // Search functionality with debouncing
-    const debouncedRender = debounce((value) => {
+    const debouncedRender = debounce(value => {
         renderCountries(value);
     }, TIMING.SEARCH_DEBOUNCE_MS);
     
-    search.addEventListener('input', (e) => {
+    search.addEventListener('input', e => {
         debouncedRender(e.target.value);
     });
 
@@ -212,7 +212,7 @@ function createBody(blockedCountries, onAction) {
 /**
  * Create a single country item using safe DOM methods
  */
-function createCountryItem(country, blockedCountries, onAction, renderCountries) {
+function createCountryItem(country, blockedCountries, onAction, _renderCountries) {
     const isBlocked = blockedCountries.has(country);
     
     const item = createElement('div', {

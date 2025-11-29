@@ -16,8 +16,13 @@ const elements = {
     statCached: document.getElementById('stat-cached'),
     statBlocked: document.getElementById('stat-blocked'),
     btnClearCache: document.getElementById('btn-clear-cache'),
-    btnOptions: document.getElementById('btn-options')
+    btnOptions: document.getElementById('btn-options'),
+    rateLimitBanner: document.getElementById('rate-limit-banner'),
+    rateLimitTime: document.getElementById('rate-limit-time')
 };
+
+// Rate limit update interval
+let rateLimitInterval = null;
 
 /**
  * Initialize popup
@@ -38,8 +43,91 @@ async function initialize() {
     // Load statistics
     await loadStats();
 
+    // Load rate limit status
+    await loadRateLimitStatus();
+    
+    // Start periodic rate limit check
+    startRateLimitMonitor();
+
     // Set up event listeners
     setupEventListeners();
+}
+
+/**
+ * Load rate limit status from background
+ */
+async function loadRateLimitStatus() {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.GET_RATE_LIMIT_STATUS
+        });
+
+        if (response?.success) {
+            updateRateLimitBanner(response);
+        }
+    } catch (error) {
+        console.error('Failed to load rate limit status:', error);
+    }
+}
+
+/**
+ * Update rate limit banner UI
+ */
+function updateRateLimitBanner({ isRateLimited, resetTime, remainingMs }) {
+    if (!elements.rateLimitBanner) return;
+    
+    if (isRateLimited && remainingMs > 0) {
+        elements.rateLimitBanner.style.display = 'flex';
+        elements.rateLimitBanner.classList.remove('ok');
+        
+        // Format remaining time
+        const resetDate = new Date(resetTime);
+        const mins = Math.ceil(remainingMs / 60000);
+        
+        let timeStr;
+        if (mins >= 60) {
+            const hours = Math.floor(mins / 60);
+            const remaining = mins % 60;
+            timeStr = remaining > 0 ? `~${hours}h ${remaining}m remaining` : `~${hours}h remaining`;
+        } else {
+            timeStr = `~${mins} min${mins > 1 ? 's' : ''} remaining`;
+        }
+        
+        elements.rateLimitTime.textContent = `Resets at ${resetDate.toLocaleTimeString()} (${timeStr})`;
+        
+        // Update icon
+        const icon = elements.rateLimitBanner.querySelector('.rate-limit-icon');
+        if (icon) icon.textContent = '⚠️';
+        
+        // Update title
+        const title = elements.rateLimitBanner.querySelector('.rate-limit-title');
+        if (title) title.textContent = 'Rate Limited';
+    } else {
+        // Show "OK" status
+        elements.rateLimitBanner.style.display = 'flex';
+        elements.rateLimitBanner.classList.add('ok');
+        
+        const icon = elements.rateLimitBanner.querySelector('.rate-limit-icon');
+        if (icon) icon.textContent = '✅';
+        
+        const title = elements.rateLimitBanner.querySelector('.rate-limit-title');
+        if (title) title.textContent = 'API Status: OK';
+        
+        elements.rateLimitTime.textContent = 'No rate limits active';
+    }
+}
+
+/**
+ * Start periodic rate limit status check
+ */
+function startRateLimitMonitor() {
+    // Clear any existing interval
+    if (rateLimitInterval) {
+        clearInterval(rateLimitInterval);
+    }
+    
+    // Check every 10 seconds
+    rateLimitInterval = setInterval(loadRateLimitStatus, 10000);
 }
 
 /**

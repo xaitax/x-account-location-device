@@ -95,7 +95,7 @@ export function extractUsernameFromUserCell(userCell) {
 /**
  * Start Intersection Observer for lazy processing
  */
-export function startIntersectionObserver(processElementSafe, debug) {
+export function startIntersectionObserver(processElementSafe, _debug) {
     if (intersectionObserver) return;
     
     intersectionObserver = new IntersectionObserver(
@@ -241,7 +241,7 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug) {
 /**
  * Scan the current page for username elements
  */
-export function scanPage(isEnabled, processElementsBatch, debug) {
+export function scanPage(isEnabled, processElementsBatch, _debug) {
     if (!isEnabled()) return;
 
     // Use cached combined selector for single DOM query (better performance)
@@ -345,11 +345,23 @@ export async function processElement(element, {
         const info = userInfoCache.get(screenName);
         if (info) {
             element.dataset.xCountry = info.location || '';
-            
+            element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
+                
+            // Hide if country is blocked
             if (info.location && blockedCountries.has(info.location.toLowerCase())) {
                 const tweet = element.closest(SELECTORS.TWEET);
                 if (tweet) {
                     tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+                }
+                return;
+            }
+            
+            // Hide if VPN detected and showVpnUsers is disabled
+            if (info.locationAccurate === false && settings.showVpnUsers === false) {
+                const tweet = element.closest(SELECTORS.TWEET);
+                if (tweet) {
+                    tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+                    tweet.classList.add('x-tweet-vpn-blocked');
                 }
                 return;
             }
@@ -486,11 +498,24 @@ export async function processElement(element, {
         userInfoCache.set(screenName, info);
         
         element.dataset.xCountry = info.location || '';
+        element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
 
+        // Hide if country is blocked
         if (info.location && blockedCountries.has(info.location.toLowerCase())) {
             const tweet = element.closest(SELECTORS.TWEET);
             if (tweet) {
                 tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+            }
+            processingQueue.delete(screenName);
+            return;
+        }
+
+        // Hide if VPN detected and showVpnUsers is disabled
+        if (info.locationAccurate === false && settings.showVpnUsers === false) {
+            const tweet = element.closest(SELECTORS.TWEET);
+            if (tweet) {
+                tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+                tweet.classList.add('x-tweet-vpn-blocked');
             }
             processingQueue.delete(screenName);
             return;

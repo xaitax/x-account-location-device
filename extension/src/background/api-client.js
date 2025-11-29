@@ -418,6 +418,22 @@ export class XAPIClient {
     }
 
     /**
+     * Get rate limit status
+     * @returns {{isRateLimited: boolean, resetTime: number|null, remainingMs: number|null}}
+     */
+    getRateLimitStatus() {
+        const now = Date.now();
+        const resetTime = this.queue.rateLimitReset;
+        const isRateLimited = resetTime > now;
+        
+        return {
+            isRateLimited,
+            resetTime: isRateLimited ? resetTime : null,
+            remainingMs: isRateLimited ? resetTime - now : null
+        };
+    }
+
+    /**
      * Clear pending requests
      */
     clearQueue() {

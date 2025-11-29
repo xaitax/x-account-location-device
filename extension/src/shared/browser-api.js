@@ -22,9 +22,9 @@ const browserAPI = (() => {
     if (isChrome && typeof chrome !== 'undefined') {
         return {
             runtime: {
-                sendMessage: (message) => {
+                sendMessage: message => {
                     return new Promise((resolve, reject) => {
-                        chrome.runtime.sendMessage(message, (response) => {
+                        chrome.runtime.sendMessage(message, response => {
                             if (chrome.runtime.lastError) {
                                 reject(new Error(chrome.runtime.lastError.message));
                             } else {
@@ -40,9 +40,9 @@ const browserAPI = (() => {
             },
             storage: {
                 local: {
-                    get: (keys) => {
+                    get: keys => {
                         return new Promise((resolve, reject) => {
-                            chrome.storage.local.get(keys, (result) => {
+                            chrome.storage.local.get(keys, result => {
                                 if (chrome.runtime.lastError) {
                                     reject(new Error(chrome.runtime.lastError.message));
                                 } else {
@@ -51,7 +51,7 @@ const browserAPI = (() => {
                             });
                         });
                     },
-                    set: (items) => {
+                    set: items => {
                         return new Promise((resolve, reject) => {
                             chrome.storage.local.set(items, () => {
                                 if (chrome.runtime.lastError) {
@@ -62,7 +62,7 @@ const browserAPI = (() => {
                             });
                         });
                     },
-                    remove: (keys) => {
+                    remove: keys => {
                         return new Promise((resolve, reject) => {
                             chrome.storage.local.remove(keys, () => {
                                 if (chrome.runtime.lastError) {
@@ -88,9 +88,9 @@ const browserAPI = (() => {
                 onChanged: chrome.storage.onChanged
             },
             tabs: {
-                query: (queryInfo) => {
+                query: queryInfo => {
                     return new Promise((resolve, reject) => {
-                        chrome.tabs.query(queryInfo, (tabs) => {
+                        chrome.tabs.query(queryInfo, tabs => {
                             if (chrome.runtime.lastError) {
                                 reject(new Error(chrome.runtime.lastError.message));
                             } else {
@@ -101,7 +101,7 @@ const browserAPI = (() => {
                 },
                 sendMessage: (tabId, message) => {
                     return new Promise((resolve, reject) => {
-                        chrome.tabs.sendMessage(tabId, message, (response) => {
+                        chrome.tabs.sendMessage(tabId, message, response => {
                             if (chrome.runtime.lastError) {
                                 reject(new Error(chrome.runtime.lastError.message));
                             } else {
@@ -112,9 +112,9 @@ const browserAPI = (() => {
                 }
             },
             scripting: chrome.scripting ? {
-                executeScript: (details) => {
+                executeScript: details => {
                     return new Promise((resolve, reject) => {
-                        chrome.scripting.executeScript(details, (results) => {
+                        chrome.scripting.executeScript(details, results => {
                             if (chrome.runtime.lastError) {
                                 reject(new Error(chrome.runtime.lastError.message));
                             } else {

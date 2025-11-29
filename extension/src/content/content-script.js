@@ -14,8 +14,7 @@ import {
     startThemeObserver,
     injectSidebarLink,
     removeSidebarLink,
-    cleanupUI,
-    uiCleanupFunctions
+    cleanupUI
 } from './ui.js';
 
 import {
@@ -25,10 +24,7 @@ import {
     processElement,
     createProcessElementSafe,
     updateBlockedTweets,
-    userInfoCache,
-    processingQueue,
-    cleanupObservers,
-    queueForVisibility
+    cleanupObservers
 } from './observer.js';
 
 // ============================================

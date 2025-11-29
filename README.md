@@ -120,6 +120,7 @@ Click the extension icon for quick toggles:
 - 🏳️ Show/hide country flags
 - 📱 Show/hide device icons
 - 🔒 Show/hide VPN indicator
+- 👁️ Show/hide VPN users (filter tweets from VPN users)
 - 🐛 Debug mode
 - 🗑️ Clear cache
 
@@ -130,7 +131,7 @@ Right-click → **Options** for the full experience:
 - 📊 **Statistics Dashboard** — Top countries, device breakdown, cache analytics
 - ☁️ **Cloud Cache** — Enable community sharing, sync local cache
 - 🚫 **Blocked Countries** — Manage your block list
-- 💾 **Export Data** — Download your cache as JSON
+- 💾 **Export/Import** — Backup and restore all settings, blocked countries, and cache
 
 ---
 
@@ -248,12 +249,11 @@ Read the full [Privacy Policy](PRIVACY.md).
 <tr>
 <td>
 
-### Latest: v2.0.3
+### Latest: v2.1.0
 
-🔒 **Security** — XSS prevention, input validation, content sanitization
-⚡ **Performance** — Throttled observers, combined selectors, memoization
-🧠 **Stability** — Memory leak fixes, race condition fixes, error boundaries
-🔧 **Build** — Smart version management from single source
+✨ **New** — Show/hide VPN users toggle, enhanced Export/Import with full backup
+📊 **Rate Limits** — Real-time API status indicator with countdown
+🔒 **VPN Stats** — Enhanced statistics with VPN user percentage
 
 </td>
 <td width="200" align="center">

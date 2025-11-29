@@ -67,6 +67,7 @@ export const TIMING = {
     SAVE_STATUS_DISPLAY_MS: 2000,   // How long to show save status
     CACHE_CLEAR_FEEDBACK_MS: 2000,  // How long to show cache cleared feedback
     RATE_LIMIT_TOAST_COOLDOWN_MS: 60000,  // Cooldown between rate limit toasts
+    RATE_LIMIT_CHECK_MS: 10000,     // Interval for rate limit status check
     KEEP_ALIVE_INTERVAL_MS: 20000,  // Service worker keep-alive interval
     NOT_FOUND_CACHE_EXPIRY_MS: 300000, // 5 minutes for not-found cache entries
     NOT_FOUND_CLEANUP_INTERVAL_MS: 60000 // Cleanup interval for not-found cache
@@ -124,6 +125,10 @@ export const MESSAGE_TYPES = {
     GET_STATISTICS: 'GET_STATISTICS',
     GET_THEME: 'GET_THEME',
     SET_THEME: 'SET_THEME',
+    GET_RATE_LIMIT_STATUS: 'GET_RATE_LIMIT_STATUS',
+    
+    // Import/Export
+    IMPORT_DATA: 'IMPORT_DATA',
     
     // Cloud cache
     GET_CLOUD_CACHE_STATUS: 'GET_CLOUD_CACHE_STATUS',
@@ -149,6 +154,7 @@ export const DEFAULT_SETTINGS = {
     showFlags: true,
     showDevices: true,
     showVpnIndicator: true,
+    showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
     showSidebarBlockerLink: true,
     debugMode: false,
     cloudCacheEnabled: false  // Opt-in only

@@ -16,6 +16,7 @@ const elements = {
     optFlags: document.getElementById('opt-flags'),
     optDevices: document.getElementById('opt-devices'),
     optVpn: document.getElementById('opt-vpn'),
+    optShowVpnUsers: document.getElementById('opt-show-vpn-users'),
     optSidebarLink: document.getElementById('opt-sidebar-link'),
     // Blocked
     blockedList: document.getElementById('blocked-list'),
@@ -37,10 +38,16 @@ const elements = {
     cloudActions: document.getElementById('cloud-actions'),
     btnSyncToCloud: document.getElementById('btn-sync-to-cloud'),
     syncStatus: document.getElementById('sync-status'),
+    // Rate limit
+    rateLimitBanner: document.getElementById('rate-limit-banner'),
+    rateLimitTime: document.getElementById('rate-limit-time'),
     // Cache
     cacheSize: document.getElementById('cache-size'),
     btnClearCache: document.getElementById('btn-clear-cache'),
     btnExportCache: document.getElementById('btn-export-cache'),
+    btnImportData: document.getElementById('btn-import-data'),
+    importFileInput: document.getElementById('import-file-input'),
+    importStatus: document.getElementById('import-status'),
     // About
     version: document.getElementById('version'),
     // Status
@@ -49,6 +56,7 @@ const elements = {
 
 let currentSettings = {};
 let blockedCountries = [];
+let rateLimitMonitorInterval = null;
 
 /**
  * Initialize options page
@@ -71,9 +79,13 @@ async function initialize() {
     await loadCacheStats();
     await loadStatistics();
     await loadCloudCacheStatus();
+    await loadRateLimitStatus();
 
     // Setup event listeners
     setupEventListeners();
+    
+    // Start rate limit monitor
+    startRateLimitMonitor();
 }
 
 /**
@@ -147,6 +159,9 @@ async function loadSettings() {
             elements.optVpn.checked = currentSettings.showVpnIndicator !== false;
             if (elements.optSidebarLink) {
                 elements.optSidebarLink.checked = currentSettings.showSidebarBlockerLink !== false;
+            }
+            if (elements.optShowVpnUsers) {
+                elements.optShowVpnUsers.checked = currentSettings.showVpnUsers !== false;
             }
         }
     } catch (error) {
@@ -511,13 +526,6 @@ function renderStatistics(stats) {
         </div>
     `).join('');
     
-    const deviceColorsMap = {
-        'iOS': '#1d9bf0',
-        'Android': '#00ba7c',
-        'Web': '#f4212e',
-        'Unknown': '#71767b'
-    };
-    
     const deviceStatsHtml = stats.topDevices.map(d => `
         <div class="device-stat">
             <span class="device-icon">${d.device === 'iOS' ? '🍎' : d.device === 'Android' ? '🤖' : d.device === 'Web' ? '🌐' : '❓'}</span>
@@ -525,6 +533,8 @@ function renderStatistics(stats) {
             <span class="device-count">${d.count} (${d.percentage}%)</span>
         </div>
     `).join('');
+    
+    const vpnPercentage = stats.totalUsers > 0 ? Math.round((stats.vpnCount / stats.totalUsers) * 100) : 0;
     
     statsSection.innerHTML = `
         <h2 class="section-title">
@@ -545,7 +555,7 @@ function renderStatistics(stats) {
             </div>
             <div class="stats-overview-item">
                 <span class="stats-overview-value">${stats.vpnCount}</span>
-                <span class="stats-overview-label">VPN Users</span>
+                <span class="stats-overview-label">🔒 VPN/Proxy (${vpnPercentage}%)</span>
             </div>
         </div>
         
@@ -667,31 +677,38 @@ function showSaveStatus() {
  */
 function setupEventListeners() {
     // General settings
-    elements.optEnabled.addEventListener('change', (e) => {
+    elements.optEnabled.addEventListener('change', e => {
         saveSettings({ enabled: e.target.checked });
     });
 
-    elements.optDebug.addEventListener('change', (e) => {
+    elements.optDebug.addEventListener('change', e => {
         saveSettings({ debugMode: e.target.checked });
     });
 
     // Display settings
-    elements.optFlags.addEventListener('change', (e) => {
+    elements.optFlags.addEventListener('change', e => {
         saveSettings({ showFlags: e.target.checked });
     });
 
-    elements.optDevices.addEventListener('change', (e) => {
+    elements.optDevices.addEventListener('change', e => {
         saveSettings({ showDevices: e.target.checked });
     });
 
-    elements.optVpn.addEventListener('change', (e) => {
+    elements.optVpn.addEventListener('change', e => {
         saveSettings({ showVpnIndicator: e.target.checked });
     });
 
     // Sidebar link toggle
     if (elements.optSidebarLink) {
-        elements.optSidebarLink.addEventListener('change', (e) => {
+        elements.optSidebarLink.addEventListener('change', e => {
             saveSettings({ showSidebarBlockerLink: e.target.checked });
+        });
+    }
+
+    // Show VPN users toggle
+    if (elements.optShowVpnUsers) {
+        elements.optShowVpnUsers.addEventListener('change', e => {
+            saveSettings({ showVpnUsers: e.target.checked });
         });
     }
 
@@ -713,7 +730,7 @@ function setupEventListeners() {
 
     // Cloud cache toggle
     if (elements.optCloudCache) {
-        elements.optCloudCache.addEventListener('change', async (e) => {
+        elements.optCloudCache.addEventListener('change', async e => {
             try {
                 const response = await browserAPI.runtime.sendMessage({
                     type: MESSAGE_TYPES.SET_CLOUD_CACHE_ENABLED,
@@ -764,34 +781,235 @@ function setupEventListeners() {
         });
     }
 
-    // Export cache
+    // Export data (enhanced with settings)
     elements.btnExportCache.addEventListener('click', async () => {
         try {
-            const response = await browserAPI.runtime.sendMessage({
+            // Get cache
+            const cacheResponse = await browserAPI.runtime.sendMessage({
                 type: MESSAGE_TYPES.GET_CACHE,
                 payload: {}
             });
 
-            if (response?.success) {
-                const data = {
-                    exportedAt: new Date().toISOString(),
-                    version: VERSION,
-                    cache: response.data || [],
-                    blockedCountries
-                };
+            // Get settings
+            const settingsResponse = await browserAPI.runtime.sendMessage({
+                type: MESSAGE_TYPES.GET_SETTINGS
+            });
 
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
+            const data = {
+                // Metadata
+                exportedAt: new Date().toISOString(),
+                version: VERSION,
+                exportFormat: '2.0',
                 
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `x-posed-data-${new Date().toISOString().split('T')[0]}.json`;
-                a.click();
+                // Configuration
+                settings: settingsResponse?.data || currentSettings,
+                blockedCountries,
                 
-                URL.revokeObjectURL(url);
-            }
+                // User data
+                cache: cacheResponse?.data || []
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `x-posed-backup-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            
+            URL.revokeObjectURL(url);
+            
+            showSaveStatus();
         } catch (error) {
             console.error('Failed to export data:', error);
+            alert('Failed to export data. Please try again.');
+        }
+    });
+
+    // Import data button click
+    if (elements.btnImportData && elements.importFileInput) {
+        elements.btnImportData.addEventListener('click', () => {
+            elements.importFileInput.click();
+        });
+
+        elements.importFileInput.addEventListener('change', async e => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            try {
+                await handleImportFile(file);
+            } finally {
+                // Reset file input so same file can be selected again
+                elements.importFileInput.value = '';
+            }
+        });
+    }
+}
+
+/**
+ * Handle importing data from a file
+ */
+async function handleImportFile(file) {
+    const statusEl = elements.importStatus;
+    
+    const showStatus = (message, isError = false) => {
+        if (statusEl) {
+            statusEl.textContent = message;
+            statusEl.className = `import-status ${isError ? 'error' : 'success'}`;
+            statusEl.style.display = 'block';
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 5000);
+        }
+    };
+
+    try {
+        // Read file
+        const text = await file.text();
+        let data;
+        
+        try {
+            data = JSON.parse(text);
+        } catch (parseError) {
+            showStatus('Invalid JSON file. Please select a valid X-Posed backup file.', true);
+            return;
+        }
+
+        // Validate structure
+        if (!data || typeof data !== 'object') {
+            showStatus('Invalid file format. Please select a valid X-Posed backup file.', true);
+            return;
+        }
+
+        // Check for required fields (at least version or exportFormat)
+        if (!data.version && !data.exportFormat) {
+            showStatus('This doesn\'t appear to be an X-Posed backup file.', true);
+            return;
+        }
+
+        // Confirm import
+        const cacheCount = Array.isArray(data.cache) ? data.cache.length : 0;
+        const blockedCount = Array.isArray(data.blockedCountries) ? data.blockedCountries.length : 0;
+        const hasSettings = data.settings && typeof data.settings === 'object';
+        
+        const confirmMessage = [
+            `Import data from ${data.version ? `v${data.version}` : 'X-Posed'}?`,
+            '',
+            'This will import:',
+            hasSettings ? '• Settings (display options, etc.)' : '',
+            blockedCount > 0 ? `• ${blockedCount} blocked countries` : '',
+            cacheCount > 0 ? `• ${cacheCount} cached users` : '',
+            '',
+            `Exported on: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'Unknown'}`,
+            '',
+            'This will replace your current configuration. Continue?'
+        ].filter(Boolean).join('\n');
+
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+
+        // Perform import
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.IMPORT_DATA,
+            payload: {
+                settings: data.settings,
+                blockedCountries: data.blockedCountries,
+                cache: data.cache
+            }
+        });
+
+        if (response?.success) {
+            const results = [];
+            if (response.importedSettings) results.push('settings');
+            if (response.importedBlockedCountries) results.push(`${response.importedBlockedCountries} blocked countries`);
+            if (response.importedCache) results.push(`${response.importedCache} cached users`);
+            
+            showStatus(`✓ Successfully imported: ${results.join(', ')}`);
+            
+            // Reload the page data to reflect imported settings
+            await loadSettings();
+            await loadBlockedCountries();
+            await loadCacheStats();
+            await loadStatistics();
+        } else {
+            showStatus(`Import failed: ${response?.error || 'Unknown error'}`, true);
+        }
+    } catch (error) {
+        console.error('Import error:', error);
+        showStatus(`Import failed: ${error.message}`, true);
+    }
+}
+
+/**
+ * Load rate limit status from background
+ */
+async function loadRateLimitStatus() {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.GET_RATE_LIMIT_STATUS
+        });
+        
+        if (response) {
+            updateRateLimitBanner(response);
+        }
+    } catch (error) {
+        console.debug('Failed to load rate limit status:', error);
+    }
+}
+
+/**
+ * Update rate limit banner UI
+ */
+function updateRateLimitBanner(status) {
+    const banner = elements.rateLimitBanner;
+    const timeEl = elements.rateLimitTime;
+    
+    if (!banner) return;
+    
+    if (status.isRateLimited) {
+        banner.style.display = 'flex';
+        banner.className = 'rate-limit-banner rate-limited';
+        banner.querySelector('.rate-limit-icon').textContent = '⚠️';
+        banner.querySelector('.rate-limit-title').textContent = 'Rate Limited';
+        
+        if (timeEl && status.resetTime) {
+            const resetDate = new Date(status.resetTime);
+            const now = new Date();
+            const diffMs = resetDate - now;
+            
+            if (diffMs > 0) {
+                const minutes = Math.ceil(diffMs / 60000);
+                timeEl.textContent = `Resets in ~${minutes} minute${minutes !== 1 ? 's' : ''}`;
+            } else {
+                timeEl.textContent = 'Resetting soon...';
+            }
+        }
+    } else {
+        // Show OK status
+        banner.style.display = 'flex';
+        banner.className = 'rate-limit-banner rate-ok';
+        banner.querySelector('.rate-limit-icon').textContent = '✅';
+        banner.querySelector('.rate-limit-title').textContent = 'API Status: OK';
+        if (timeEl) {
+            timeEl.textContent = 'No rate limits active';
+        }
+    }
+}
+
+/**
+ * Start periodic rate limit status monitoring
+ */
+function startRateLimitMonitor() {
+    // Update every 10 seconds
+    rateLimitMonitorInterval = setInterval(loadRateLimitStatus, TIMING.RATE_LIMIT_CHECK_MS);
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        if (rateLimitMonitorInterval) {
+            clearInterval(rateLimitMonitorInterval);
         }
     });
 }

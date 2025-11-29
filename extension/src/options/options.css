@@ -89,6 +89,70 @@ body {
     color: var(--text-secondary);
 }
 
+/* Rate Limit Banner */
+.rate-limit-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.rate-limit-banner.rate-limited {
+    background: linear-gradient(135deg, rgba(244, 33, 46, 0.15) 0%, rgba(244, 33, 46, 0.05) 100%);
+    border: 1px solid rgba(244, 33, 46, 0.4);
+}
+
+.rate-limit-banner.rate-ok {
+    background: linear-gradient(135deg, rgba(0, 186, 124, 0.15) 0%, rgba(0, 186, 124, 0.05) 100%);
+    border: 1px solid rgba(0, 186, 124, 0.4);
+}
+
+.rate-limit-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.rate-limit-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.rate-limit-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.rate-limit-banner.rate-limited .rate-limit-title {
+    color: var(--danger);
+}
+
+.rate-limit-banner.rate-ok .rate-limit-title {
+    color: var(--success);
+}
+
+.rate-limit-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.rate-limit-banner.rate-limited {
+    animation: slideIn 0.3s ease-out, pulse-warning-options 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning-options {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(244, 33, 46, 0.2);
+    }
+    50% {
+        box-shadow: 0 0 0 6px rgba(244, 33, 46, 0);
+    }
+}
+
 /* Sections */
 .options-section {
     background: var(--bg-secondary);
@@ -793,6 +857,33 @@ body {
 
 .sync-status.error {
     color: var(--danger);
+}
+
+/* Import Status */
+.import-status {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.import-status.success {
+    background: rgba(0, 186, 124, 0.1);
+    border: 1px solid rgba(0, 186, 124, 0.3);
+    color: var(--success);
+}
+
+.import-status.error {
+    background: rgba(244, 33, 46, 0.1);
+    border: 1px solid rgba(244, 33, 46, 0.3);
+    color: var(--danger);
+}
+
+.import-status.info {
+    background: rgba(29, 155, 240, 0.1);
+    border: 1px solid rgba(29, 155, 240, 0.3);
+    color: var(--accent);
 }
 
 /* What's New Banner */

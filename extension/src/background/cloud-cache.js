@@ -3,7 +3,7 @@
  * Handles communication with the Cloudflare Workers API for shared cache
  */
 
-import { STORAGE_KEYS, CLOUD_CACHE_CONFIG, TIMING } from '../shared/constants.js';
+import { STORAGE_KEYS, CLOUD_CACHE_CONFIG } from '../shared/constants.js';
 import browserAPI from '../shared/browser-api.js';
 import { debounce } from '../shared/utils.js';
 
@@ -304,9 +304,7 @@ class CloudCacheClient {
 
                 // Track misses
                 if (data.misses) {
-                    for (const username of data.misses) {
-                        this.stats.misses++;
-                    }
+                    this.stats.misses += data.misses.length;
                 }
 
             } catch (error) {

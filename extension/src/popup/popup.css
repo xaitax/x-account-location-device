@@ -88,6 +88,55 @@ body {
     color: var(--text-secondary);
 }
 
+/* Rate Limit Banner */
+.rate-limit-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: rgba(244, 33, 46, 0.1);
+    border-bottom: 1px solid rgba(244, 33, 46, 0.3);
+    animation: pulse-warning 2s ease-in-out infinite;
+}
+
+.rate-limit-banner.ok {
+    background: rgba(0, 186, 124, 0.1);
+    border-bottom: 1px solid rgba(0, 186, 124, 0.3);
+    animation: none;
+}
+
+.rate-limit-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.rate-limit-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.rate-limit-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--danger);
+}
+
+.rate-limit-banner.ok .rate-limit-title {
+    color: var(--success);
+}
+
+.rate-limit-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+@keyframes pulse-warning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
 /* Main Content */
 .popup-content {
     flex: 1;

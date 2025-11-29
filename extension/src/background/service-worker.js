@@ -11,9 +11,6 @@ import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
 import cloudCache from './cloud-cache.js';
 
-// Version that triggers "What's New" notification (semantic versioning major.minor)
-const WHATS_NEW_VERSION = '2.0';
-
 // Track initialization state
 let initialized = false;
 
@@ -59,7 +56,7 @@ async function initialize() {
 /**
  * Handle messages from content scripts and popup
  */
-async function handleMessage(message, sender) {
+async function handleMessage(message, _sender) {
     // Ensure initialization
     if (!initialized) {
         await initialize();
@@ -102,6 +99,9 @@ async function handleMessage(message, sender) {
             case MESSAGE_TYPES.SET_THEME:
                 return await handleSetTheme(payload);
             
+            case MESSAGE_TYPES.GET_RATE_LIMIT_STATUS:
+                return handleGetRateLimitStatus();
+            
             // Cloud cache handlers
             case MESSAGE_TYPES.GET_CLOUD_CACHE_STATUS:
                 return handleGetCloudCacheStatus();
@@ -117,6 +117,9 @@ async function handleMessage(message, sender) {
             
             case MESSAGE_TYPES.SYNC_LOCAL_TO_CLOUD:
                 return await handleSyncLocalToCloud();
+            
+            case MESSAGE_TYPES.IMPORT_DATA:
+                return await handleImportData(payload);
             
             default:
                 console.warn('Unknown message type:', type);
@@ -456,6 +459,17 @@ async function handleSetTheme({ theme }) {
 }
 
 /**
+ * Get rate limit status handler
+ */
+function handleGetRateLimitStatus() {
+    const status = apiClient.getRateLimitStatus();
+    return {
+        success: true,
+        ...status
+    };
+}
+
+/**
  * Get cloud cache status handler
  */
 function handleGetCloudCacheStatus() {
@@ -556,6 +570,79 @@ async function handleSyncLocalToCloud() {
 }
 
 /**
+ * Import data handler - imports settings, blocked countries, and cache from exported JSON
+ */
+async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, cache: importCache }) {
+    const results = {
+        settings: false,
+        blockedCountries: { count: 0 },
+        cache: { count: 0 }
+    };
+    
+    try {
+        // Import settings if provided
+        if (importSettings && typeof importSettings === 'object') {
+            await settings.set(importSettings);
+            results.settings = true;
+        }
+        
+        // Import blocked countries if provided
+        if (Array.isArray(importBlockedCountries)) {
+            // Clear existing and set new
+            await blockedCountries.clear();
+            for (const country of importBlockedCountries) {
+                blockedCountries.add(country);
+            }
+            results.blockedCountries.count = importBlockedCountries.length;
+        }
+        
+        // Import cache entries if provided
+        if (Array.isArray(importCache)) {
+            for (const entry of importCache) {
+                if (entry.screenName) {
+                    userCache.set(entry.screenName, entry);
+                    results.cache.count++;
+                }
+            }
+        }
+        
+        // Notify all tabs about updates
+        try {
+            const tabs = await browserAPI.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] });
+            for (const tab of tabs) {
+                try {
+                    // Notify about settings update
+                    await browserAPI.tabs.sendMessage(tab.id, {
+                        type: MESSAGE_TYPES.SETTINGS_UPDATED,
+                        payload: settings.get()
+                    });
+                    // Notify about blocked countries update
+                    await browserAPI.tabs.sendMessage(tab.id, {
+                        type: MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED,
+                        payload: blockedCountries.getAll()
+                    });
+                } catch (e) {
+                    // Tab might not have content script loaded
+                }
+            }
+        } catch (e) {
+            console.debug('Could not notify tabs:', e);
+        }
+        
+        return {
+            success: true,
+            results
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message,
+            results
+        };
+    }
+}
+
+/**
  * Handle extension install/update
  */
 async function handleInstalled(details) {
@@ -630,8 +717,9 @@ function startKeepAlive() {
 }
 
 /**
- * Stop keep-alive mechanism
+ * Stop keep-alive mechanism (kept for potential future use/testing)
  */
+// eslint-disable-next-line no-unused-vars
 function stopKeepAlive() {
     if (keepAliveInterval) {
         clearInterval(keepAliveInterval);

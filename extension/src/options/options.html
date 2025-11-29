@@ -67,6 +67,15 @@
             </div>
         </header>
 
+        <!-- Rate Limit Status Banner -->
+        <div class="rate-limit-banner" id="rate-limit-banner" style="display: none;">
+            <div class="rate-limit-icon">⚠️</div>
+            <div class="rate-limit-content">
+                <span class="rate-limit-title">Rate Limited</span>
+                <span class="rate-limit-time" id="rate-limit-time"></span>
+            </div>
+        </div>
+
         <!-- Main Content -->
         <main class="options-content">
             <!-- General Settings -->
@@ -139,6 +148,17 @@
                     </div>
                     <label class="toggle">
                         <input type="checkbox" id="opt-vpn" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="option-row">
+                    <div class="option-info">
+                        <span class="option-label">Show VPN/Proxy Users</span>
+                        <span class="option-description">Display tweets from users detected using VPN or proxy services</span>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" id="opt-show-vpn-users" checked>
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -288,7 +308,12 @@
                     <button class="btn btn-secondary" id="btn-export-cache">
                         Export Data
                     </button>
+                    <button class="btn btn-secondary" id="btn-import-data">
+                        Import Data
+                    </button>
+                    <input type="file" id="import-file-input" accept=".json" style="display: none;">
                 </div>
+                <div class="import-status" id="import-status" style="display: none;"></div>
             </section>
 
             <!-- About -->
