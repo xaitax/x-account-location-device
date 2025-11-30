@@ -2,11 +2,16 @@
 
 # 🌍 X-Posed
 
-### Account Location & Device Intelligence for X
+### See where X users are really posting from.
 
-**See where X users are really posting from — and what device they're using.**
+**Country flags, device info, VPN detection, and powerful filtering — all in one extension.**
 
-If you find this research valuable, I’d appreciate a coffee:  
+[![Chrome Web Store](https://img.shields.io/badge/Chrome-Install-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk)
+[![Firefox Add-ons](https://img.shields.io/badge/Firefox-Install-FF7139?style=for-the-badge&logo=firefox-browser&logoColor=white)](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/)
+
+<br>
+
+If you find this useful, I'd appreciate a coffee:  
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/M4M61EP5XL)
 
 ---
@@ -17,163 +22,149 @@ If you find this research valuable, I’d appreciate a coffee:
 
 ---
 
-## ✨ Features
+## ✨ Key Features
 
-<table>
-<tr>
-<td width="50%">
+### 🏳️ Country Flags & Device Detection
 
-### 🏳️ Country Flags
-Real location data from X's official API displayed as flag emojis next to every username.
+Every tweet shows the author's real location and device at a glance.
 
-### 📱 Device Detection
-See if users are on iOS (🍎), Android (🤖), or web (🌐) at a glance.
+| Indicator | Meaning |
+|-----------|---------|
+| 🇺🇸 🇬🇧 🇯🇵 | Country flag from X's location data |
+| 🍎 | iOS (iPhone/iPad) |
+| 🤖 | Android |
+| 🌐 | Web browser |
+| 🔒 | VPN/Proxy detected — location may not be accurate |
 
-### 🔒 VPN Indicator
-Know when X detects a VPN or proxy — the 🔒 icon appears when location might not be accurate.
-
-</td>
-<td width="50%">
-
-### 🌐 Community Cloud Cache
-**NEW!** Opt-in shared cache with instant lookups. Community-powered, privacy-first.
-
-### 📸 Evidence Screenshot
-**NEW!** Capture tweets with location metadata overlay. Perfect for researchers, journalists, and OSINT.
-
-### 🚫 Country & Region Blocking
-Filter your feed by hiding OR highlighting tweets from specific countries or entire regions. One-click setup with tabbed interface.
-
-</td>
-</tr>
-</table>
+<!-- Screenshot: Timeline showing flags and device icons -->
 
 ---
 
-## 🚀 Quick Start
+### 🚫 Location Blocking
 
-### Install from Store (Recommended)
+Filter your timeline by hiding or highlighting tweets from specific locations.
+
+**Countries** — Block individual countries with one-click selection  
+**Regions** — Block entire geographic areas (Europe, South Asia, Africa, etc.)
+
+**Two blocking modes:**
+- **Hide** (default) — Blocked tweets vanish from your feed
+- **Highlight** — Blocked tweets stay visible with a subtle amber border
+
+<!-- Screenshot: Country/Region blocker modal with tabs -->
+
+---
+
+### 📸 Evidence Screenshot
+
+Capture any tweet with a forensic metadata overlay showing location, device, VPN status, and timestamp.
+
+Perfect for researchers, journalists, and OSINT professionals who need to document social media evidence.
+
+<!-- Screenshot: Evidence capture overlay on a tweet -->
+
+---
+
+### 📊 Statistics Dashboard
+
+See your cached data at a glance:
+- 🌍 **Top countries** — Most common locations in your cache
+- 📱 **Device breakdown** — iOS vs Android vs Web distribution
+- 🔒 **VPN users** — Percentage of users detected with VPN/proxy
+- ☁️ **Cloud stats** — Community cache contribution metrics
+
+<!-- Screenshot: Statistics dashboard in options page -->
+
+---
+
+### 💾 Export & Import
+
+Full backup and restore of your configuration:
+- All settings and preferences
+- Blocked countries and regions
+- Cached user data
+
+Move between browsers or share configurations across devices.
+
+---
+
+## 🚀 Installation
+
+### From Store (Recommended)
 
 | Browser | Link |
 |---------|------|
-| **Chrome / Edge / Brave** | [![Chrome Web Store](https://img.shields.io/badge/Chrome-Install-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk)|
-| **Firefox** (soon) | [Firefox Add-ons](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/) |
+| **Chrome / Edge / Brave** | [Chrome Web Store](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk) |
+| **Firefox** | [Firefox Add-ons](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/) |
 
-### Userscript (Alternative - and not updated anymore since v1.5.1)
+### Manual Installation
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/)
-2. [Click to install script](https://github.com/xaitax/x-account-location-device/raw/main/x-account-location-flag.user.js)
-3. Visit [x.com](https://x.com) — you're done!
+```bash
+git clone https://github.com/xaitax/x-account-location-device.git
+cd x-account-location-device/extension
+npm install
+npm run build
+```
 
----
-
-## ☁️ Community Cloud Cache
-
-<div align="center">
-
-### Share lookups. Save API calls. Everyone benefits.
-
-</div>
-
-| Feature | Description |
-|---------|-------------|
-| **🔄 Instant Lookups** | Sub-50ms responses via Cloudflare's global edge network |
-| **👥 Community Powered** | One user's lookup benefits everyone |
-| **🔒 Privacy First** | Only username → location/device mappings. No personal data. |
-| **🏠 Self-Hostable** | Deploy your own Cloudflare Worker (free tier available) |
-
-### Enable Cloud Cache
-
-1. Open **Options** (right-click extension icon → Options)
-2. Toggle **Enable Community Cache** → ON
-3. Done! You're now part of the community
-
-### Sync Your Local Cache
-
-Already have hundreds of cached users? One click uploads them all:
-
-1. Open **Options** page
-2. Click **"Sync Local Cache to Cloud"**
-3. Your existing cache is shared with the community
+Load `dist/chrome` or `dist/firefox` as an unpacked extension in your browser.
 
 ---
 
-## 🛡️ Location Blocking
+## ⚙️ Configuration
 
-Hide tweets from specific countries or entire regions in real-time.
+### Quick Settings (Popup)
 
-### Countries Tab
-1. Click **Block Countries** in X's sidebar
-2. Search or scroll to select countries
-3. Click **Done**
-
-### Regions Tab
-Some X users show regional locations like "South Asia" or "Europe" instead of specific countries. Block entire regions:
-- 🌍 Africa, Europe, North Africa, West Asia
-- 🌎 North America, South America
-- 🌏 Australasia, East Asia & Pacific, South Asia
-
-### Hide vs Highlight Mode
-Choose how to handle blocked tweets in Options:
-- **Hide** (default) — Blocked tweets vanish instantly
-- **Highlight** — Blocked tweets shown with subtle amber left border (useful for researchers)
-
-Settings persist across sessions.
-
----
-
-## ⚙️ Settings
-
-### Popup (Quick Access)
-
-Click the extension icon for quick toggles:
+Click the extension icon for instant toggles:
 
 - ✅ Enable/disable extension
 - 🏳️ Show/hide country flags
 - 📱 Show/hide device icons
 - 🔒 Show/hide VPN indicator
-- 👁️ Show/hide VPN users (filter tweets from VPN users)
-- 🐛 Debug mode
-- 🗑️ Clear cache
+- 👁️ Filter VPN user tweets
+- 🗑️ Clear local cache
 
-### Options Page
+### Full Options Page
 
-Right-click → **Options** for the full experience:
+Right-click the extension icon → **Options** for complete control:
 
-- 📊 **Statistics Dashboard** — Top countries, device breakdown, cache analytics
-- ☁️ **Cloud Cache** — Enable community sharing, sync local cache
-- 🚫 **Blocked Locations** — Manage your country and region block lists
-- 💾 **Export/Import** — Backup and restore all settings, blocked countries, and cache
+- **Statistics** — View cached data analytics
+- **Cloud Cache** — Enable community sharing (opt-in)
+- **Location Blocking** — Manage blocked countries and regions
+- **Export/Import** — Backup and restore configuration
 
 ---
 
-## 📈 Statistics Dashboard
+## ☁️ Community Cloud Cache
 
-<table>
-<tr>
-<td>
+**Optional feature** — Share anonymous lookups with other users.
 
-**See your data at a glance:**
-- 🌍 Top 5 countries in your cache
-- 📱 Device distribution (mobile/desktop/web)
-- 🔒 VPN user count
-- ☁️ Cloud cache statistics
+| Benefit | Description |
+|---------|-------------|
+| ⚡ **Faster lookups** | Instant responses from cached community data |
+| 🛡️ **Avoid rate limits** | Reduce direct API calls to X |
+| 👥 **Community powered** | One user's lookup helps everyone |
 
-</td>
-</tr>
-</table>
+**Privacy:** Only username → location/device mappings are shared. No personal data, no IP logging.
+
+Enable in **Options → Cloud Cache → Enable Community Cache**.
+
+---
+
+## 🔐 Privacy
+
+| Mode | What happens |
+|------|--------------|
+| **Default** | All data stored locally. API calls go directly to X. No external servers. |
+| **With Cloud Cache** | Username → location mappings shared anonymously. Self-hostable. |
+
+Read the full [Privacy Policy](PRIVACY.md).
 
 ---
 
 ## 🔧 Development
 
 ```bash
-# Clone the repo
-git clone https://github.com/xaitax/x-account-location-device.git
-cd x-account-location-device/extension
-
-# Install dependencies
-npm install
+cd extension
 
 # Development (watch mode)
 npm run dev:chrome
@@ -182,123 +173,53 @@ npm run dev:firefox
 # Production build
 npm run build
 
-# Output
-# → dist/chrome/   (Chrome/Edge/Brave)
-# → dist/firefox/  (Firefox)
+# Package for distribution
+npm run package
 ```
 
-### Architecture
+### Project Structure
 
 ```
 extension/
 ├── src/
-│   ├── background/      # Service worker, API client, cloud cache
+│   ├── background/      # Service worker, API client
 │   ├── content/         # DOM observer, badge injection
 │   ├── popup/           # Quick settings popup
 │   ├── options/         # Full settings page
-│   └── shared/          # Constants, utils, storage
-├── dist/
-│   ├── chrome/          # Chrome MV3 build
-│   └── firefox/         # Firefox MV3 build
-└── rollup.config.js     # Build configuration
+│   └── shared/          # Constants, utilities, storage
+└── dist/
+    ├── chrome/          # Chrome MV3 build
+    └── firefox/         # Firefox MV3 build
 ```
-
----
-
-## 🌐 Deploy Your Own Cloud Server
-
-Want to run your own community cache? It's easy with Cloudflare Workers.
-
-```bash
-cd cloud-server
-npm install -g wrangler
-wrangler login
-
-# Create KV namespace
-wrangler kv namespace create "CACHE_KV"
-# Update wrangler.toml with the ID
-
-# Deploy
-wrangler deploy
-```
-
-**Cost:** Free for up to 100,000 requests/day. See [cloud-server/README.md](cloud-server/README.md) for details.
-
----
-
-## 🔐 Privacy
-
-<table>
-<tr>
-<td width="50%">
-
-### Default Mode
-- ✅ All data stored locally
-- ✅ Direct API calls to X only
-- ✅ No external servers
-- ✅ No analytics or tracking
-
-</td>
-<td width="50%">
-
-### With Cloud Cache (Opt-In)
-- ✅ Only username → location/device shared
-- ✅ No personal information
-- ✅ No IP logging
-- ✅ Self-hostable
-
-</td>
-</tr>
-</table>
-
-Read the full [Privacy Policy](PRIVACY.md).
 
 ---
 
 ## 📝 Changelog
 
-<table>
-<tr>
-<td>
+### v2.2.0 — Latest
 
-### Latest: v2.2.0
+- 🌍 **Region Blocking** — Block entire geographic areas
+- ⚠️ **Highlight Mode** — Show blocked tweets with amber border instead of hiding
+- 🔒 **VPN Filter** — Hide/show tweets from VPN users
+- 💾 **Full Export/Import** — Complete configuration backup
 
-🗺️ **Region Block** — Region blocking with tabbed interface (Countries | Regions)
-⚠️ **Highlight Mode** — Show blocked tweets with amber border instead of hiding
-🌍 **Geographic Globe Emojis** — Africa, Americas, Asia/Oceania regions supported
-
-</td>
-<td width="200" align="center">
-
-[![Changelog](https://img.shields.io/badge/Full_Changelog-View-blue?style=for-the-badge)](CHANGELOG.md)
-
-</td>
-</tr>
-</table>
+[View full changelog →](CHANGELOG.md)
 
 ---
 
 ## 🤝 Contributing
 
-Issues and PRs welcome! Please read the existing code style before contributing.
+Issues and pull requests welcome. Please review the existing code style before contributing.
 
 ---
 
 ## 👤 Author
-
-<table>
-<tr>
-<td>
 
 **Alexander Hagenah**
 
 [![X](https://img.shields.io/badge/@xaitax-000000?style=flat&logo=x&logoColor=white)](https://x.com/xaitax)
 [![LinkedIn](https://img.shields.io/badge/alexhagenah-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/alexhagenah/)
 [![Website](https://img.shields.io/badge/primepage.de-FF6B6B?style=flat&logo=safari&logoColor=white)](https://primepage.de)
-
-</td>
-</tr>
-</table>
 
 ---
 
