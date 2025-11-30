@@ -1,14 +1,22 @@
-# 🌍 X-Posed
+<h1 align="center">🌍 X-Posed</h1>
 
-**See where X users are really posting from.**
-
+<p align="center">
+<strong>See where X users are really posting from.</strong><br>
 Country flags, device info, VPN detection, and powerful filtering — all in one extension.
+</p>
 
-[![Chrome Web Store](https://img.shields.io/badge/Chrome-Install-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk)
-[![Firefox Add-ons](https://img.shields.io/badge/Firefox-Install-FF7139?style=for-the-badge&logo=firefox-browser&logoColor=white)](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/)
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/M4M61EP5XL)
+<p align="center">
+<a href="https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk"><img src="https://img.shields.io/badge/Chrome-Install-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Chrome Web Store"></a>
+<a href="https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/"><img src="https://img.shields.io/badge/Firefox-Install-FF7139?style=for-the-badge&logo=firefox-browser&logoColor=white" alt="Firefox Add-ons"></a>
+</p>
 
-![X-Posed showing country flags and device icons on X timeline](https://github.com/user-attachments/assets/53c5c59f-a0f4-4cee-8582-275f9717c807)
+<p align="center">
+<a href="https://ko-fi.com/M4M61EP5XL"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support on Ko-fi"></a>
+</p>
+
+<p align="center">
+<img width="800" alt="X-Posed showing country flags and device icons on X timeline" src="https://github.com/user-attachments/assets/53c5c59f-a0f4-4cee-8582-275f9717c807">
+</p>
 
 ---
 
