@@ -227,6 +227,98 @@ class BlockedCountriesStorage {
 }
 
 /**
+ * Blocked regions storage (similar to blocked countries but for regions)
+ */
+class BlockedRegionsStorage {
+    constructor() {
+        this.regions = new Set();
+        this.loaded = false;
+    }
+
+    async load() {
+        try {
+            const result = await browserAPI.storage.local.get(STORAGE_KEYS.BLOCKED_REGIONS);
+            const stored = result[STORAGE_KEYS.BLOCKED_REGIONS];
+            
+            if (Array.isArray(stored)) {
+                this.regions = new Set(stored);
+                console.log(`🚫 Loaded ${this.regions.size} blocked regions`);
+            }
+            
+            this.loaded = true;
+        } catch (error) {
+            console.error('Failed to load blocked regions:', error);
+            this.loaded = true;
+        }
+    }
+
+    async save() {
+        try {
+            const array = Array.from(this.regions);
+            await browserAPI.storage.local.set({
+                [STORAGE_KEYS.BLOCKED_REGIONS]: array
+            });
+            console.log(`💾 Saved ${array.length} blocked regions`);
+        } catch (error) {
+            console.error('Failed to save blocked regions:', error);
+        }
+    }
+
+    isBlocked(region) {
+        if (!region) return false;
+        return this.regions.has(region.trim().toLowerCase());
+    }
+
+    add(region) {
+        const normalized = region.trim().toLowerCase();
+        if (!this.regions.has(normalized)) {
+            this.regions.add(normalized);
+            this.save();
+            return true;
+        }
+        return false;
+    }
+
+    remove(region) {
+        const normalized = region.trim().toLowerCase();
+        if (this.regions.has(normalized)) {
+            this.regions.delete(normalized);
+            this.save();
+            return true;
+        }
+        return false;
+    }
+
+    toggle(region) {
+        const normalized = region.trim().toLowerCase();
+        if (this.regions.has(normalized)) {
+            this.regions.delete(normalized);
+        } else {
+            this.regions.add(normalized);
+        }
+        this.save();
+        return this.regions.has(normalized);
+    }
+
+    clear() {
+        this.regions.clear();
+        return this.save();
+    }
+
+    get size() {
+        return this.regions.size;
+    }
+
+    getAll() {
+        return Array.from(this.regions);
+    }
+
+    has(region) {
+        return this.isBlocked(region);
+    }
+}
+
+/**
  * Settings storage
  */
 class SettingsStorage {
@@ -359,11 +451,12 @@ class HeadersStorage {
 // Export singleton instances
 export const userCache = new UserCacheStorage();
 export const blockedCountries = new BlockedCountriesStorage();
+export const blockedRegions = new BlockedRegionsStorage();
 export const settings = new SettingsStorage();
 export const headersStorage = new HeadersStorage();
 
 // Export classes for testing
-export { LRUCache, UserCacheStorage, BlockedCountriesStorage, SettingsStorage, HeadersStorage };
+export { LRUCache, UserCacheStorage, BlockedCountriesStorage, BlockedRegionsStorage, SettingsStorage, HeadersStorage };
 
 /**
  * Initialize all storage modules
@@ -372,6 +465,7 @@ export async function initializeStorage() {
     await Promise.all([
         userCache.load(),
         blockedCountries.load(),
+        blockedRegions.load(),
         settings.load(),
         headersStorage.load()
     ]);

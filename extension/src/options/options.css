@@ -427,6 +427,90 @@ body {
     justify-content: flex-end;
 }
 
+/* Blocked Locations Tabs */
+.blocked-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+    gap: 4px;
+}
+
+.blocked-tab {
+    flex: 1;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.blocked-tab:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.blocked-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.blocked-tab.active:hover {
+    background: rgba(29, 155, 240, 0.1);
+}
+
+.blocked-tab .blocked-count {
+    margin-left: 4px;
+    font-size: 10px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+}
+
+.blocked-panel {
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.section-hint {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    border-left: 3px solid var(--accent);
+}
+
+/* Region-specific styling */
+.region-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.region-item {
+    background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+}
+
+.region-item .country-item-flag {
+    font-size: 20px;
+}
+
 .btn-small {
     padding: 8px 16px;
     font-size: 13px;

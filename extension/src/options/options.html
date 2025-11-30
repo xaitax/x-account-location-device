@@ -165,8 +165,8 @@
 
                 <div class="option-row">
                     <div class="option-info">
-                        <span class="option-label">Show Sidebar "Block Countries" Link</span>
-                        <span class="option-description">Display the Block Countries link in X's sidebar navigation</span>
+                        <span class="option-label">Show Sidebar "Block Locations" Link</span>
+                        <span class="option-description">Display the Block Locations link in X's sidebar navigation</span>
                     </div>
                     <label class="toggle">
                         <input type="checkbox" id="opt-sidebar-link" checked>
@@ -175,37 +175,102 @@
                 </div>
             </section>
 
-            <!-- Blocked Countries -->
+            <!-- Blocked Locations (Countries & Regions with Tabs) -->
             <section class="options-section">
                 <h2 class="section-title">
                     <svg viewBox="0 0 24 24" width="20" height="20">
                         <path fill="currentColor" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78z"/>
                     </svg>
-                    Blocked Countries
-                    <span class="blocked-count" id="blocked-count">0</span>
+                    Blocked Locations
                 </h2>
 
                 <p class="section-description">
-                    Tweets from users in blocked countries will be hidden from your feed. Click a country to toggle blocking.
+                    Manage which locations are blocked. Click countries or regions to toggle blocking.
                 </p>
 
-                <!-- Currently blocked countries -->
-                <div class="blocked-list" id="blocked-list">
-                    <p class="empty-state">No countries blocked</p>
-                </div>
+                <!-- Blocking Mode Options -->
+                <div class="blocking-mode-options">
+                    <div class="option-row">
+                        <div class="option-info">
+                            <span class="option-label">Hide blocked tweets</span>
+                            <span class="option-description">Completely hide tweets from blocked locations</span>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="opt-hide-blocked" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
 
-                <!-- Country search and selection -->
-                <div class="country-selector">
-                    <input type="text" class="country-search" id="country-search" placeholder="Search countries to block...">
-                    <div class="country-grid" id="country-grid">
-                        <!-- Countries will be rendered here by JS -->
+                    <div class="option-row">
+                        <div class="option-info">
+                            <span class="option-label">Highlight blocked tweets</span>
+                            <span class="option-description">Show tweets but highlight with a red border instead of hiding</span>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="opt-highlight-blocked">
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
                 </div>
 
-                <div class="blocked-actions">
-                    <button class="btn btn-secondary btn-small" id="btn-clear-blocked">
-                        Clear All Blocked
+                <!-- Tab Bar -->
+                <div class="blocked-tabs">
+                    <button class="blocked-tab active" id="tab-countries">
+                        🌍 Countries
+                        <span class="blocked-count" id="blocked-count">0</span>
                     </button>
+                    <button class="blocked-tab" id="tab-regions">
+                        🗺️ Regions
+                        <span class="blocked-count" id="blocked-regions-count">0</span>
+                    </button>
+                </div>
+
+                <!-- Countries Panel -->
+                <div class="blocked-panel" id="panel-countries">
+                    <!-- Currently blocked countries -->
+                    <div class="blocked-list" id="blocked-list">
+                        <p class="empty-state">No countries blocked</p>
+                    </div>
+
+                    <!-- Country search and selection -->
+                    <div class="country-selector">
+                        <input type="text" class="country-search" id="country-search" placeholder="Search countries to block...">
+                        <div class="country-grid" id="country-grid">
+                            <!-- Countries will be rendered here by JS -->
+                        </div>
+                    </div>
+
+                    <div class="blocked-actions">
+                        <button class="btn btn-secondary btn-small" id="btn-clear-blocked">
+                            Clear All Countries
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Regions Panel -->
+                <div class="blocked-panel" id="panel-regions" style="display: none;">
+                    <p class="section-hint">
+                        Some X users show regional locations like "South Asia" or "Europe" instead of specific countries.
+                    </p>
+
+                    <!-- Currently blocked regions -->
+                    <div class="blocked-list" id="blocked-regions-list">
+                        <p class="empty-state">No regions blocked</p>
+                    </div>
+
+                    <!-- Region search and selection -->
+                    <div class="country-selector">
+                        <input type="text" class="country-search" id="region-search" placeholder="Search regions to block...">
+                        <div class="country-grid region-grid" id="region-grid">
+                            <!-- Regions will be rendered here by JS -->
+                        </div>
+                    </div>
+
+                    <div class="blocked-actions">
+                        <button class="btn btn-secondary btn-small" id="btn-clear-blocked-regions">
+                            Clear All Regions
+                        </button>
+                    </div>
                 </div>
             </section>
 

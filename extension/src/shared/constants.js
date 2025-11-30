@@ -10,6 +10,7 @@ export const VERSION = '__BUILD_VERSION__';
 export const STORAGE_KEYS = {
     CACHE: 'x_location_cache_v4',
     BLOCKED_COUNTRIES: 'x_blocked_countries',
+    BLOCKED_REGIONS: 'x_blocked_regions',
     SETTINGS: 'x_location_settings',
     HEADERS: 'x_api_headers',
     THEME: 'x_theme_preference',
@@ -122,6 +123,8 @@ export const MESSAGE_TYPES = {
     SET_SETTINGS: 'SET_SETTINGS',
     GET_BLOCKED_COUNTRIES: 'GET_BLOCKED_COUNTRIES',
     SET_BLOCKED_COUNTRIES: 'SET_BLOCKED_COUNTRIES',
+    GET_BLOCKED_REGIONS: 'GET_BLOCKED_REGIONS',
+    SET_BLOCKED_REGIONS: 'SET_BLOCKED_REGIONS',
     GET_STATISTICS: 'GET_STATISTICS',
     GET_THEME: 'GET_THEME',
     SET_THEME: 'SET_THEME',
@@ -141,6 +144,7 @@ export const MESSAGE_TYPES = {
     USER_INFO_RESULT: 'USER_INFO_RESULT',
     SETTINGS_UPDATED: 'SETTINGS_UPDATED',
     BLOCKED_COUNTRIES_UPDATED: 'BLOCKED_COUNTRIES_UPDATED',
+    BLOCKED_REGIONS_UPDATED: 'BLOCKED_REGIONS_UPDATED',
     THEME_UPDATED: 'THEME_UPDATED',
     
     // Page script to content script (via custom events)
@@ -157,7 +161,8 @@ export const DEFAULT_SETTINGS = {
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
     showSidebarBlockerLink: true,
     debugMode: false,
-    cloudCacheEnabled: false  // Opt-in only
+    cloudCacheEnabled: false,  // Opt-in only
+    highlightBlockedTweets: false  // If true, highlight instead of hide blocked tweets
 };
 
 // Bearer token for X API (public, embedded in X's own code)
@@ -219,3 +224,65 @@ export const COUNTRY_LIST = Object.keys(COUNTRY_FLAGS)
         return !duplicates.includes(name);
     })
     .sort();
+
+// Region display names (for UI) with geographic globe emojis
+// 🌍 = Africa, Europe, Middle East (Europe/Africa visible)
+// 🌎 = Americas (Americas visible)
+// 🌏 = Asia, Oceania (Asia/Australia visible)
+export const REGION_DATA = [
+    { name: 'Africa', key: 'africa', flag: '🌍' },
+    { name: 'Australasia', key: 'australasia', flag: '🌏' },
+    { name: 'East Asia & Pacific', key: 'east asia & pacific', flag: '🌏' },
+    { name: 'Europe', key: 'europe', flag: '🌍' },
+    { name: 'North Africa', key: 'north africa', flag: '🌍' },
+    { name: 'North America', key: 'north america', flag: '🌎' },
+    { name: 'South America', key: 'south america', flag: '🌎' },
+    { name: 'South Asia', key: 'south asia', flag: '🌏' },
+    { name: 'West Asia', key: 'west asia', flag: '🌍' }
+];
+
+// Region flags lookup by lowercase key
+export const REGION_FLAGS = Object.fromEntries(
+    REGION_DATA.map(r => [r.key, r.flag])
+);
+
+// Region display name lookup by lowercase key
+export const REGION_NAMES = Object.fromEntries(
+    REGION_DATA.map(r => [r.key, r.name])
+);
+
+// Get sorted region list for UI (returns array of {name, key, flag} objects)
+export const REGION_LIST = REGION_DATA;
+
+/**
+ * Check if a location is a region (not a country)
+ * @param {string} location - Location string to check
+ * @returns {boolean} - True if location is a region
+ */
+export function isRegion(location) {
+    if (!location) return false;
+    return Object.hasOwn(REGION_FLAGS, location.toLowerCase());
+}
+
+/**
+ * Get flag/globe emoji for any location (country or region)
+ * @param {string} location - Location string
+ * @returns {string} - Emoji flag/globe or default globe
+ */
+export function getLocationEmoji(location) {
+    if (!location) return '🌍';
+    const normalized = location.toLowerCase();
+    
+    // Check countries first
+    if (COUNTRY_FLAGS[normalized]) {
+        return COUNTRY_FLAGS[normalized];
+    }
+    
+    // Check regions
+    if (REGION_FLAGS[normalized]) {
+        return REGION_FLAGS[normalized];
+    }
+    
+    // Default globe
+    return '🌍';
+}

@@ -145,6 +145,33 @@
     display: none !important;
 }
 
+/* Highlighted tweet (alternative to hiding) - Clean amber left border accent */
+.x-tweet-highlighted {
+    border-left: 3px solid rgba(255, 173, 31, 0.7) !important;
+    background: linear-gradient(90deg,
+        rgba(255, 173, 31, 0.05) 0%,
+        transparent 15%
+    ) !important;
+}
+
+/* Light theme - slightly more visible amber accent */
+[data-x-theme="light"] .x-tweet-highlighted {
+    border-left-color: rgba(234, 151, 12, 0.8) !important;
+    background: linear-gradient(90deg,
+        rgba(234, 151, 12, 0.06) 0%,
+        transparent 15%
+    ) !important;
+}
+
+/* Dim theme */
+[data-x-theme="dim"] .x-tweet-highlighted {
+    border-left-color: rgba(255, 173, 31, 0.6) !important;
+    background: linear-gradient(90deg,
+        rgba(255, 173, 31, 0.04) 0%,
+        transparent 15%
+    ) !important;
+}
+
 /* Country Blocker Modal Overlay */
 .x-blocker-modal-overlay {
     position: fixed;
@@ -303,6 +330,8 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
     gap: 8px;
+    flex: 1;
+    align-content: start;
 }
 
 .x-country-item {
@@ -429,6 +458,107 @@
 
 [data-x-theme="light"] .x-blocker-btn-secondary:hover {
     background: rgba(15, 20, 25, 0.1);
+}
+
+/* ============================================
+   TAB BAR FOR COUNTRIES/REGIONS
+   ============================================ */
+
+.x-blocker-tabs {
+    display: flex;
+    border-bottom: 1px solid rgb(47, 51, 54);
+    padding: 0 20px;
+    gap: 8px;
+}
+
+[data-x-theme="light"] .x-blocker-tabs {
+    border-bottom-color: rgb(207, 217, 222);
+}
+
+[data-x-theme="dim"] .x-blocker-tabs {
+    border-bottom-color: rgb(56, 68, 77);
+}
+
+.x-blocker-tab {
+    flex: 1;
+    padding: 14px 16px;
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: rgb(113, 118, 123);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.x-blocker-tab:hover {
+    background: rgba(231, 233, 234, 0.05);
+    color: rgb(231, 233, 234);
+}
+
+[data-x-theme="light"] .x-blocker-tab:hover {
+    background: rgba(15, 20, 25, 0.05);
+    color: rgb(15, 20, 25);
+}
+
+.x-blocker-tab.active {
+    color: rgb(29, 155, 240);
+    border-bottom-color: rgb(29, 155, 240);
+}
+
+.x-blocker-tab.active:hover {
+    background: rgba(29, 155, 240, 0.1);
+}
+
+/* Tab content container */
+.x-blocker-tab-content {
+    display: flex;
+    flex-direction: column;
+    height: 55vh;
+    min-height: 400px;
+    overflow: hidden;
+}
+
+/* Tab panels */
+.x-blocker-tab-panel {
+    display: none;
+    flex: 1;
+}
+
+.x-blocker-tab-panel[style*="display: block"] {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Region-specific styles */
+.x-blocker-regions {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.x-region-item {
+    background: linear-gradient(135deg, rgb(22, 24, 28) 0%, rgb(28, 30, 35) 100%);
+}
+
+[data-x-theme="light"] .x-region-item {
+    background: linear-gradient(135deg, rgb(247, 249, 249) 0%, rgb(252, 252, 253) 100%);
+}
+
+[data-x-theme="dim"] .x-region-item {
+    background: linear-gradient(135deg, rgb(30, 42, 54) 0%, rgb(35, 48, 62) 100%);
+}
+
+.x-region-flag {
+    font-size: 22px;
+}
+
+.x-region-name {
+    font-weight: 500;
 }
 
 /* Sidebar Block Countries Link - hover styling to match X's native nav items */

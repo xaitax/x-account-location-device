@@ -527,7 +527,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
 /**
  * Inject sidebar link for country blocker
  */
-export function injectSidebarLink(settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES) {
+export function injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
     if (settings.showSidebarBlockerLink === false) {
         if (debug) debug('Sidebar blocker link disabled in settings');
         return;
@@ -576,9 +576,9 @@ export function injectSidebarLink(settings, debug, blockedCountries, sendMessage
             }
             
             currentNav = nav;
-            addBlockerLink(nav, blockedCountries, sendMessage, MESSAGE_TYPES);
-            observeSidebarChanges(nav, settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES);
-            setupResizeHandler(settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES);
+            addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
+            observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
+            setupResizeHandler(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
         }
     }, TIMING.SIDEBAR_CHECK_MS);
 
@@ -606,7 +606,7 @@ export function injectSidebarLink(settings, debug, blockedCountries, sendMessage
 /**
  * Observe sidebar for changes
  */
-function observeSidebarChanges(nav, settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES) {
+function observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
     if (sidebarObserver) {
         sidebarObserver.disconnect();
     }
@@ -621,7 +621,7 @@ function observeSidebarChanges(nav, settings, debug, blockedCountries, sendMessa
             if (debug) debug('Sidebar link removed, re-injecting...');
             
             sidebarObserver.disconnect();
-            addBlockerLink(nav, blockedCountries, sendMessage, MESSAGE_TYPES);
+            addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
             
             setTimeout(() => {
                 if (sidebarObserver && nav.isConnected) {
@@ -651,7 +651,7 @@ function observeSidebarChanges(nav, settings, debug, blockedCountries, sendMessa
 /**
  * Handle window resize
  */
-function setupResizeHandler(settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES) {
+function setupResizeHandler(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
     let resizeHandler = null;
     
     if (resizeHandler) {
@@ -668,7 +668,7 @@ function setupResizeHandler(settings, debug, blockedCountries, sendMessage, MESS
             existingLink.remove();
         }
         
-        addBlockerLink(currentNav, blockedCountries, sendMessage, MESSAGE_TYPES);
+        addBlockerLink(currentNav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
         if (debug) debug('Sidebar link refreshed after resize');
         
         setTimeout(() => {
@@ -701,7 +701,7 @@ export function removeSidebarLink(debug) {
 /**
  * Add blocker link to sidebar
  */
-function addBlockerLink(nav, blockedCountries, sendMessage, MESSAGE_TYPES) {
+function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
     if (document.getElementById('x-country-blocker-link')) return;
 
     const profileLink = nav.querySelector(SELECTORS.PROFILE_LINK);
@@ -715,7 +715,7 @@ function addBlockerLink(nav, blockedCountries, sendMessage, MESSAGE_TYPES) {
     link.classList.add('x-blocker-nav-link');
     link.href = '#';
     link.removeAttribute('data-testid');
-    link.setAttribute('aria-label', 'Block Countries');
+    link.setAttribute('aria-label', 'Block Countries & Regions');
     
     const svg = link.querySelector('svg');
     if (svg) {
@@ -735,15 +735,15 @@ function addBlockerLink(nav, blockedCountries, sendMessage, MESSAGE_TYPES) {
     if (textDiv) {
         const spans = textDiv.querySelectorAll('span');
         if (spans.length > 0) {
-            spans[0].textContent = 'Block Countries';
+            spans[0].textContent = 'Block Locations';
         } else {
-            textDiv.textContent = 'Block Countries';
+            textDiv.textContent = 'Block Locations';
         }
     } else {
         const allSpans = link.querySelectorAll('span');
         for (const span of allSpans) {
             if (span.textContent.trim() === 'Profile') {
-                span.textContent = 'Block Countries';
+                span.textContent = 'Block Locations';
                 break;
             }
         }
@@ -752,7 +752,7 @@ function addBlockerLink(nav, blockedCountries, sendMessage, MESSAGE_TYPES) {
     link.onclick = e => {
         e.preventDefault();
         e.stopPropagation();
-        showBlockerModal(blockedCountries, sendMessage, MESSAGE_TYPES);
+        showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
     };
 
     profileLink.parentElement.insertBefore(link, profileLink.nextSibling);
@@ -763,10 +763,11 @@ function addBlockerLink(nav, blockedCountries, sendMessage, MESSAGE_TYPES) {
 }
 
 /**
- * Show the country blocker modal
+ * Show the country/region blocker modal
  */
-function showBlockerModal(blockedCountries, sendMessage, MESSAGE_TYPES) {
-    showModal(blockedCountries, async (action, country) => {
+function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
+    // Country action handler
+    const onCountryAction = async (action, country) => {
         const response = await sendMessage({
             type: MESSAGE_TYPES.SET_BLOCKED_COUNTRIES,
             payload: { action, country }
@@ -781,7 +782,27 @@ function showBlockerModal(blockedCountries, sendMessage, MESSAGE_TYPES) {
         }
         
         return response;
-    });
+    };
+    
+    // Region action handler
+    const onRegionAction = async (action, region) => {
+        const response = await sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_REGIONS,
+            payload: { action, region }
+        });
+        
+        if (response?.success) {
+            // Update the reference (caller needs to handle this)
+            blockedRegions.clear();
+            for (const r of response.data) {
+                blockedRegions.add(r);
+            }
+        }
+        
+        return response;
+    };
+    
+    showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction);
 }
 
 // ============================================

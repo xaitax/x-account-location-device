@@ -3,7 +3,7 @@
  * Handles DOM observation, user processing, and caching
  */
 
-import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING } from '../shared/constants.js';
+import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, isRegion } from '../shared/constants.js';
 import { extractUsername, findInsertionPoint } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
@@ -21,6 +21,33 @@ import { LRUCache } from '../shared/lru-cache.js';
 function isValidScreenName(screenName) {
     if (!screenName || typeof screenName !== 'string') return false;
     return /^[a-zA-Z0-9_]{1,15}$/.test(screenName);
+}
+
+/**
+ * Check if element is inside a quoted tweet (not the main tweet author)
+ * Quote tweets on X are inside clickable card containers with role="link" and tabindex="0"
+ * @param {HTMLElement} element - The element to check
+ * @returns {boolean} - True if inside a quote tweet
+ */
+function isInsideQuoteTweet(element) {
+    // Get the tweet article
+    const tweet = element.closest(SELECTORS.TWEET);
+    if (!tweet) return false;
+    
+    // Walk up from the element to the tweet article
+    // If we encounter a quote card container, this is a quoted user
+    let current = element.parentElement;
+    while (current && current !== tweet) {
+        // Quote tweet cards are clickable containers with role="link" and tabindex="0"
+        // They contain the quoted tweet's content including the username
+        if (current.getAttribute('role') === 'link' &&
+            current.getAttribute('tabindex') === '0') {
+            return true;
+        }
+        current = current.parentElement;
+    }
+    
+    return false;
 }
 
 // ============================================
@@ -295,6 +322,7 @@ export function createProcessElementSafe(processElement) {
  */
 export async function processElement(element, {
     blockedCountries,
+    blockedRegions,
     settings,
     csrfToken,
     sendMessage,
@@ -346,14 +374,36 @@ export async function processElement(element, {
         if (info) {
             element.dataset.xCountry = info.location || '';
             element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
+            element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
                 
-            // Hide if country is blocked
-            if (info.location && blockedCountries.has(info.location.toLowerCase())) {
-                const tweet = element.closest(SELECTORS.TWEET);
-                if (tweet) {
-                    tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+            // Handle blocked country or region - only for main tweet author, not quoted tweets
+            if (info.location) {
+                const locationLower = info.location.toLowerCase();
+                const isBlockedCountry = blockedCountries.has(locationLower);
+                const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
+                
+                if (isBlockedCountry || isBlockedRegion) {
+                    // Only block/highlight if this is the main tweet author, not a quoted user
+                    const isQuote = isInsideQuoteTweet(element);
+                    
+                    if (!isQuote) {
+                        const tweet = element.closest(SELECTORS.TWEET);
+                        if (tweet) {
+                            if (settings.highlightBlockedTweets) {
+                                tweet.classList.add('x-tweet-highlighted');
+                                tweet.classList.remove(CSS_CLASSES.TWEET_BLOCKED);
+                            } else {
+                                tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+                                tweet.classList.remove('x-tweet-highlighted');
+                            }
+                        }
+                        // Don't return - still need to show badge for highlighted mode
+                        if (!settings.highlightBlockedTweets) {
+                            return;
+                        }
+                    }
+                    // If it's a quote, continue to show badge but don't block/highlight parent tweet
                 }
-                return;
             }
             
             // Hide if VPN detected and showVpnUsers is disabled
@@ -394,12 +444,32 @@ export async function processElement(element, {
             const info = userInfoCache.get(screenName);
             if (info) {
                 element.dataset.xCountry = info.location || '';
-                if (info.location && blockedCountries.has(info.location.toLowerCase())) {
-                    const tweet = element.closest(SELECTORS.TWEET);
-                    if (tweet) {
-                        tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+                element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
+                if (info.location) {
+                    const locationLower = info.location.toLowerCase();
+                    const isBlockedCountry = blockedCountries.has(locationLower);
+                    const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
+                    
+                    if (isBlockedCountry || isBlockedRegion) {
+                        // Only block/highlight if not inside a quote tweet
+                        const isQuote = isInsideQuoteTweet(element);
+                        
+                        if (!isQuote) {
+                            const tweet = element.closest(SELECTORS.TWEET);
+                            if (tweet) {
+                                if (settings.highlightBlockedTweets) {
+                                    tweet.classList.add('x-tweet-highlighted');
+                                    tweet.classList.remove(CSS_CLASSES.TWEET_BLOCKED);
+                                } else {
+                                    tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+                                    tweet.classList.remove('x-tweet-highlighted');
+                                }
+                            }
+                            if (!settings.highlightBlockedTweets) {
+                                return;
+                            }
+                        }
                     }
-                    return;
                 }
                 if (info.location || info.device) {
                     createBadge(element, screenName, info, isUserCell, settings, debug);
@@ -499,15 +569,33 @@ export async function processElement(element, {
         
         element.dataset.xCountry = info.location || '';
         element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
+        element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
 
-        // Hide if country is blocked
-        if (info.location && blockedCountries.has(info.location.toLowerCase())) {
-            const tweet = element.closest(SELECTORS.TWEET);
-            if (tweet) {
-                tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+        // Handle blocked country or region
+        // Only block/highlight if this is NOT inside a quote tweet (we only care about main tweet author)
+        const isQuote = isInsideQuoteTweet(element);
+        if (info.location && !isQuote) {
+            const locationLower = info.location.toLowerCase();
+            const isBlockedCountry = blockedCountries.has(locationLower);
+            const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
+            
+            if (isBlockedCountry || isBlockedRegion) {
+                const tweet = element.closest(SELECTORS.TWEET);
+                if (tweet) {
+                    if (settings.highlightBlockedTweets) {
+                        tweet.classList.add('x-tweet-highlighted');
+                        tweet.classList.remove(CSS_CLASSES.TWEET_BLOCKED);
+                    } else {
+                        tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
+                        tweet.classList.remove('x-tweet-highlighted');
+                    }
+                }
+                // Don't return if highlight mode - still need to show badge
+                if (!settings.highlightBlockedTweets) {
+                    processingQueue.delete(screenName);
+                    return;
+                }
             }
-            processingQueue.delete(screenName);
-            return;
         }
 
         // Hide if VPN detected and showVpnUsers is disabled
@@ -542,23 +630,47 @@ export async function processElement(element, {
 // ============================================
 
 /**
- * Update visibility of tweets based on blocked countries
+ * Update visibility of tweets based on blocked countries and regions
+ * @param {Set} blockedCountries - Set of blocked country names (lowercase)
+ * @param {Set} blockedRegions - Set of blocked region names (lowercase)
+ * @param {Object} settings - Settings object with highlightBlockedTweets flag
  */
-export function updateBlockedTweets(blockedCountries) {
+export function updateBlockedTweets(blockedCountries, blockedRegions, settings = {}) {
+    const highlightMode = settings.highlightBlockedTweets === true;
+    
     document.querySelectorAll('[data-x-screen-name]').forEach(element => {
-        const country = element.dataset.xCountry;
+        const location = element.dataset.xCountry;
         
-        if (!country) return;
+        if (!location) return;
         
         const tweet = element.closest(SELECTORS.TWEET);
         if (!tweet) return;
         
-        const isBlocked = blockedCountries.has(country.toLowerCase());
-        tweet.classList.toggle(CSS_CLASSES.TWEET_BLOCKED, isBlocked);
+        const locationLower = location.toLowerCase();
+        const isBlockedCountry = blockedCountries.has(locationLower);
+        const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
+        const isBlocked = isBlockedCountry || isBlockedRegion;
         
-        const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
-        if (badge) {
-            badge.style.display = isBlocked ? 'none' : '';
+        if (highlightMode) {
+            // Highlight mode: show with red border
+            tweet.classList.toggle('x-tweet-highlighted', isBlocked);
+            tweet.classList.remove(CSS_CLASSES.TWEET_BLOCKED);
+            
+            // Badge visible in highlight mode
+            const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+            if (badge) {
+                badge.style.display = '';
+            }
+        } else {
+            // Hide mode: hide completely
+            tweet.classList.toggle(CSS_CLASSES.TWEET_BLOCKED, isBlocked);
+            tweet.classList.remove('x-tweet-highlighted');
+            
+            // Badge hidden when tweet is blocked
+            const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+            if (badge) {
+                badge.style.display = isBlocked ? 'none' : '';
+            }
         }
     });
 }

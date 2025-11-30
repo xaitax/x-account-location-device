@@ -389,8 +389,6 @@ export function createElement(tag, attributes = {}, children = []) {
         } else if (key.startsWith('on') && typeof value === 'function') {
             const event = key.slice(2).toLowerCase();
             element.addEventListener(event, value);
-        } else if (key === 'innerHTML') {
-            element.innerHTML = value;
         } else if (key === 'textContent') {
             element.textContent = value;
         } else {

@@ -1,6 +1,6 @@
 {
   "name": "x-posed-extension",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.",
   "type": "module",
   "scripts": {

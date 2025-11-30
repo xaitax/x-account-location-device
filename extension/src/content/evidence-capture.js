@@ -663,8 +663,24 @@ function showEvidencePreview(canvas, info) {
     
     const saveBtn = document.createElement('button');
     saveBtn.className = 'x-evidence-btn x-evidence-btn-primary';
-    saveBtn.innerHTML = '💾 Save as PNG <kbd style="opacity:0.7;font-size:11px;margin-left:4px">↵</kbd>';
     saveBtn.title = 'Save image (Enter)';
+    
+    // Helper to set save button content safely without innerHTML
+    const setSaveBtnContent = (isSaved = false) => {
+        saveBtn.replaceChildren();
+        if (isSaved) {
+            saveBtn.textContent = '✓ Saved!';
+        } else {
+            saveBtn.appendChild(document.createTextNode('💾 Save as PNG '));
+            const kbd = document.createElement('kbd');
+            kbd.style.cssText = 'opacity:0.7;font-size:11px;margin-left:4px';
+            kbd.textContent = '↵';
+            saveBtn.appendChild(kbd);
+        }
+    };
+    
+    // Set initial content
+    setSaveBtnContent(false);
     
     const performSave = () => {
         const link = document.createElement('a');
@@ -672,10 +688,10 @@ function showEvidencePreview(canvas, info) {
         link.href = canvas.toDataURL('image/png');
         link.click();
         
-        saveBtn.innerHTML = '✓ Saved!';
+        setSaveBtnContent(true);
         saveBtn.style.background = '#00ba7c';
         setTimeout(() => {
-            saveBtn.innerHTML = '💾 Save as PNG <kbd style="opacity:0.7;font-size:11px;margin-left:4px">↵</kbd>';
+            setSaveBtnContent(false);
             saveBtn.style.background = '';
         }, 2000);
     };

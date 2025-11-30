@@ -1,28 +1,47 @@
 /**
- * Country Blocker Modal Component
- * Provides UI for blocking/unblocking countries
+ * Country/Region Blocker Modal Component
+ * Provides UI for blocking/unblocking countries and regions
+ * Uses tabbed interface for switching between countries and regions
  */
 
-import { COUNTRY_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
+import { COUNTRY_LIST, REGION_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
 import { getFlagEmoji, formatCountryName, createElement, debounce } from '../shared/utils.js';
+
+// Track blocked sets globally for proper syncing
+let localBlockedCountries = null;
+let localBlockedRegions = null;
 
 let currentModal = null;
 
-// Memoized country filtering for performance
+// Memoized filtering for performance
 let cachedFilteredCountries = null;
-let cachedFilter = '';
+let cachedCountryFilter = '';
+let cachedFilteredRegions = null;
+let cachedRegionFilter = '';
+
+// Current tab state
+let activeTab = 'countries';
 
 /**
- * Show the country blocker modal
+ * Show the blocker modal
  * @param {Set} blockedCountries - Set of currently blocked countries
- * @param {Function} onAction - Callback for actions (toggle, clear)
+ * @param {Set} blockedRegions - Set of currently blocked regions
+ * @param {Function} onCountryAction - Callback for country actions
+ * @param {Function} onRegionAction - Callback for region actions
  */
-export function showModal(blockedCountries, onAction) {
+export function showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction) {
     // Remove existing modal if present
     if (currentModal) {
         currentModal.remove();
         currentModal = null;
     }
+
+    // Store references for syncing
+    localBlockedCountries = blockedCountries;
+    localBlockedRegions = blockedRegions;
+
+    // Reset active tab
+    activeTab = 'countries';
 
     const overlay = createElement('div', {
         className: CSS_CLASSES.MODAL_OVERLAY
@@ -38,18 +57,62 @@ export function showModal(blockedCountries, onAction) {
         currentModal = null;
     });
 
-    // Create body
-    const { body, renderCountries, searchInput } = createBody(blockedCountries, onAction);
+    // Create tab bar
+    const { tabBar, switchTab } = createTabBar();
+
+    // Create bodies for both tabs
+    const { body: countryBody, renderCountries, searchInput: countrySearch } = createCountryBody(blockedCountries, onCountryAction);
+    const { body: regionBody, renderRegions, searchInput: regionSearch } = createRegionBody(blockedRegions, onRegionAction);
+
+    // Tab content container
+    const tabContent = createElement('div', { className: 'x-blocker-tab-content' });
+    tabContent.appendChild(countryBody);
+    tabContent.appendChild(regionBody);
+
+    // Initially show countries tab
+    countryBody.style.display = 'block';
+    regionBody.style.display = 'none';
+
+    // Tab switching logic
+    const handleTabSwitch = tab => {
+        activeTab = tab;
+        switchTab(tab);
+        
+        if (tab === 'countries') {
+            countryBody.style.display = 'block';
+            regionBody.style.display = 'none';
+            updateStats(blockedCountries.size, 'countries');
+            setTimeout(() => countrySearch.focus(), 50);
+        } else {
+            countryBody.style.display = 'none';
+            regionBody.style.display = 'block';
+            updateStats(blockedRegions.size, 'regions');
+            setTimeout(() => regionSearch.focus(), 50);
+        }
+    };
+
+    // Wire up tab click handlers
+    tabBar.querySelector('[data-tab="countries"]').addEventListener('click', () => handleTabSwitch('countries'));
+    tabBar.querySelector('[data-tab="regions"]').addEventListener('click', () => handleTabSwitch('regions'));
 
     // Create footer
-    const footer = createFooter(blockedCountries, onAction, renderCountries, () => {
-        overlay.remove();
-        currentModal = null;
-    });
+    const footer = createFooter(
+        blockedCountries, 
+        blockedRegions, 
+        onCountryAction, 
+        onRegionAction,
+        renderCountries, 
+        renderRegions,
+        () => {
+            overlay.remove();
+            currentModal = null;
+        }
+    );
 
     // Assemble modal
     modal.appendChild(header);
-    modal.appendChild(body);
+    modal.appendChild(tabBar);
+    modal.appendChild(tabContent);
     modal.appendChild(footer);
     overlay.appendChild(modal);
 
@@ -61,7 +124,7 @@ export function showModal(blockedCountries, onAction) {
         }
     });
 
-    // Close on Escape key (with proper cleanup)
+    // Close on Escape key
     const handleKeydown = e => {
         if (e.key === 'Escape') {
             closeModal();
@@ -81,10 +144,11 @@ export function showModal(blockedCountries, onAction) {
     currentModal = overlay;
 
     // Focus search input
-    setTimeout(() => searchInput.focus(), 100);
+    setTimeout(() => countrySearch.focus(), 100);
 
     // Initial render
     renderCountries();
+    renderRegions();
 }
 
 /**
@@ -111,7 +175,7 @@ function createHeader(onClose) {
     titleSvg.appendChild(titleG);
     
     title.appendChild(titleSvg);
-    title.appendChild(document.createTextNode('Block Countries'));
+    title.appendChild(document.createTextNode('Block Locations'));
 
     // Create close button
     const closeBtn = createElement('button', {
@@ -141,10 +205,39 @@ function createHeader(onClose) {
 }
 
 /**
- * Create modal body with search and country list
+ * Create tab bar for switching between countries and regions
  */
-function createBody(blockedCountries, onAction) {
-    const body = createElement('div', { className: 'x-blocker-body' });
+function createTabBar() {
+    const tabBar = createElement('div', { className: 'x-blocker-tabs' });
+
+    const countriesTab = createElement('button', {
+        className: 'x-blocker-tab active',
+        textContent: '🌍 Countries',
+        'data-tab': 'countries'
+    });
+
+    const regionsTab = createElement('button', {
+        className: 'x-blocker-tab',
+        textContent: '🗺️ Regions',
+        'data-tab': 'regions'
+    });
+
+    tabBar.appendChild(countriesTab);
+    tabBar.appendChild(regionsTab);
+
+    const switchTab = tab => {
+        countriesTab.classList.toggle('active', tab === 'countries');
+        regionsTab.classList.toggle('active', tab === 'regions');
+    };
+
+    return { tabBar, switchTab };
+}
+
+/**
+ * Create country body with search and country list
+ */
+function createCountryBody(blockedCountries, onAction) {
+    const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'countries' });
 
     const info = createElement('div', {
         className: 'x-blocker-info',
@@ -170,23 +263,21 @@ function createBody(blockedCountries, onAction) {
     // Render countries function with memoized filtering
     const renderCountries = (filter = currentFilter) => {
         currentFilter = filter;
-        countriesContainer.innerHTML = '';
+        countriesContainer.replaceChildren();
 
-        // Use memoized results if filter hasn't changed
         const filterLower = filter.toLowerCase();
         let filteredCountries;
         
-        if (cachedFilter === filterLower && cachedFilteredCountries) {
+        if (cachedCountryFilter === filterLower && cachedFilteredCountries) {
             filteredCountries = cachedFilteredCountries;
         } else {
             filteredCountries = COUNTRY_LIST.filter(country =>
                 country.includes(filterLower)
             );
-            cachedFilter = filterLower;
+            cachedCountryFilter = filterLower;
             cachedFilteredCountries = filteredCountries;
         }
 
-        // Use document fragment for better performance
         const fragment = document.createDocumentFragment();
 
         for (const country of filteredCountries) {
@@ -210,9 +301,78 @@ function createBody(blockedCountries, onAction) {
 }
 
 /**
+ * Create region body with search and region list
+ */
+function createRegionBody(blockedRegions, onAction) {
+    const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'regions' });
+
+    const info = createElement('div', {
+        className: 'x-blocker-info',
+        textContent: 'Block entire regions. Some users show regional locations like "South Asia" or "Europe" instead of specific countries.'
+    });
+
+    const search = createElement('input', {
+        type: 'text',
+        className: 'x-blocker-search',
+        placeholder: 'Search regions...'
+    });
+
+    const regionsContainer = createElement('div', {
+        className: 'x-blocker-countries x-blocker-regions'
+    });
+
+    body.appendChild(info);
+    body.appendChild(search);
+    body.appendChild(regionsContainer);
+
+    let currentFilter = '';
+
+    // Render regions function with memoized filtering
+    const renderRegions = (filter = currentFilter) => {
+        currentFilter = filter;
+        regionsContainer.replaceChildren();
+
+        const filterLower = filter.toLowerCase();
+        let filteredRegions;
+        
+        if (cachedRegionFilter === filterLower && cachedFilteredRegions) {
+            filteredRegions = cachedFilteredRegions;
+        } else {
+            // REGION_LIST is now array of {name, key, flag} objects
+            filteredRegions = REGION_LIST.filter(region =>
+                region.name.toLowerCase().includes(filterLower) ||
+                region.key.toLowerCase().includes(filterLower)
+            );
+            cachedRegionFilter = filterLower;
+            cachedFilteredRegions = filteredRegions;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        for (const region of filteredRegions) {
+            const item = createRegionItem(region, blockedRegions, onAction);
+            fragment.appendChild(item);
+        }
+
+        regionsContainer.appendChild(fragment);
+    };
+
+    // Search functionality with debouncing
+    const debouncedRender = debounce(value => {
+        renderRegions(value);
+    }, TIMING.SEARCH_DEBOUNCE_MS);
+    
+    search.addEventListener('input', e => {
+        debouncedRender(e.target.value);
+    });
+
+    return { body, renderRegions, searchInput: search };
+}
+
+/**
  * Create a single country item using safe DOM methods
  */
-function createCountryItem(country, blockedCountries, onAction, _renderCountries) {
+function createCountryItem(country, blockedCountries, onAction) {
     const isBlocked = blockedCountries.has(country);
     
     const item = createElement('div', {
@@ -223,12 +383,13 @@ function createCountryItem(country, blockedCountries, onAction, _renderCountries
     const flagSpan = createElement('span', { className: 'x-country-flag' });
     const flag = getFlagEmoji(country);
     if (typeof flag === 'string' && flag.startsWith('<img')) {
-        // Parse the img tag safely by creating a temporary container
-        // The Twemoji img is safe since it's generated internally with trusted source
-        const temp = document.createElement('div');
-        temp.innerHTML = flag;
-        const imgEl = temp.firstChild;
-        if (imgEl && imgEl.tagName === 'IMG') {
+        const srcMatch = flag.match(/src="(https:\/\/abs-0\.twimg\.com\/emoji\/v2\/svg\/[^"]+\.svg)"/);
+        if (srcMatch && srcMatch[1]) {
+            const imgEl = document.createElement('img');
+            imgEl.src = srcMatch[1];
+            imgEl.className = 'x-flag-emoji';
+            imgEl.alt = country;
+            imgEl.style.cssText = 'height: 1.2em; vertical-align: -0.2em;';
             flagSpan.appendChild(imgEl);
         } else {
             flagSpan.textContent = '🌍';
@@ -253,27 +414,78 @@ function createCountryItem(country, blockedCountries, onAction, _renderCountries
     item.appendChild(name);
     item.appendChild(status);
 
-    // Click handler - update only this item's visual state instead of full re-render
+    // Click handler - sync from response data
     item.addEventListener('click', async () => {
         const response = await onAction('toggle', country);
         
-        if (response?.success) {
-            // Update local state
-            const wasBlocked = blockedCountries.has(country);
-            if (wasBlocked) {
-                blockedCountries.delete(country);
-            } else {
-                blockedCountries.add(country);
+        if (response?.success && response.data) {
+            // Sync local set from server response
+            localBlockedCountries.clear();
+            for (const c of response.data) {
+                localBlockedCountries.add(c);
             }
             
-            // Update this item's visual state only (avoid full re-render)
-            item.classList.toggle('blocked', !wasBlocked);
-            const statusEl = item.querySelector('.x-country-status');
-            if (statusEl) {
-                statusEl.textContent = wasBlocked ? '' : 'BLOCKED';
+            // Update UI based on new state
+            const nowBlocked = localBlockedCountries.has(country);
+            item.classList.toggle('blocked', nowBlocked);
+            status.textContent = nowBlocked ? 'BLOCKED' : '';
+            
+            updateStats(localBlockedCountries.size, 'countries');
+        }
+    });
+
+    return item;
+}
+
+/**
+ * Create a single region item using safe DOM methods
+ * @param {Object} region - Region object with {name, key, flag}
+ */
+function createRegionItem(region, blockedRegions, onAction) {
+    const regionKey = region.key;
+    const isBlocked = blockedRegions.has(regionKey);
+    
+    const item = createElement('div', {
+        className: `x-country-item x-region-item${isBlocked ? ' blocked' : ''}`
+    });
+
+    // Globe emoji based on region
+    const flagSpan = createElement('span', { className: 'x-country-flag x-region-flag' });
+    flagSpan.textContent = region.flag;
+
+    // Name - use proper display name
+    const name = createElement('span', {
+        className: 'x-country-name x-region-name',
+        textContent: region.name
+    });
+
+    // Status
+    const status = createElement('span', {
+        className: 'x-country-status',
+        textContent: isBlocked ? 'BLOCKED' : ''
+    });
+
+    item.appendChild(flagSpan);
+    item.appendChild(name);
+    item.appendChild(status);
+
+    // Click handler - sync from response data
+    item.addEventListener('click', async () => {
+        const response = await onAction('toggle', regionKey);
+        
+        if (response?.success && response.data) {
+            // Sync local set from server response
+            localBlockedRegions.clear();
+            for (const r of response.data) {
+                localBlockedRegions.add(r);
             }
             
-            updateStats(blockedCountries.size);
+            // Update UI based on new state
+            const nowBlocked = localBlockedRegions.has(regionKey);
+            item.classList.toggle('blocked', nowBlocked);
+            status.textContent = nowBlocked ? 'BLOCKED' : '';
+            
+            updateStats(localBlockedRegions.size, 'regions');
         }
     });
 
@@ -283,7 +495,7 @@ function createCountryItem(country, blockedCountries, onAction, _renderCountries
 /**
  * Create modal footer
  */
-function createFooter(blockedCountries, onAction, renderCountries, onClose) {
+function createFooter(blockedCountries, blockedRegions, onCountryAction, onRegionAction, renderCountries, renderRegions, onClose) {
     const footer = createElement('div', { className: 'x-blocker-footer' });
 
     const stats = createElement('div', {
@@ -301,11 +513,20 @@ function createFooter(blockedCountries, onAction, renderCountries, onClose) {
         className: 'x-blocker-btn x-blocker-btn-secondary',
         textContent: 'Clear All',
         onClick: async () => {
-            const response = await onAction('clear');
-            if (response?.success) {
-                blockedCountries.clear();
-                renderCountries();
-                updateStats(0);
+            if (activeTab === 'countries') {
+                const response = await onCountryAction('clear');
+                if (response?.success) {
+                    blockedCountries.clear();
+                    renderCountries();
+                    updateStats(0, 'countries');
+                }
+            } else {
+                const response = await onRegionAction('clear');
+                if (response?.success) {
+                    blockedRegions.clear();
+                    renderRegions();
+                    updateStats(0, 'regions');
+                }
             }
         }
     });
@@ -328,10 +549,11 @@ function createFooter(blockedCountries, onAction, renderCountries, onClose) {
 /**
  * Update stats display
  */
-function updateStats(count) {
+function updateStats(count, type = 'countries') {
     const stats = document.getElementById('x-blocker-stats');
     if (stats) {
-        stats.textContent = `${count} countries blocked`;
+        const label = type === 'countries' ? 'countries' : 'regions';
+        stats.textContent = `${count} ${label} blocked`;
     }
 }
 

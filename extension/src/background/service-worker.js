@@ -6,7 +6,7 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING } from '../shared/constants.js';
-import { userCache, blockedCountries, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { userCache, blockedCountries, blockedRegions, settings, headersStorage, initializeStorage } from '../shared/storage.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
 import cloudCache from './cloud-cache.js';
@@ -89,6 +89,12 @@ async function handleMessage(message, _sender) {
             
             case MESSAGE_TYPES.SET_BLOCKED_COUNTRIES:
                 return await handleSetBlockedCountries(payload);
+            
+            case MESSAGE_TYPES.GET_BLOCKED_REGIONS:
+                return handleGetBlockedRegions();
+            
+            case MESSAGE_TYPES.SET_BLOCKED_REGIONS:
+                return await handleSetBlockedRegions(payload);
             
             case MESSAGE_TYPES.GET_STATISTICS:
                 return handleGetStatistics();
@@ -388,10 +394,71 @@ async function handleSetBlockedCountries({ action, country, countries }) {
         console.debug('Could not notify tabs:', e);
     }
     
-    return { 
-        success: true, 
+    return {
+        success: true,
         data: blockedCountries.getAll(),
         size: blockedCountries.size
+    };
+}
+
+/**
+ * Get blocked regions handler
+ */
+function handleGetBlockedRegions() {
+    return {
+        success: true,
+        data: blockedRegions.getAll(),
+        size: blockedRegions.size
+    };
+}
+
+/**
+ * Set blocked regions handler
+ */
+async function handleSetBlockedRegions({ action, region, regions }) {
+    switch (action) {
+        case 'add':
+            blockedRegions.add(region);
+            break;
+        case 'remove':
+            blockedRegions.remove(region);
+            break;
+        case 'toggle':
+            blockedRegions.toggle(region);
+            break;
+        case 'clear':
+            await blockedRegions.clear();
+            break;
+        case 'set':
+            // Replace all blocked regions
+            await blockedRegions.clear();
+            for (const r of regions) {
+                blockedRegions.add(r);
+            }
+            break;
+    }
+    
+    // Notify all tabs about blocked regions change
+    try {
+        const tabs = await browserAPI.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] });
+        for (const tab of tabs) {
+            try {
+                await browserAPI.tabs.sendMessage(tab.id, {
+                    type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED,
+                    payload: blockedRegions.getAll()
+                });
+            } catch (e) {
+                // Tab might not have content script loaded
+            }
+        }
+    } catch (e) {
+        console.debug('Could not notify tabs:', e);
+    }
+    
+    return {
+        success: true,
+        data: blockedRegions.getAll(),
+        size: blockedRegions.size
     };
 }
 
@@ -570,12 +637,13 @@ async function handleSyncLocalToCloud() {
 }
 
 /**
- * Import data handler - imports settings, blocked countries, and cache from exported JSON
+ * Import data handler - imports settings, blocked countries, blocked regions, and cache from exported JSON
  */
-async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, cache: importCache }) {
+async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, cache: importCache }) {
     const results = {
         settings: false,
         blockedCountries: { count: 0 },
+        blockedRegions: { count: 0 },
         cache: { count: 0 }
     };
     
@@ -594,6 +662,16 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
                 blockedCountries.add(country);
             }
             results.blockedCountries.count = importBlockedCountries.length;
+        }
+        
+        // Import blocked regions if provided
+        if (Array.isArray(importBlockedRegions)) {
+            // Clear existing and set new
+            await blockedRegions.clear();
+            for (const region of importBlockedRegions) {
+                blockedRegions.add(region);
+            }
+            results.blockedRegions.count = importBlockedRegions.length;
         }
         
         // Import cache entries if provided
@@ -620,6 +698,11 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
                     await browserAPI.tabs.sendMessage(tab.id, {
                         type: MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED,
                         payload: blockedCountries.getAll()
+                    });
+                    // Notify about blocked regions update
+                    await browserAPI.tabs.sendMessage(tab.id, {
+                        type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED,
+                        payload: blockedRegions.getAll()
                     });
                 } catch (e) {
                     // Tab might not have content script loaded

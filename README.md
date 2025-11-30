@@ -41,8 +41,8 @@ Know when X detects a VPN or proxy — the 🔒 icon appears when location might
 ### 📸 Evidence Screenshot
 **NEW!** Capture tweets with location metadata overlay. Perfect for researchers, journalists, and OSINT.
 
-### 🚫 Country Blocking
-Filter your feed by hiding tweets from specific countries. One-click setup.
+### 🚫 Country & Region Blocking
+Filter your feed by hiding OR highlighting tweets from specific countries or entire regions. One-click setup with tabbed interface.
 
 </td>
 </tr>
@@ -98,15 +98,27 @@ Already have hundreds of cached users? One click uploads them all:
 
 ---
 
-## 🛡️ Country Blocking
+## 🛡️ Location Blocking
 
-Hide tweets from specific countries in real-time.
+Hide tweets from specific countries or entire regions in real-time.
 
+### Countries Tab
 1. Click **Block Countries** in X's sidebar
 2. Search or scroll to select countries
 3. Click **Done**
 
-Blocked tweets vanish instantly. Settings persist across sessions.
+### Regions Tab
+Some X users show regional locations like "South Asia" or "Europe" instead of specific countries. Block entire regions:
+- 🌍 Africa, Europe, North Africa, West Asia
+- 🌎 North America, South America
+- 🌏 Australasia, East Asia & Pacific, South Asia
+
+### Hide vs Highlight Mode
+Choose how to handle blocked tweets in Options:
+- **Hide** (default) — Blocked tweets vanish instantly
+- **Highlight** — Blocked tweets shown with subtle amber left border (useful for researchers)
+
+Settings persist across sessions.
 
 ---
 
@@ -130,7 +142,7 @@ Right-click → **Options** for the full experience:
 
 - 📊 **Statistics Dashboard** — Top countries, device breakdown, cache analytics
 - ☁️ **Cloud Cache** — Enable community sharing, sync local cache
-- 🚫 **Blocked Countries** — Manage your block list
+- 🚫 **Blocked Locations** — Manage your country and region block lists
 - 💾 **Export/Import** — Backup and restore all settings, blocked countries, and cache
 
 ---
@@ -249,11 +261,11 @@ Read the full [Privacy Policy](PRIVACY.md).
 <tr>
 <td>
 
-### Latest: v2.1.0
+### Latest: v2.2.0
 
-✨ **New** — Show/hide VPN users toggle, enhanced Export/Import with full backup
-📊 **Rate Limits** — Real-time API status indicator with countdown
-🔒 **VPN Stats** — Enhanced statistics with VPN user percentage
+🗺️ **Region Block** — Region blocking with tabbed interface (Countries | Regions)
+⚠️ **Highlight Mode** — Show blocked tweets with amber border instead of hiding
+🌍 **Geographic Globe Emojis** — Africa, Americas, Asia/Oceania regions supported
 
 </td>
 <td width="200" align="center">

@@ -2,6 +2,23 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [2.2.0] - 2024-11-30
+
+### ✨ New Features
+- **Region Blocking** — Block entire geographic regions (Africa, Europe, South Asia, etc.)
+  - Some X users show regional locations like "South Asia" or "Europe" instead of specific countries
+  - New tabbed interface in sidebar modal and options page (Countries | Regions)
+  - Geographic globe emojis: 🌍 Africa/Europe/West Asia, 🌎 Americas, 🌏 Asia/Oceania
+  - Blocked regions can be managed separately from blocked countries
+  - Export/Import now includes blocked regions
+- **Highlight Mode** — NEW alternative to hiding blocked tweets
+  - Toggle in Options page: "Hide blocked tweets" vs "Highlight blocked tweets"
+  - Highlighted tweets shown with subtle amber left border instead of being hidden
+  - Useful for users who want to see content but be warned about location
+  - Setting syncs with Export/Import
+
+---
+
 ## [2.1.0] - 2024-11-29
 
 ### ✨ New Features

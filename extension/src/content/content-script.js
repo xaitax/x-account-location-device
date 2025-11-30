@@ -33,6 +33,7 @@ import {
 
 let isEnabled = true;
 let blockedCountries = new Set();
+let blockedRegions = new Set();
 let settings = {};
 let csrfToken = null;
 let debugMode = false;
@@ -169,7 +170,7 @@ async function handleBackgroundMessage(type, payload) {
                 if (settings.showSidebarBlockerLink === false) {
                     removeSidebarLink(debug);
                 } else {
-                    injectSidebarLink(settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES);
+                    injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
                 }
             }
             return { success: true };
@@ -177,7 +178,12 @@ async function handleBackgroundMessage(type, payload) {
 
         case MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED:
             blockedCountries = new Set(payload);
-            updateBlockedTweets(blockedCountries);
+            updateBlockedTweets(blockedCountries, blockedRegions, settings);
+            return { success: true };
+
+        case MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED:
+            blockedRegions = new Set(payload);
+            updateBlockedTweets(blockedCountries, blockedRegions, settings);
             return { success: true };
 
         default:
@@ -206,10 +212,11 @@ async function initialize() {
         // Inject page script for header interception
         injectPageScript();
 
-        // Load initial settings and blocked countries
-        const [settingsResponse, blockedResponse] = await Promise.all([
+        // Load initial settings, blocked countries, and blocked regions
+        const [settingsResponse, blockedResponse, blockedRegionsResponse] = await Promise.all([
             sendMessage({ type: MESSAGE_TYPES.GET_SETTINGS }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES })
+            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES }),
+            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_REGIONS })
         ]);
 
         if (settingsResponse?.success) {
@@ -222,6 +229,10 @@ async function initialize() {
 
         if (blockedResponse?.success) {
             blockedCountries = new Set(blockedResponse.data);
+        }
+
+        if (blockedRegionsResponse?.success) {
+            blockedRegions = new Set(blockedRegionsResponse.data);
         }
 
         // Inject styles
@@ -238,11 +249,11 @@ async function initialize() {
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
                 startObserver(memoizedIsEnabledFn, memoizedProcessElementSafe, memoizedScanPageFn, debug);
-                injectSidebarLink(settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES);
+                injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
             });
         } else {
             startObserver(memoizedIsEnabledFn, memoizedProcessElementSafe, memoizedScanPageFn, debug);
-            injectSidebarLink(settings, debug, blockedCountries, sendMessage, MESSAGE_TYPES);
+            injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
         }
 
     } catch (error) {
@@ -266,6 +277,7 @@ function createMemoizedFunctions() {
     // Note: This references the module-level variables, so it always uses current values
     memoizedProcessElementWithContext = element => processElement(element, {
         get blockedCountries() { return blockedCountries; },
+        get blockedRegions() { return blockedRegions; },
         get settings() { return settings; },
         get csrfToken() { return csrfToken; },
         sendMessage,
@@ -334,5 +346,10 @@ window.__X_POSED_CONTENT__ = {
             memoizedScanPageFn();
         }
     },
-    getState: () => ({ isEnabled, blockedCountries: Array.from(blockedCountries), settings })
+    getState: () => ({
+        isEnabled,
+        blockedCountries: Array.from(blockedCountries),
+        blockedRegions: Array.from(blockedRegions),
+        settings
+    })
 };
