@@ -59,7 +59,7 @@ Capture any tweet with a forensic metadata overlay showing location, device, VPN
 
 Perfect for researchers, journalists, and OSINT professionals who need to document social media evidence.
 
-<img width="1062" height="1133" alt="image" src="https://github.com/user-attachments/assets/a243b826-9656-4f3c-9dce-94be9bcc2515" />
+<img width="690" height="735" alt="image" src="https://github.com/user-attachments/assets/03b80339-cc54-40f6-a8ba-4b65abf673d4" />
 
 ---
 
@@ -71,7 +71,7 @@ See your cached data at a glance:
 - 🔒 **VPN users** — Percentage of users detected with VPN/proxy
 - ☁️ **Cloud stats** — Community cache contribution metrics
 
-<img width="730" height="770" alt="image" src="https://github.com/user-attachments/assets/517d8c0d-badb-45d6-9d8d-52ab943477e6" />
+<img width="631" height="663" alt="image" src="https://github.com/user-attachments/assets/3c159157-c60e-4bf7-8426-fabbf78d41ca" />
 
 ---
 
@@ -138,7 +138,7 @@ Optional feature — Share anonymous lookups with other users.
 
 Enable in **Options → Cloud Cache → Enable Community Cache**.
 
-<img width="968" height="1062" alt="image" src="https://github.com/user-attachments/assets/c095e6c2-ff02-4025-9952-eb5269cb6218" />
+<img width="629" height="690" alt="image" src="https://github.com/user-attachments/assets/f381e1f9-ccaa-4aba-ba98-68031ac4bc0f" />
 
 ---
 
