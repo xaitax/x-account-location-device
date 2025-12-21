@@ -138,7 +138,7 @@ Optional feature — Share anonymous lookups with other users.
 
 Enable in **Options → Cloud Cache → Enable Community Cache**.
 
-<img width="629" height="690" alt="image" src="https://github.com/user-attachments/assets/f381e1f9-ccaa-4aba-ba98-68031ac4bc0f" />
+<img width="489" height="531" alt="image" src="https://github.com/user-attachments/assets/49680ef9-0743-44a3-a1a3-9de0b80761a4" />
 
 ---
 
