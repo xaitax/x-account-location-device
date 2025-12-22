@@ -8,6 +8,7 @@ Country flags, device info, VPN detection, and powerful filtering — all in one
 <p align="center">
 <a href="https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk"><img src="https://img.shields.io/badge/Chrome-Install-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Chrome Web Store"></a>
 <a href="https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/"><img src="https://img.shields.io/badge/Firefox-Install-FF7139?style=for-the-badge&logo=firefox-browser&logoColor=white" alt="Firefox Add-ons"></a>
+<a href="https://apps.apple.com/us/app/x-posed-location/id6755918713"><img src="https://img.shields.io/badge/App_Store-Install-000000?style=for-the-badge&logo=apple&logoColor=white" alt="App Store"></a>
 </p>
 
 <p align="center">
@@ -92,6 +93,7 @@ Move between browsers or share configurations across devices.
 |---------|------|
 | **Chrome / Edge / Brave** | [Chrome Web Store](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk) |
 | **Firefox** | [Firefox Add-ons](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/) |
+| **iOS / iPadOS** | [App Store](https://apps.apple.com/us/app/x-posed-location/id6755918713) |
 
 **Manual installation:**
 
@@ -192,7 +194,6 @@ extension/src/
   - Stable X internal account identifier labeled as **User ID**
   - Affiliation label (if present)
 - Info badge actions are always visible (info hint + evidence camera)
-- Hovercard cleaned up by removing non-actionable rows (avatar shape + learn-more link)
 
 [View full changelog →](CHANGELOG.md)
 

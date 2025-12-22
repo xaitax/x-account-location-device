@@ -17,7 +17,6 @@ All notable changes to X-Posed will be documented in this file.
   - Stable X internal account identifier labeled as **User ID**
   - Affiliation label (if present)
 - Info badge actions are always visible (info hint + evidence camera)
-- Hovercard cleaned up by removing non-actionable rows (avatar shape + learn-more link)
 
 ---
 
