@@ -2,9 +2,11 @@
 
 All notable changes to X-Posed will be documented in this file.
 
-## [2.3.1] - 2025-12-21
+## [2.3.2] - 2025-12-22
 
 ### 🐛 Bug Fixes
+- Fixed issue where the logged-in user's own tweets were being hidden/blocked (causing infinite scroll loops on profile pages)
+- Resolved Firefox initialization crash by ensuring safe DOM injection (fixing the incomplete patch in v2.3.1)
 - Fixed intermittent Firefox initialization crash when `document.head` is temporarily unavailable at `document_start`
 
 ### 🎨 UI/UX
@@ -12,9 +14,9 @@ All notable changes to X-Posed will be documented in this file.
   - Location, device, VPN/proxy signal
   - Verification signals (Blue / Verified / ID / Protected)
   - Account created date, “Verified since”, handle-change count
-  - Stable X internal account identifier labeled as **User ID** (formerly `rest_id`)
+  - Stable X internal account identifier labeled as **User ID**
   - Affiliation label (if present)
-- Info badge actions are now always visible (info hint + evidence camera)
+- Info badge actions are always visible (info hint + evidence camera)
 - Hovercard cleaned up by removing non-actionable rows (avatar shape + learn-more link)
 
 ---

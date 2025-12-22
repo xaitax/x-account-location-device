@@ -4,7 +4,7 @@
  */
 
 import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, isRegion } from '../shared/constants.js';
-import { extractUsername, findInsertionPoint } from '../shared/utils.js';
+import { extractUsername, findInsertionPoint, getLoggedInUsername } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
 
@@ -385,8 +385,10 @@ export async function processElement(element, {
                 if (isBlockedCountry || isBlockedRegion) {
                     // Only block/highlight if this is the main tweet author, not a quoted user
                     const isQuote = isInsideQuoteTweet(element);
+                    const loggedInUser = getLoggedInUsername();
+                    const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
                     
-                    if (!isQuote) {
+                    if (!isQuote && !isSelf) {
                         const tweet = element.closest(SELECTORS.TWEET);
                         if (tweet) {
                             if (settings.highlightBlockedTweets) {
@@ -407,7 +409,10 @@ export async function processElement(element, {
             }
             
             // Hide if VPN detected and showVpnUsers is disabled
-            if (info.locationAccurate === false && settings.showVpnUsers === false) {
+            const loggedInUser = getLoggedInUsername();
+            const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
+        
+            if (info.locationAccurate === false && settings.showVpnUsers === false && !isSelf) {
                 const tweet = element.closest(SELECTORS.TWEET);
                 if (tweet) {
                     tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
@@ -453,8 +458,10 @@ export async function processElement(element, {
                     if (isBlockedCountry || isBlockedRegion) {
                         // Only block/highlight if not inside a quote tweet
                         const isQuote = isInsideQuoteTweet(element);
+                        const loggedInUser = getLoggedInUsername();
+                        const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
                         
-                        if (!isQuote) {
+                        if (!isQuote && !isSelf) {
                             const tweet = element.closest(SELECTORS.TWEET);
                             if (tweet) {
                                 if (settings.highlightBlockedTweets) {

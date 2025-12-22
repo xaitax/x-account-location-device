@@ -838,9 +838,12 @@ export function injectStyles() {
     link.href = styleUrl;
 
     const mount = document.head || document.documentElement;
-    mount.appendChild(link);
-
-    stylesInjected = true;
+    if (mount) {
+        mount.appendChild(link);
+        stylesInjected = true;
+    } else {
+        console.error('X-Posed: Could not find mount point for styles');
+    }
 }
 
 // ============================================

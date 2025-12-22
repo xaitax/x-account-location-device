@@ -177,11 +177,22 @@ extension/src/
 
 ## 📝 Changelog
 
-**v2.2.0** — Latest
-- 🌍 Region blocking (block entire geographic areas)
-- ⚠️ Highlight mode (amber border instead of hiding)
-- 🔒 VPN user filter
-- 💾 Full export/import
+**v2.3.2** — Latest
+
+### 🐛 Bug Fixes
+- Fixed issue where the logged-in user's own tweets were being hidden/blocked (causing infinite scroll loops on profile pages)
+- Resolved Firefox initialization crash by ensuring safe DOM injection (fixing the incomplete patch in v2.3.1)
+- Fixed intermittent Firefox initialization crash when `document.head` is temporarily unavailable at `document_start`
+
+### 🎨 UI/UX
+- **New Hovercard (on badge hover)** with rich account metadata:
+  - Location, device, VPN/proxy signal
+  - Verification signals (Blue / Verified / ID / Protected)
+  - Account created date, “Verified since”, handle-change count
+  - Stable X internal account identifier labeled as **User ID**
+  - Affiliation label (if present)
+- Info badge actions are always visible (info hint + evidence camera)
+- Hovercard cleaned up by removing non-actionable rows (avatar shape + learn-more link)
 
 [View full changelog →](CHANGELOG.md)
 

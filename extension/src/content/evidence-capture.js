@@ -94,7 +94,7 @@ function showLoadingToast(message) {
         const style = document.createElement('style');
         style.id = 'x-evidence-keyframes';
         style.textContent = '@keyframes x-spin { to { transform: rotate(360deg); } }';
-        document.head.appendChild(style);
+        (document.head || document.documentElement).appendChild(style);
     }
     
     document.body.appendChild(toast);

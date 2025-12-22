@@ -298,6 +298,22 @@ export function extractUsername(element) {
 }
 
 /**
+ * Get the logged-in username from the DOM
+ * @returns {string|null} - The username (without @) or null
+ */
+export function getLoggedInUsername() {
+    // Try to find the profile link in the sidebar
+    const profileLink = document.querySelector('[data-testid="AppTabBar_Profile_Link"]');
+    if (profileLink) {
+        const href = profileLink.getAttribute('href');
+        if (href && href.startsWith('/')) {
+            return href.substring(1);
+        }
+    }
+    return null;
+}
+
+/**
  * Find the best insertion point for badge in a username element.
  * Handles various X DOM structures including profile headers and timeline items.
  * @param {HTMLElement} container - The container element to search in
