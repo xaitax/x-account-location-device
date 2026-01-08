@@ -165,6 +165,7 @@ export const DEFAULT_SETTINGS = {
     showDevices: true,
     showVpnIndicator: true,
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
+    showCaptureButton: true,
     showSidebarBlockerLink: true,
     debugMode: false,
     cloudCacheEnabled: false,  // Opt-in only

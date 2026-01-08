@@ -13,6 +13,7 @@ const elements = {
     toggleFlags: document.getElementById('toggle-flags'),
     toggleDevices: document.getElementById('toggle-devices'),
     toggleVpn: document.getElementById('toggle-vpn'),
+    toggleCaptureButton: document.getElementById('toggle-capture-button'),
     statCached: document.getElementById('stat-cached'),
     statBlocked: document.getElementById('stat-blocked'),
     btnClearCache: document.getElementById('btn-clear-cache'),
@@ -163,6 +164,7 @@ async function loadSettings() {
             elements.toggleFlags.checked = settings.showFlags !== false;
             elements.toggleDevices.checked = settings.showDevices !== false;
             elements.toggleVpn.checked = settings.showVpnIndicator !== false;
+            elements.toggleCaptureButton.checked = settings.showCaptureButton !== false;
         }
     } catch (error) {
         console.error('Failed to load settings:', error);
@@ -235,6 +237,13 @@ function setupEventListeners() {
     elements.toggleVpn.addEventListener('change', async e => {
         await saveSettings({ showVpnIndicator: e.target.checked });
     });
+
+    // Capture button toggle
+    if (elements.toggleCaptureButton) {
+        elements.toggleCaptureButton.addEventListener('change', async e => {
+            await saveSettings({ showCaptureButton: e.target.checked });
+        });
+    }
 
     // Clear cache button with confirmation
     elements.btnClearCache.addEventListener('click', async () => {
