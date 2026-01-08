@@ -164,9 +164,7 @@ async function loadSettings() {
             elements.toggleFlags.checked = settings.showFlags !== false;
             elements.toggleDevices.checked = settings.showDevices !== false;
             elements.toggleVpn.checked = settings.showVpnIndicator !== false;
-            if (elements.toggleCaptureButton) {
-                elements.toggleCaptureButton.checked = settings.showCaptureButton !== false;
-            }
+            elements.toggleCaptureButton.checked = settings.showCaptureButton !== false;
         }
     } catch (error) {
         console.error('Failed to load settings:', error);

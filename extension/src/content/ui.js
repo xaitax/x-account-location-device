@@ -480,7 +480,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     hint.textContent = 'i';
     badge.appendChild(hint);
 
-    // Capture button (conditionally shown based on settings)
+    // Capture button
     if (settings.showCaptureButton !== false) {
         const captureBtn = document.createElement('button');
         captureBtn.className = 'x-capture-btn';
