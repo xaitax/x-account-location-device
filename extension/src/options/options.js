@@ -18,6 +18,7 @@ const elements = {
     optFlags: document.getElementById('opt-flags'),
     optDevices: document.getElementById('opt-devices'),
     optVpn: document.getElementById('opt-vpn'),
+    optCaptureButton: document.getElementById('opt-capture-button'),
     optShowVpnUsers: document.getElementById('opt-show-vpn-users'),
     optSidebarLink: document.getElementById('opt-sidebar-link'),
     // Blocking Mode
@@ -218,6 +219,9 @@ async function loadSettings() {
             elements.optFlags.checked = currentSettings.showFlags !== false;
             elements.optDevices.checked = currentSettings.showDevices !== false;
             elements.optVpn.checked = currentSettings.showVpnIndicator !== false;
+            if (elements.optCaptureButton) {
+                elements.optCaptureButton.checked = currentSettings.showCaptureButton !== false;
+            }
             if (elements.optSidebarLink) {
                 elements.optSidebarLink.checked = currentSettings.showSidebarBlockerLink !== false;
             }
@@ -1295,6 +1299,13 @@ function setupEventListeners() {
     elements.optVpn.addEventListener('change', e => {
         saveSettings({ showVpnIndicator: e.target.checked });
     });
+
+    // Capture button toggle
+    if (elements.optCaptureButton) {
+        elements.optCaptureButton.addEventListener('change', e => {
+            saveSettings({ showCaptureButton: e.target.checked });
+        });
+    }
 
     // Sidebar link toggle
     if (elements.optSidebarLink) {

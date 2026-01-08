@@ -481,40 +481,42 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     badge.appendChild(hint);
 
     // Capture button
-    const captureBtn = document.createElement('button');
-    captureBtn.className = 'x-capture-btn';
-    captureBtn.title = 'Capture evidence screenshot';
-    captureBtn.setAttribute('aria-label', 'Capture evidence');
-    
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('width', '14');
-    svg.setAttribute('height', '14');
-    
-    const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path1.setAttribute('fill', 'currentColor');
-    path1.setAttribute('d', 'M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z');
-    
-    const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path2.setAttribute('fill', 'currentColor');
-    path2.setAttribute('d', 'M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z');
-    
-    svg.appendChild(path1);
-    svg.appendChild(path2);
-    captureBtn.appendChild(svg);
-    badge.appendChild(captureBtn);
-
-    captureBtn.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
+    if (settings.showCaptureButton !== false) {
+        const captureBtn = document.createElement('button');
+        captureBtn.className = 'x-capture-btn';
+        captureBtn.title = 'Capture evidence screenshot';
+        captureBtn.setAttribute('aria-label', 'Capture evidence');
         
-        const tweet = element.closest(SELECTORS.TWEET);
-        if (tweet) {
-            captureEvidence(tweet, info, screenName);
-        } else {
-            console.warn('X-Posed: Could not find tweet to capture');
-        }
-    });
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '14');
+        svg.setAttribute('height', '14');
+        
+        const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path1.setAttribute('fill', 'currentColor');
+        path1.setAttribute('d', 'M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z');
+        
+        const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path2.setAttribute('fill', 'currentColor');
+        path2.setAttribute('d', 'M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z');
+        
+        svg.appendChild(path1);
+        svg.appendChild(path2);
+        captureBtn.appendChild(svg);
+        badge.appendChild(captureBtn);
+
+        captureBtn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const tweet = element.closest(SELECTORS.TWEET);
+            if (tweet) {
+                captureEvidence(tweet, info, screenName);
+            } else {
+                console.warn('X-Posed: Could not find tweet to capture');
+            }
+        });
+    }
 
     const insertionPoint = isUserCell
         ? findUserCellInsertionPoint(element, screenName)
