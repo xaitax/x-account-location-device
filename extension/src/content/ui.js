@@ -8,7 +8,7 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { SELECTORS, CSS_CLASSES, TIMING } from '../shared/constants.js';
-import { findInsertionPoint, getFlagEmoji, getDeviceEmoji, debounce, throttle } from '../shared/utils.js';
+import { findInsertionPoint, getFlagEmoji, getDeviceEmoji, getDeviceCountry, formatCountryName, debounce, throttle } from '../shared/utils.js';
 import { showModal } from './modal.js';
 import { captureEvidence } from './evidence-capture.js';
 import { hovercard } from './hovercard.js';
@@ -66,7 +66,7 @@ export function detectXTheme() {
 
     // Check CSS variable first
     const bgColor = window.getComputedStyle(document.documentElement).getPropertyValue('--background-color').trim();
-    
+
     if (bgColor) {
         if (bgColor.includes('255, 255, 255') || bgColor === '#ffffff' || bgColor === 'white') {
             return 'light';
@@ -78,23 +78,23 @@ export function detectXTheme() {
             return 'dark';
         }
     }
-    
+
     // Fallback: check body background
     const bodyBg = window.getComputedStyle(document.body).backgroundColor;
-    
+
     if (bodyBg) {
         if (bodyBg.includes('255, 255, 255')) return 'light';
         if (bodyBg.includes('21, 32, 43')) return 'dim';
         if (bodyBg.includes('0, 0, 0')) return 'dark';
     }
-    
+
     // Check HTML background as last resort
     const htmlBg = window.getComputedStyle(document.documentElement).backgroundColor;
     if (htmlBg) {
         if (htmlBg.includes('255, 255, 255')) return 'light';
         if (htmlBg.includes('21, 32, 43')) return 'dim';
     }
-    
+
     return 'dark'; // Default
 }
 
@@ -118,23 +118,23 @@ export function startThemeObserver() {
     const throttledThemeDetection = throttle(() => {
         detectAndApplyTheme();
     }, 500);
-    
+
     themeObserver = new MutationObserver(() => {
         throttledThemeDetection();
     });
-    
+
     themeObserver.observe(document.documentElement, {
         attributes: true,
         attributeFilter: ['style', 'class']
     });
-    
+
     if (document.body) {
         themeObserver.observe(document.body, {
             attributes: true,
             attributeFilter: ['style', 'class']
         });
     }
-    
+
     // Use keyed cleanup to prevent duplicate registrations
     registerCleanup('themeObserver', () => {
         if (themeObserver) {
@@ -171,52 +171,52 @@ function getToastContainer() {
  */
 export function showToast({ title, message, icon = '⏳', iconType = 'warning', duration = 8000 }) {
     const container = getToastContainer();
-    
+
     const toast = document.createElement('div');
     toast.className = 'x-toast';
-    
+
     // Icon
     const iconEl = document.createElement('div');
     iconEl.className = `x-toast-icon x-toast-icon-${iconType}`;
     iconEl.textContent = icon;
     toast.appendChild(iconEl);
-    
+
     // Content
     const contentEl = document.createElement('div');
     contentEl.className = 'x-toast-content';
-    
+
     const titleEl = document.createElement('div');
     titleEl.className = 'x-toast-title';
     titleEl.textContent = title;
     contentEl.appendChild(titleEl);
-    
+
     const messageEl = document.createElement('div');
     messageEl.className = 'x-toast-message';
     // Use textContent for safety, construct time badge safely if needed
     messageEl.textContent = message;
     contentEl.appendChild(messageEl);
-    
+
     toast.appendChild(contentEl);
-    
+
     // Close button (built with safe DOM methods)
     const closeBtn = document.createElement('button');
     closeBtn.className = 'x-toast-close';
     closeBtn.setAttribute('aria-label', 'Dismiss');
-    
+
     const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     closeSvg.setAttribute('viewBox', '0 0 24 24');
     closeSvg.setAttribute('fill', 'none');
     closeSvg.setAttribute('stroke', 'currentColor');
     closeSvg.setAttribute('stroke-width', '2');
-    
+
     const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     closePath.setAttribute('d', 'M18 6L6 18M6 6l12 12');
     closeSvg.appendChild(closePath);
     closeBtn.appendChild(closeSvg);
-    
+
     closeBtn.addEventListener('click', () => dismissToast(toast));
     toast.appendChild(closeBtn);
-    
+
     // Progress bar for auto-dismiss
     if (duration > 0) {
         const progress = document.createElement('div');
@@ -224,14 +224,14 @@ export function showToast({ title, message, icon = '⏳', iconType = 'warning', 
         progress.style.animationDuration = `${duration}ms`;
         toast.appendChild(progress);
     }
-    
+
     container.appendChild(toast);
-    
+
     // Auto-dismiss
     if (duration > 0) {
         setTimeout(() => dismissToast(toast), duration);
     }
-    
+
     return toast;
 }
 
@@ -240,9 +240,9 @@ export function showToast({ title, message, icon = '⏳', iconType = 'warning', 
  */
 export function dismissToast(toast) {
     if (!toast || !toast.isConnected) return;
-    
+
     toast.classList.add('x-toast-hiding');
-    
+
     setTimeout(() => {
         if (toast.isConnected) {
             toast.remove();
@@ -257,7 +257,7 @@ export function dismissToast(toast) {
 export function showRateLimitToast(timeUntilReset) {
     // Sanitize the time string to prevent XSS
     const sanitizedTime = sanitizeText(timeUntilReset);
-    
+
     showToastWithTimeBadge({
         title: 'Rate Limit Reached',
         message: 'X API limit hit. Resets in',
@@ -274,31 +274,31 @@ export function showRateLimitToast(timeUntilReset) {
  */
 function showToastWithTimeBadge({ title, message, timeBadge, icon = '⏳', iconType = 'warning', duration = 8000 }) {
     const container = getToastContainer();
-    
+
     const toast = document.createElement('div');
     toast.className = 'x-toast';
-    
+
     // Icon
     const iconEl = document.createElement('div');
     iconEl.className = `x-toast-icon x-toast-icon-${iconType}`;
     iconEl.textContent = icon;
     toast.appendChild(iconEl);
-    
+
     // Content
     const contentEl = document.createElement('div');
     contentEl.className = 'x-toast-content';
-    
+
     const titleEl = document.createElement('div');
     titleEl.className = 'x-toast-title';
     titleEl.textContent = title;
     contentEl.appendChild(titleEl);
-    
+
     const messageEl = document.createElement('div');
     messageEl.className = 'x-toast-message';
-    
+
     // Add message text
     messageEl.appendChild(document.createTextNode(message + ' '));
-    
+
     // Add time badge safely using DOM methods
     if (timeBadge) {
         const timeBadgeEl = document.createElement('span');
@@ -306,29 +306,29 @@ function showToastWithTimeBadge({ title, message, timeBadge, icon = '⏳', iconT
         timeBadgeEl.textContent = timeBadge;
         messageEl.appendChild(timeBadgeEl);
     }
-    
+
     contentEl.appendChild(messageEl);
     toast.appendChild(contentEl);
-    
+
     // Close button
     const closeBtn = document.createElement('button');
     closeBtn.className = 'x-toast-close';
     closeBtn.setAttribute('aria-label', 'Dismiss');
-    
+
     const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     closeSvg.setAttribute('viewBox', '0 0 24 24');
     closeSvg.setAttribute('fill', 'none');
     closeSvg.setAttribute('stroke', 'currentColor');
     closeSvg.setAttribute('stroke-width', '2');
-    
+
     const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     closePath.setAttribute('d', 'M18 6L6 18M6 6l12 12');
     closeSvg.appendChild(closePath);
     closeBtn.appendChild(closeSvg);
-    
+
     closeBtn.addEventListener('click', () => dismissToast(toast));
     toast.appendChild(closeBtn);
-    
+
     // Progress bar for auto-dismiss
     if (duration > 0) {
         const progress = document.createElement('div');
@@ -336,14 +336,14 @@ function showToastWithTimeBadge({ title, message, timeBadge, icon = '⏳', iconT
         progress.style.animationDuration = `${duration}ms`;
         toast.appendChild(progress);
     }
-    
+
     container.appendChild(toast);
-    
+
     // Auto-dismiss
     if (duration > 0) {
         setTimeout(() => dismissToast(toast), duration);
     }
-    
+
     return toast;
 }
 
@@ -377,21 +377,21 @@ function createTwemojiImage(imgTag, altText) {
     if (!srcMatch || !srcMatch[1]) {
         return null;
     }
-    
+
     const src = srcMatch[1];
-    
+
     // Validate URL is from trusted Twemoji CDN
     if (!src.startsWith('https://abs-0.twimg.com/emoji/v2/svg/')) {
         return null;
     }
-    
+
     // Create image element safely
     const img = document.createElement('img');
     img.src = src;
     img.className = 'x-flag-emoji';
     img.alt = sanitizeText(altText) || 'flag';
     img.style.cssText = 'height: 1.2em; vertical-align: -0.2em;';
-    
+
     return img;
 }
 
@@ -405,7 +405,7 @@ export function findUserCellInsertionPoint(userCell, screenName) {
             return { target: span.parentElement, ref: span.nextSibling };
         }
     }
-    
+
     const nameLinks = userCell.querySelectorAll('a[href="/' + screenName + '"]');
     for (const link of nameLinks) {
         const nameSpan = link.querySelector('span span');
@@ -413,7 +413,7 @@ export function findUserCellInsertionPoint(userCell, screenName) {
             return { target: link, ref: null };
         }
     }
-    
+
     return null;
 }
 
@@ -427,21 +427,27 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
 
     const badge = document.createElement('span');
     badge.className = CSS_CLASSES.INFO_BADGE;
-    
+
     let hasContent = false;
 
     // Add flag
-    if (info.location && settings.showFlags !== false) {
-        const flag = getFlagEmoji(info.location);
+    if (settings.showFlags !== false) {
+        // Optionally show the flag of the device's country instead of the
+        // account location
+        // Web/unknown sources have no country, so we fall back to location.
+        const deviceCountry = settings.flagFromDevice ? getDeviceCountry(info.device) : null;
+        const flagCountry = deviceCountry || info.location;
+        const flag = flagCountry ? getFlagEmoji(flagCountry) : null;
         if (flag) {
+            const flagLabel = deviceCountry ? formatCountryName(deviceCountry) : info.location;
             const flagSpan = document.createElement('span');
             flagSpan.className = 'x-flag';
-            flagSpan.title = sanitizeText(info.location);
-            
+            flagSpan.title = sanitizeText(flagLabel);
+
             // Handle Twemoji img tags safely using DOM methods
             if (typeof flag === 'string' && flag.startsWith('<img')) {
                 // Parse the trusted Twemoji img tag safely
-                const imgEl = createTwemojiImage(flag, info.location);
+                const imgEl = createTwemojiImage(flag, flagLabel);
                 if (imgEl) {
                     flagSpan.appendChild(imgEl);
                 } else {
@@ -490,20 +496,20 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
         captureBtn.className = 'x-capture-btn';
         captureBtn.title = 'Capture evidence screenshot';
         captureBtn.setAttribute('aria-label', 'Capture evidence');
-        
+
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('viewBox', '0 0 24 24');
         svg.setAttribute('width', '14');
         svg.setAttribute('height', '14');
-        
+
         const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path1.setAttribute('fill', 'currentColor');
         path1.setAttribute('d', 'M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z');
-        
+
         const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path2.setAttribute('fill', 'currentColor');
         path2.setAttribute('d', 'M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z');
-        
+
         svg.appendChild(path1);
         svg.appendChild(path2);
         captureBtn.appendChild(svg);
@@ -512,7 +518,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
         captureBtn.addEventListener('click', e => {
             e.preventDefault();
             e.stopPropagation();
-            
+
             const tweet = element.closest(SELECTORS.TWEET);
             if (tweet) {
                 captureEvidence(tweet, info, screenName);
@@ -525,7 +531,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     const insertionPoint = isUserCell
         ? findUserCellInsertionPoint(element, screenName)
         : findInsertionPoint(element, screenName);
-        
+
     if (insertionPoint) {
         insertionPoint.target.insertBefore(badge, insertionPoint.ref);
         if (debug) debug(`Badge inserted for @${screenName}${isUserCell ? ' (UserCell)' : ''}`);
@@ -549,7 +555,7 @@ export function injectSidebarLink(settings, debug, blockedCountries, blockedRegi
         if (debug) debug('Sidebar blocker link disabled in settings');
         return;
     }
-    
+
     // Clear any existing interval/timeout
     if (sidebarCheckInterval) {
         clearInterval(sidebarCheckInterval);
@@ -559,7 +565,7 @@ export function injectSidebarLink(settings, debug, blockedCountries, blockedRegi
         clearTimeout(sidebarCheckTimeout);
         sidebarCheckTimeout = null;
     }
-    
+
     sidebarCheckInterval = setInterval(() => {
         let nav = document.querySelector(SELECTORS.PRIMARY_NAV);
 
@@ -591,7 +597,7 @@ export function injectSidebarLink(settings, debug, blockedCountries, blockedRegi
                 clearTimeout(sidebarCheckTimeout);
                 sidebarCheckTimeout = null;
             }
-            
+
             currentNav = nav;
             addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
             observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
@@ -606,7 +612,7 @@ export function injectSidebarLink(settings, debug, blockedCountries, blockedRegi
             if (debug) debug('Sidebar check timed out');
         }
     }, TIMING.SIDEBAR_TIMEOUT_MS);
-    
+
     // Use keyed cleanup to prevent duplicate registrations
     registerCleanup('sidebarCheck', () => {
         if (sidebarCheckInterval) {
@@ -630,16 +636,16 @@ function observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRe
 
     sidebarObserver = new MutationObserver(() => {
         if (sidebarModifying) return;
-        
+
         const ourLink = document.getElementById('x-country-blocker-link');
         const profileLink = nav.querySelector(SELECTORS.PROFILE_LINK);
-        
+
         if (!ourLink && profileLink && settings.showSidebarBlockerLink !== false) {
             if (debug) debug('Sidebar link removed, re-injecting...');
-            
+
             sidebarObserver.disconnect();
             addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
-            
+
             setTimeout(() => {
                 if (sidebarObserver && nav.isConnected) {
                     sidebarObserver.observe(nav, {
@@ -655,7 +661,7 @@ function observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRe
         childList: true,
         subtree: true
     });
-    
+
     // Use keyed cleanup to prevent duplicate registrations
     registerCleanup('sidebarObserver', () => {
         if (sidebarObserver) {
@@ -670,31 +676,31 @@ function observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRe
  */
 function setupResizeHandler(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
     let resizeHandler = null;
-    
+
     if (resizeHandler) {
         window.removeEventListener('resize', resizeHandler);
     }
-    
+
     resizeHandler = debounce(() => {
         if (!currentNav || settings.showSidebarBlockerLink === false) return;
-        
+
         sidebarModifying = true;
-        
+
         const existingLink = document.getElementById('x-country-blocker-link');
         if (existingLink) {
             existingLink.remove();
         }
-        
+
         addBlockerLink(currentNav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
         if (debug) debug('Sidebar link refreshed after resize');
-        
+
         setTimeout(() => {
             sidebarModifying = false;
         }, 50);
     }, TIMING.RESIZE_DEBOUNCE_MS);
-    
+
     window.addEventListener('resize', resizeHandler);
-    
+
     // Use keyed cleanup to prevent duplicate registrations
     registerCleanup('resizeHandler', () => {
         if (resizeHandler) {
@@ -723,17 +729,17 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
 
     const profileLink = nav.querySelector(SELECTORS.PROFILE_LINK);
     if (!profileLink) return;
-    
+
     sidebarModifying = true;
 
     const link = profileLink.cloneNode(true);
-    
+
     link.id = 'x-country-blocker-link';
     link.classList.add('x-blocker-nav-link');
     link.href = '#';
     link.removeAttribute('data-testid');
     link.setAttribute('aria-label', 'Block Countries & Regions');
-    
+
     const svg = link.querySelector('svg');
     if (svg) {
         // Clear existing content safely
@@ -747,7 +753,7 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
         g.appendChild(path);
         svg.appendChild(g);
     }
-    
+
     const textDiv = link.querySelector('[dir="ltr"]');
     if (textDiv) {
         const spans = textDiv.querySelectorAll('span');
@@ -773,7 +779,7 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
     };
 
     profileLink.parentElement.insertBefore(link, profileLink.nextSibling);
-    
+
     setTimeout(() => {
         sidebarModifying = false;
     }, 50);
@@ -789,7 +795,7 @@ function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE
             type: MESSAGE_TYPES.SET_BLOCKED_COUNTRIES,
             payload: { action, country }
         });
-        
+
         if (response?.success) {
             // Update the reference (caller needs to handle this)
             blockedCountries.clear();
@@ -797,17 +803,17 @@ function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE
                 blockedCountries.add(c);
             }
         }
-        
+
         return response;
     };
-    
+
     // Region action handler
     const onRegionAction = async (action, region) => {
         const response = await sendMessage({
             type: MESSAGE_TYPES.SET_BLOCKED_REGIONS,
             payload: { action, region }
         });
-        
+
         if (response?.success) {
             // Update the reference (caller needs to handle this)
             blockedRegions.clear();
@@ -815,31 +821,31 @@ function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE
                 blockedRegions.add(r);
             }
         }
-        
+
         return response;
     };
-    
+
     // Get blockedTags from the global state (window.__X_POSED_CONTENT__)
     const state = window.__X_POSED_CONTENT__?.getState?.() || {};
     const blockedTags = new Set(state.blockedTags || []);
-    
+
     // Tag action handler
     const onTagAction = async (action, tag) => {
         const response = await sendMessage({
             type: MESSAGE_TYPES.SET_BLOCKED_TAGS,
             payload: { action, tag }
         });
-        
+
         if (response?.success) {
             blockedTags.clear();
             for (const t of response.data) {
                 blockedTags.add(t);
             }
         }
-        
+
         return response;
     };
-    
+
     showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags, onTagAction);
 }
 
@@ -890,7 +896,7 @@ export function cleanupUI() {
         }
     }
     cleanupRegistry.clear();
-    
+
     if (resizeTimeout) {
         clearTimeout(resizeTimeout);
         resizeTimeout = null;

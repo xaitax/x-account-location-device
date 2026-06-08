@@ -4,7 +4,7 @@
  */
 
 import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, isRegion } from '../shared/constants.js';
-import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText } from '../shared/utils.js';
+import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
 
@@ -412,6 +412,20 @@ export function processElementsBatch(elements, processElementSafe, debug) {
 // ============================================
 
 /**
+ * Get the effective country for blocking/display.
+ * When flagFromDevice is enabled, use the device's country; otherwise use
+ * the account location. Returns null for web/unknown sources (graceful
+ * fallback to location in callers that need it).
+ */
+function effectiveCountry(info, flagFromDevice) {
+    if (flagFromDevice && info?.device) {
+        const deviceCountry = getDeviceCountry(info.device);
+        if (deviceCountry) return deviceCountry;
+    }
+    return info?.location || null;
+}
+
+/**
  * Safe wrapper for processElement with error boundary
  */
 export function createProcessElementSafe(processElement) {
@@ -519,22 +533,23 @@ export async function processElement(element, {
         if (debug) debug(`Using local cache for @${screenName}`);
         const info = userInfoCache.get(screenName);
         if (info) {
-            element.dataset.xCountry = info.location || '';
+            const effCountry = effectiveCountry(info, settings.flagFromDevice);
+            element.dataset.xCountry = effCountry || '';
             element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
-            element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
-                
+            element.dataset.xIsRegion = isRegion(effCountry) ? 'true' : '';
+
             // Handle blocked country or region - only for main tweet author, not quoted tweets
-            if (info.location) {
-                const locationLower = info.location.toLowerCase();
+            if (effCountry) {
+                const locationLower = effCountry.toLowerCase();
                 const isBlockedCountry = blockedCountries.has(locationLower);
                 const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
-                
+
                 if (isBlockedCountry || isBlockedRegion) {
                     // Only block/highlight if this is the main tweet author, not a quoted user
                     const isQuote = isInsideQuoteTweet(element);
                     const loggedInUser = getLoggedInUsername();
                     const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
-                    
+
                     if (!isQuote && !isSelf) {
                         const tweet = element.closest(SELECTORS.TWEET);
                         if (tweet) {
@@ -595,19 +610,20 @@ export async function processElement(element, {
         if (userInfoCache.has(screenName)) {
             const info = userInfoCache.get(screenName);
             if (info) {
-                element.dataset.xCountry = info.location || '';
-                element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
-                if (info.location) {
-                    const locationLower = info.location.toLowerCase();
+                const effCountry = effectiveCountry(info, settings.flagFromDevice);
+                element.dataset.xCountry = effCountry || '';
+                element.dataset.xIsRegion = isRegion(effCountry) ? 'true' : '';
+                if (effCountry) {
+                    const locationLower = effCountry.toLowerCase();
                     const isBlockedCountry = blockedCountries.has(locationLower);
                     const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
-                    
+
                     if (isBlockedCountry || isBlockedRegion) {
                         // Only block/highlight if not inside a quote tweet
                         const isQuote = isInsideQuoteTweet(element);
                         const loggedInUser = getLoggedInUsername();
                         const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
-                        
+
                         if (!isQuote && !isSelf) {
                             const tweet = element.closest(SELECTORS.TWEET);
                             if (tweet) {
@@ -720,19 +736,20 @@ export async function processElement(element, {
         if (debug) debug(`Received data for @${screenName}:`, { location: info.location, device: info.device });
         
         userInfoCache.set(screenName, info);
-        
-        element.dataset.xCountry = info.location || '';
+
+        const effCountry = effectiveCountry(info, settings.flagFromDevice);
+        element.dataset.xCountry = effCountry || '';
         element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
-        element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
+        element.dataset.xIsRegion = isRegion(effCountry) ? 'true' : '';
 
         // Handle blocked country or region
         // Only block/highlight if this is NOT inside a quote tweet (we only care about main tweet author)
         const isQuote = isInsideQuoteTweet(element);
-        if (info.location && !isQuote) {
-            const locationLower = info.location.toLowerCase();
+        if (effCountry && !isQuote) {
+            const locationLower = effCountry.toLowerCase();
             const isBlockedCountry = blockedCountries.has(locationLower);
             const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
-            
+
             if (isBlockedCountry || isBlockedRegion) {
                 const tweet = element.closest(SELECTORS.TWEET);
                 if (tweet) {

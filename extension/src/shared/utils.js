@@ -20,7 +20,7 @@ import { COUNTRY_FLAGS } from './constants.js';
 export const logger = (() => {
     let debugEnabled = false;
     const PREFIX = 'X-Posed:';
-    
+
     return {
         setDebugMode: enabled => { debugEnabled = enabled; },
         debug: (...args) => { if (debugEnabled) console.log('🔍', PREFIX, ...args); },
@@ -43,7 +43,7 @@ export function debounce(func, wait, immediate = false) {
     let timeout;
     return function executedFunction(...args) {
         const context = this;
-        const later = function() {
+        const later = function () {
             timeout = null;
             if (!immediate) func.apply(context, args);
         };
@@ -64,11 +64,11 @@ export function debounce(func, wait, immediate = false) {
 export function throttle(func, wait) {
     let lastCall = 0;
     let timeout = null;
-    
+
     return function executedFunction(...args) {
         const now = Date.now();
         const remaining = wait - (now - lastCall);
-        
+
         if (remaining <= 0) {
             if (timeout) {
                 clearTimeout(timeout);
@@ -122,10 +122,10 @@ export function cancelIdleCallback(id) {
  */
 export async function processBatch(items, processor, batchSize = 10) {
     const results = [];
-    
+
     for (let i = 0; i < items.length; i += batchSize) {
         const batch = items.slice(i, i + batchSize);
-        
+
         await new Promise(resolve => {
             requestIdleCallback(async deadline => {
                 for (const item of batch) {
@@ -142,7 +142,7 @@ export async function processBatch(items, processor, batchSize = 10) {
             }, { timeout: 100 });
         });
     }
-    
+
     return results;
 }
 
@@ -153,12 +153,12 @@ export async function processBatch(items, processor, batchSize = 10) {
  */
 function isWindowsPlatform() {
     if (typeof navigator === 'undefined') return false;
-    
+
     // Modern API (Chrome 90+, Edge 90+)
     if (navigator.userAgentData?.platform) {
         return navigator.userAgentData.platform === 'Windows';
     }
-    
+
     // Fallback to userAgent parsing
     return /Windows|Win32|Win64|WOW64/.test(navigator.userAgent);
 }
@@ -171,23 +171,23 @@ function isWindowsPlatform() {
  */
 export function getFlagEmoji(countryName) {
     if (!countryName) return null;
-    
+
     const normalized = countryName.trim().toLowerCase();
     const emoji = COUNTRY_FLAGS[normalized] || '🌍';
-    
+
     // Check if we are on Windows (which doesn't support flag emojis well)
     if (isWindowsPlatform() && emoji !== '🌍') {
         // Convert emoji to Twemoji URL
         const codePoints = Array.from(emoji)
             .map(c => c.codePointAt(0).toString(16))
             .join('-');
-        
+
         return `<img src="https://abs-0.twimg.com/emoji/v2/svg/${codePoints}.svg"
                 class="x-flag-emoji"
                 alt="${emoji}"
                 style="height: 1.2em; vertical-align: -0.2em;">`;
     }
-    
+
     return emoji;
 }
 
@@ -234,20 +234,42 @@ export function getCountryCode(location) {
  */
 export function getDeviceEmoji(deviceString) {
     if (!deviceString) return null;
-    
+
     const d = deviceString.toLowerCase();
-    
+
     // iOS devices (App Store = iPhone/iPad)
     if (d.includes('app store')) return '🍎';
-    
+
     // Android devices
     if (d.includes('android')) return '🤖';
-    
+
     // Web clients (could be desktop or mobile browser - we can't distinguish)
     if (d.includes('web') || d === 'x' || d === 'twitter') return '🌐';
-    
+
     // Unknown device type
     return '❓';
+}
+
+/**
+ * Extract the country name from a device/source string.
+ * The country is always at the start, followed by the platform.
+ * Web/unknown sources have no country (just "Web"), so we return
+ * null and let the caller fall back to the account location.
+ * @param {string|null|undefined} deviceString - The device/client string from X API
+ * @returns {string|null} - Country name (matching COUNTRY_FLAGS) or null
+ */
+export function getDeviceCountry(deviceString) {
+    if (!deviceString) return null;
+
+    // Peel platform words off the end until the prefix matches a known country
+    // (e.g. "russian federation android app" → "russian federation").
+    const words = deviceString.trim().toLowerCase().split(/\s+/);
+    for (let i = words.length; i > 0; i--) {
+        const candidate = words.slice(0, i).join(' ');
+        if (COUNTRY_FLAGS[candidate]) return candidate;
+    }
+
+    return null;
 }
 
 /**
@@ -324,7 +346,7 @@ export function findInsertionPoint(container, screenName) {
     // 1. Profile Header Specific Logic
     const isProfileHeader = !container.querySelector('time') &&
         (container.querySelector('[data-testid="userFollowIndicator"]') !== null ||
-        (container.getAttribute('data-testid') === 'UserName' && container.className.includes('r-14gqq1x')));
+            (container.getAttribute('data-testid') === 'UserName' && container.className.includes('r-14gqq1x')));
 
     if (isProfileHeader) {
         const nameContainer = container.querySelector('div[dir="ltr"]');
@@ -342,7 +364,7 @@ export function findInsertionPoint(container, screenName) {
     const handleLink = links.find(l =>
         l.textContent.trim().toLowerCase() === `@${screenName.toLowerCase()}`
     );
-    
+
     if (handleLink) {
         // Navigate up to find a suitable container
         const parent = handleLink.parentNode;
@@ -394,7 +416,7 @@ export function findInsertionPoint(container, screenName) {
  */
 export function createElement(tag, attributes = {}, children = []) {
     const element = document.createElement(tag);
-    
+
     for (const [key, value] of Object.entries(attributes)) {
         if (key === 'className') {
             element.className = value;
@@ -411,7 +433,7 @@ export function createElement(tag, attributes = {}, children = []) {
             element.setAttribute(key, value);
         }
     }
-    
+
     for (const child of children) {
         if (typeof child === 'string') {
             element.appendChild(document.createTextNode(child));
@@ -419,7 +441,7 @@ export function createElement(tag, attributes = {}, children = []) {
             element.appendChild(child);
         }
     }
-    
+
     return element;
 }
 
@@ -478,7 +500,7 @@ export function sleep(ms) {
  */
 export async function retry(fn, maxRetries = 3, baseDelay = 1000) {
     let lastError;
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             return await fn();
@@ -490,7 +512,7 @@ export async function retry(fn, maxRetries = 3, baseDelay = 1000) {
             }
         }
     }
-    
+
     throw lastError;
 }
 
@@ -574,11 +596,11 @@ export function detectXTheme() {
     if (typeof document !== 'undefined') {
         const htmlElement = document.documentElement;
         const xTheme = htmlElement.getAttribute('data-theme');
-        
+
         if (xTheme) {
             return xTheme; // "dark", "dim", or "light"
         }
-        
+
         // Fallback: check background color
         const bgColor = window.getComputedStyle(document.body).backgroundColor;
         if (bgColor) {
@@ -588,7 +610,7 @@ export function detectXTheme() {
             if (bgColor === 'rgb(255, 255, 255)') return 'light';
         }
     }
-    
+
     // Default to dark
     return 'dark';
 }
@@ -606,7 +628,7 @@ export function applyTheme(theme, doc = document) {
  */
 export function observeThemeChanges(callback) {
     if (typeof document === 'undefined') return null;
-    
+
     const observer = new MutationObserver(mutations => {
         for (const mutation of mutations) {
             if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
@@ -615,12 +637,12 @@ export function observeThemeChanges(callback) {
             }
         }
     });
-    
+
     observer.observe(document.documentElement, {
         attributes: true,
         attributeFilter: ['data-theme']
     });
-    
+
     return observer;
 }
 
@@ -645,32 +667,32 @@ export function calculateStatistics(cacheEntries) {
         topCountries: [],
         topDevices: []
     };
-    
+
     if (!cacheEntries || !Array.isArray(cacheEntries)) {
         return stats;
     }
-    
+
     stats.totalUsers = cacheEntries.length;
-    
+
     for (const entry of cacheEntries) {
         // Count by country
         if (entry.location) {
             const country = entry.location.toLowerCase();
             stats.countryCounts[country] = (stats.countryCounts[country] || 0) + 1;
         }
-        
+
         // Count by device
         if (entry.device) {
             const deviceType = getDeviceCategory(entry.device);
             stats.deviceCounts[deviceType] = (stats.deviceCounts[deviceType] || 0) + 1;
         }
-        
+
         // Count VPN users
         if (entry.locationAccurate === false) {
             stats.vpnCount++;
         }
     }
-    
+
     // Sort and get top countries
     stats.topCountries = Object.entries(stats.countryCounts)
         .sort((a, b) => b[1] - a[1])
@@ -680,7 +702,7 @@ export function calculateStatistics(cacheEntries) {
             count,
             percentage: Math.round((count / stats.totalUsers) * 100)
         }));
-    
+
     // Sort and get device distribution
     stats.topDevices = Object.entries(stats.deviceCounts)
         .sort((a, b) => b[1] - a[1])
@@ -689,7 +711,7 @@ export function calculateStatistics(cacheEntries) {
             count,
             percentage: Math.round((count / stats.totalUsers) * 100)
         }));
-    
+
     return stats;
 }
 
@@ -701,18 +723,18 @@ export function calculateStatistics(cacheEntries) {
  */
 function getDeviceCategory(deviceString) {
     if (!deviceString) return 'Unknown';
-    
+
     const d = deviceString.toLowerCase();
-    
+
     // iOS devices (App Store = iPhone/iPad)
     if (d.includes('app store')) return 'iOS';
-    
+
     // Android devices
     if (d.includes('android')) return 'Android';
-    
+
     // Web clients (desktop or mobile browser)
     if (d.includes('web') || d === 'x' || d === 'twitter') return 'Web';
-    
+
     return 'Unknown';
 }
 
@@ -727,9 +749,9 @@ function getDeviceCategory(deviceString) {
  */
 export function extractTagsFromText(text) {
     if (!text || typeof text !== 'string') return [];
-    
+
     const tags = new Set();
-    
+
     // Comprehensive emoji regex pattern
     // Matches most emoji including:
     // - Basic emoji (😀-🙏)
@@ -738,21 +760,21 @@ export function extractTagsFromText(text) {
     // - Compound emojis with ZWJ (👨‍👩‍👧)
     // - Emoji with variation selectors
     const emojiRegex = /(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Component})+(?:\u200D(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Component})+)*/gu;
-    
+
     // Extract all emojis
     const emojiMatches = text.match(emojiRegex);
     if (emojiMatches) {
         for (const emoji of emojiMatches) {
             // Skip common punctuation that might match as emoji components
-            if (emoji === '#' || emoji === '*' || emoji === '0' || emoji === '1' || 
-                emoji === '2' || emoji === '3' || emoji === '4' || emoji === '5' || 
+            if (emoji === '#' || emoji === '*' || emoji === '0' || emoji === '1' ||
+                emoji === '2' || emoji === '3' || emoji === '4' || emoji === '5' ||
                 emoji === '6' || emoji === '7' || emoji === '8' || emoji === '9') {
                 continue;
             }
             tags.add(emoji);
         }
     }
-    
+
     // Also extract common symbolic patterns users put in names
     // These are patterns like: ⭐, ✨, 🔥, 💀, etc. that might not be caught above
     // And text-based tags in brackets/parentheses like: [BOT], (parody), etc.
@@ -762,7 +784,7 @@ export function extractTagsFromText(text) {
             tags.add(pattern);
         }
     }
-    
+
     // Extract hashtag-like patterns without the #
     // E.g., in "John #MAGA Smith" we extract "MAGA"
     const hashtagMatches = text.match(/#(\w{2,20})/g);
@@ -771,7 +793,7 @@ export function extractTagsFromText(text) {
             tags.add(hashtag);
         }
     }
-    
+
     return Array.from(tags);
 }
 

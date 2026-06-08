@@ -16,6 +16,7 @@ const elements = {
     optDebug: document.getElementById('opt-debug'),
     // Display
     optFlags: document.getElementById('opt-flags'),
+    optFlagDevice: document.getElementById('opt-flag-device'),
     optDevices: document.getElementById('opt-devices'),
     optVpn: document.getElementById('opt-vpn'),
     optCaptureButton: document.getElementById('opt-capture-button'),
@@ -217,6 +218,9 @@ async function loadSettings() {
             elements.optEnabled.checked = currentSettings.enabled !== false;
             elements.optDebug.checked = currentSettings.debugMode === true;
             elements.optFlags.checked = currentSettings.showFlags !== false;
+            if (elements.optFlagDevice) {
+                elements.optFlagDevice.checked = currentSettings.flagFromDevice === true;
+            }
             elements.optDevices.checked = currentSettings.showDevices !== false;
             elements.optVpn.checked = currentSettings.showVpnIndicator !== false;
             if (elements.optCaptureButton) {
@@ -1291,6 +1295,12 @@ function setupEventListeners() {
     elements.optFlags.addEventListener('change', e => {
         saveSettings({ showFlags: e.target.checked });
     });
+
+    if (elements.optFlagDevice) {
+        elements.optFlagDevice.addEventListener('change', e => {
+            saveSettings({ flagFromDevice: e.target.checked });
+        });
+    }
 
     elements.optDevices.addEventListener('change', e => {
         saveSettings({ showDevices: e.target.checked });

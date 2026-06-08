@@ -172,6 +172,7 @@ export const MESSAGE_TYPES = {
 export const DEFAULT_SETTINGS = {
     enabled: true,
     showFlags: true,
+    flagFromDevice: false,  // Use the device's country for the flag (fallback to location)
     showDevices: true,
     showVpnIndicator: true,
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected

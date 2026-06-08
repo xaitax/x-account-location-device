@@ -11,6 +11,7 @@ import { applyTheme } from '../shared/utils.js';
 const elements = {
     toggleEnabled: document.getElementById('toggle-enabled'),
     toggleFlags: document.getElementById('toggle-flags'),
+    toggleFlagDevice: document.getElementById('toggle-flag-device'),
     toggleDevices: document.getElementById('toggle-devices'),
     toggleVpn: document.getElementById('toggle-vpn'),
     toggleCaptureButton: document.getElementById('toggle-capture-button'),
@@ -162,6 +163,7 @@ async function loadSettings() {
             
             elements.toggleEnabled.checked = settings.enabled !== false;
             elements.toggleFlags.checked = settings.showFlags !== false;
+            elements.toggleFlagDevice.checked = settings.flagFromDevice === true;
             elements.toggleDevices.checked = settings.showDevices !== false;
             elements.toggleVpn.checked = settings.showVpnIndicator !== false;
             elements.toggleCaptureButton.checked = settings.showCaptureButton !== false;
@@ -228,6 +230,10 @@ function setupEventListeners() {
     // Display toggles
     elements.toggleFlags.addEventListener('change', async e => {
         await saveSettings({ showFlags: e.target.checked });
+    });
+
+    elements.toggleFlagDevice.addEventListener('change', async e => {
+        await saveSettings({ flagFromDevice: e.target.checked });
     });
 
     elements.toggleDevices.addEventListener('change', async e => {

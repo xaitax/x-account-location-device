@@ -13,7 +13,7 @@
 // @run-at       document-start
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     /**
@@ -109,6 +109,7 @@
             this.fetchPromises = new Map(); // Track active promises
             this.observer = null;
             this.isEnabled = true;
+            this.flagFromDevice = false;
             this.blockedCountries = new Set();
 
             this.init();
@@ -122,7 +123,7 @@
             this.loadBlockedCountries();
             this.setupInterceptors();
             this.exposeAPI();
-            
+
             // Inject styles and start observing when DOM is ready
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', () => {
@@ -145,10 +146,10 @@
          */
         setupInterceptors() {
             const self = this;
-            
+
             // Intercept Fetch
             const originalFetch = window.fetch;
-            window.fetch = function(url, options) {
+            window.fetch = function (url, options) {
                 if (typeof url === 'string' && url.includes('x.com/i/api/graphql') && options?.headers) {
                     self.captureHeaders(options.headers);
                 }
@@ -160,18 +161,18 @@
             const originalSend = XMLHttpRequest.prototype.send;
             const originalSetHeader = XMLHttpRequest.prototype.setRequestHeader;
 
-            XMLHttpRequest.prototype.open = function(method, url) {
+            XMLHttpRequest.prototype.open = function (method, url) {
                 this._url = url;
                 return originalOpen.apply(this, arguments);
             };
 
-            XMLHttpRequest.prototype.setRequestHeader = function(header, value) {
+            XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
                 if (!this._headers) this._headers = {};
                 this._headers[header] = value;
                 return originalSetHeader.apply(this, arguments);
             };
 
-            XMLHttpRequest.prototype.send = function() {
+            XMLHttpRequest.prototype.send = function () {
                 if (this._url?.includes('x.com/i/api/graphql') && this._headers) {
                     self.captureHeaders(this._headers);
                 }
@@ -181,9 +182,9 @@
 
         captureHeaders(headers) {
             if (this.headers) return; // Already captured
-            
+
             const headerObj = headers instanceof Headers ? Object.fromEntries(headers.entries()) : headers;
-            
+
             // Validate we have auth headers
             if (headerObj.authorization || headerObj['authorization']) {
                 this.headers = headerObj;
@@ -216,6 +217,9 @@
             try {
                 const stored = localStorage.getItem('x_location_enabled');
                 this.isEnabled = stored !== null ? JSON.parse(stored) : true;
+
+                const flagSource = localStorage.getItem('x_flag_from_device');
+                this.flagFromDevice = flagSource !== null ? JSON.parse(flagSource) : false;
             } catch (e) {
                 console.error('Failed to load settings', e);
             }
@@ -248,7 +252,7 @@
             try {
                 const raw = localStorage.getItem(CONFIG.CACHE_KEY);
                 if (!raw) return;
-                
+
                 const parsed = JSON.parse(raw);
                 const now = Date.now();
                 let count = 0;
@@ -271,11 +275,11 @@
                 const now = Date.now();
                 const expiry = now + CONFIG.CACHE_EXPIRY;
                 const exportData = {};
-                
+
                 this.cache.forEach((value, key) => {
                     exportData[key] = { value, expiry };
                 });
-                
+
                 localStorage.setItem(CONFIG.CACHE_KEY, JSON.stringify(exportData));
             } catch (e) {
                 console.error('Cache save failed', e);
@@ -354,7 +358,7 @@
             if (!headers) {
                 // Try fallback
                 headers = this.getFallbackHeaders();
-                
+
                 if (!headers) {
                     // Wait for headers
                     await new Promise(r => setTimeout(r, 2000));
@@ -392,7 +396,7 @@
 
             const data = await response.json();
             const profile = data?.data?.user_result_by_screen_name?.result?.about_profile;
-            
+
             return {
                 location: profile?.account_based_in || null,
                 device: profile?.source || null,
@@ -405,7 +409,7 @@
          */
         injectStyles() {
             if (document.getElementById(CONFIG.STYLES.SHIMMER_ID)) return;
-            
+
             const style = document.createElement('style');
             style.id = CONFIG.STYLES.SHIMMER_ID;
             style.textContent = `
@@ -522,22 +526,22 @@
         getFlagEmoji(countryName) {
             if (!countryName) return null;
             const emoji = COUNTRY_FLAGS[countryName.trim().toLowerCase()] || '🌍';
-            
+
             // Check if we are on Windows (which doesn't support flag emojis)
             const isWindows = navigator.platform.indexOf('Win') > -1;
-            
+
             if (isWindows && emoji !== '🌍') {
                 // Convert emoji to Twemoji URL
                 const codePoints = Array.from(emoji)
                     .map(c => c.codePointAt(0).toString(16))
                     .join('-');
-                
+
                 return `<img src="https://abs-0.twimg.com/emoji/v2/svg/${codePoints}.svg"
                         class="x-flag-emoji"
                         alt="${emoji}"
                         style="height: 1.2em; vertical-align: -0.2em;">`;
             }
-            
+
             return emoji;
         }
 
@@ -558,25 +562,51 @@
             return '📱';
         }
 
+        getDeviceCountry(deviceString) {
+            if (!deviceString) return null;
+
+            // Peel words off the end
+            // until the prefix matches a known country. Web/unknown sources have
+            // none, so we return null and let the caller fall back to location.
+            const words = deviceString.trim().toLowerCase().split(/\s+/);
+            for (let i = words.length; i > 0; i--) {
+                const candidate = words.slice(0, i).join(' ');
+                if (COUNTRY_FLAGS[candidate]) return candidate;
+            }
+
+            return null;
+        }
+
+        formatCountryName(country) {
+            if (!country) return '';
+            return country.split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
+        }
+
         async processElement(element) {
             // Skip if already processed
             if (element.dataset.xProcessed) return;
-            
+
             const screenName = this.extractUsername(element);
             if (!screenName) return;
 
             // Mark as processed immediately to prevent duplicates
             element.dataset.xProcessed = 'true';
-            
+
             // Store username for later reference
             element.dataset.xScreenName = screenName;
 
             try {
                 const info = await this.fetchUserInfo(screenName);
 
-                // Check if country is blocked FIRST before adding any UI
-                if (info && info.location) {
-                    const countryLower = info.location.trim().toLowerCase();
+                // Check if country is blocked FIRST before adding any UI.
+                // When flagFromDevice is on, the device country drives the
+                // block (falling back to location for web/unknown sources)
+                // so blocking matches the displayed flag.
+                const effCountry = (this.flagFromDevice && info.device ? this.getDeviceCountry(info.device) : null) || info.location;
+                if (effCountry) {
+                    const countryLower = effCountry.trim().toLowerCase();
                     if (this.blockedCountries.has(countryLower)) {
                         this.hideTweet(element);
                         return; // Exit early - don't add any badges/shimmers
@@ -596,18 +626,23 @@
                 if (info && (info.location || info.device)) {
                     const badge = document.createElement('span');
                     badge.className = 'x-info-badge';
-                    
+
                     let content = '';
-                    if (info.location) {
-                        const flag = this.getFlagEmoji(info.location);
-                        if (flag) content += `<span title="${info.location}">${flag}</span>`;
-                        
+                    // Optionally use the device's country for the flag, falling
+                    // back to location for web/unknown sources.
+                    const deviceCountry = this.flagFromDevice ? this.getDeviceCountry(info.device) : null;
+                    const flagCountry = deviceCountry || info.location;
+                    if (flagCountry) {
+                        const flag = this.getFlagEmoji(flagCountry);
+                        const flagLabel = deviceCountry ? this.formatCountryName(deviceCountry) : info.location;
+                        if (flag) content += `<span title="${flagLabel}">${flag}</span>`;
+
                         // Add VPN/Proxy indicator if location is not accurate
                         if (info.locationAccurate === false) {
                             content += `<span title="Location may not be accurate (VPN/Proxy detected)">🔒</span>`;
                         }
                     }
-                    
+
                     const device = info.device;
                     if (device) {
                         const emoji = this.getDeviceEmoji(device);
@@ -615,7 +650,7 @@
                     }
 
                     badge.innerHTML = content;
-                    
+
                     // Re-find insertion point as DOM might have changed
                     const finalPoint = this.findInsertionPoint(element, screenName);
                     if (finalPoint) finalPoint.target.insertBefore(badge, finalPoint.ref);
@@ -667,10 +702,10 @@
             // 1. Profile Header Specific Logic
             // The profile header has a specific structure where the name and handle are in separate rows
             // We want to target the first row (Display Name)
-            
+
             // Check if this is likely a profile header (no timestamp link, large text)
             const isProfileHeader = !container.querySelector('time') && container.querySelector('[data-testid="userFollowIndicator"]') !== null ||
-                                    (container.getAttribute('data-testid') === 'UserName' && container.className.includes('r-14gqq1x'));
+                (container.getAttribute('data-testid') === 'UserName' && container.className.includes('r-14gqq1x'));
 
             if (isProfileHeader) {
                 // Find the display name container (first div[dir="ltr"])
@@ -691,7 +726,7 @@
             // Look for the handle (@username)
             const links = Array.from(container.querySelectorAll('a'));
             const handleLink = links.find(l => l.textContent.trim().toLowerCase() === `@${screenName.toLowerCase()}`);
-            
+
             if (handleLink) {
                 // Insert after the handle
                 return { target: handleLink.parentNode.parentNode, ref: handleLink.parentNode.nextSibling };
@@ -709,7 +744,7 @@
         startObserver() {
             this.observer = new MutationObserver((mutations) => {
                 if (!this.isEnabled) return;
-                
+
                 for (const m of mutations) {
                     m.addedNodes.forEach(node => {
                         if (node.nodeType === 1) { // Element
@@ -742,7 +777,7 @@
             const checkSidebar = setInterval(() => {
                 // Try multiple selectors to be language-agnostic
                 let nav = document.querySelector('nav[aria-label="Primary"]'); // English
-                
+
                 // Fallback: look for nav with role="navigation" that contains profile link
                 if (!nav) {
                     const allNavs = document.querySelectorAll('nav[role="navigation"]');
@@ -753,7 +788,7 @@
                         }
                     }
                 }
-                
+
                 // Additional fallback: look for header > div > nav structure
                 if (!nav) {
                     const headers = document.querySelectorAll('header');
@@ -765,7 +800,7 @@
                         }
                     }
                 }
-                
+
                 if (nav) {
                     clearInterval(checkSidebar);
                     console.log('✅ Sidebar navigation found, adding Block Countries link');
@@ -796,7 +831,7 @@
             link.setAttribute('role', 'link');
             link.className = profileLink.className;
             link.setAttribute('aria-label', 'Block Countries');
-            
+
             link.innerHTML = `
                 <div class="css-175oi2r r-sdzlij r-dnmrzs r-1awozwy r-18u37iz r-1777fci r-xyw6el r-o7ynqc r-6416eg">
                     <div class="css-175oi2r">
@@ -824,11 +859,11 @@
             // Create overlay
             const overlay = document.createElement('div');
             overlay.className = 'x-blocker-modal-overlay';
-            
+
             // Create modal
             const modal = document.createElement('div');
             modal.className = 'x-blocker-modal';
-            
+
             // Create header
             const header = document.createElement('div');
             header.className = 'x-blocker-header';
@@ -845,42 +880,42 @@
                     </svg>
                 </button>
             `;
-            
+
             // Create body
             const body = document.createElement('div');
             body.className = 'x-blocker-body';
-            
+
             const info = document.createElement('div');
             info.className = 'x-blocker-info';
             info.textContent = 'Select countries to block. Tweets from users in these countries will be hidden from your feed.';
-            
+
             const search = document.createElement('input');
             search.type = 'text';
             search.className = 'x-blocker-search';
             search.placeholder = 'Search countries...';
-            
+
             const countriesContainer = document.createElement('div');
             countriesContainer.className = 'x-blocker-countries';
-            
+
             body.appendChild(info);
             body.appendChild(search);
             body.appendChild(countriesContainer);
-            
+
             // Create footer
             const footer = document.createElement('div');
             footer.className = 'x-blocker-footer';
-            
+
             const stats = document.createElement('div');
             stats.className = 'x-blocker-stats';
             const updateStats = () => {
                 stats.textContent = `${this.blockedCountries.size} countries blocked`;
             };
             updateStats();
-            
+
             const btnContainer = document.createElement('div');
             btnContainer.style.display = 'flex';
             btnContainer.style.gap = '12px';
-            
+
             const clearBtn = document.createElement('button');
             clearBtn.className = 'x-blocker-btn x-blocker-btn-secondary';
             clearBtn.textContent = 'Clear All';
@@ -889,30 +924,33 @@
                 this.saveBlockedCountries();
                 renderCountries();
                 updateStats();
-                
+
                 // Smart clear: only update already-processed tweets (no new API calls)
                 document.querySelectorAll('[data-x-processed][data-x-screen-name]').forEach(el => {
                     const screenName = el.dataset.xScreenName;
                     const cachedInfo = this.cache.get(screenName);
                     if (!cachedInfo) return;
-                    
+
                     const tweet = el.closest('article[data-testid="tweet"]');
-                    
+
                     // Unhide tweet if it was blocked
                     if (tweet && tweet.classList.contains('x-tweet-blocked')) {
                         tweet.classList.remove('x-tweet-blocked');
                     }
-                    
+
                     // Re-add badge if it's missing and user has location/device
                     if (!el.querySelector('.x-info-badge') && (cachedInfo.location || cachedInfo.device)) {
                         const badge = document.createElement('span');
                         badge.className = 'x-info-badge';
-                        
+
                         let content = '';
-                        if (cachedInfo.location) {
-                            const flag = this.getFlagEmoji(cachedInfo.location);
-                            if (flag) content += `<span title="${cachedInfo.location}">${flag}</span>`;
-                            
+                        const deviceCountry = this.flagFromDevice ? this.getDeviceCountry(cachedInfo.device) : null;
+                        const flagCountry = deviceCountry || cachedInfo.location;
+                        if (flagCountry) {
+                            const flag = this.getFlagEmoji(flagCountry);
+                            const flagLabel = deviceCountry ? this.formatCountryName(deviceCountry) : cachedInfo.location;
+                            if (flag) content += `<span title="${flagLabel}">${flag}</span>`;
+
                             // Add VPN/Proxy indicator if location is not accurate
                             if (cachedInfo.locationAccurate === false) {
                                 content += `<span title="Location may not be accurate (VPN/Proxy detected)">🔒</span>`;
@@ -922,46 +960,46 @@
                             const emoji = this.getDeviceEmoji(cachedInfo.device);
                             content += `<span title="Connected via: ${cachedInfo.device}">${emoji}</span>`;
                         }
-                        
+
                         badge.innerHTML = content;
                         const insertionPoint = this.findInsertionPoint(el, screenName);
                         if (insertionPoint) insertionPoint.target.insertBefore(badge, insertionPoint.ref);
                     }
                 });
             });
-            
+
             const doneBtn = document.createElement('button');
             doneBtn.className = 'x-blocker-btn x-blocker-btn-primary';
             doneBtn.textContent = 'Done';
             doneBtn.addEventListener('click', () => {
                 overlay.remove();
             });
-            
+
             btnContainer.appendChild(clearBtn);
             btnContainer.appendChild(doneBtn);
             footer.appendChild(stats);
             footer.appendChild(btnContainer);
-            
+
             // Assemble modal
             modal.appendChild(header);
             modal.appendChild(body);
             modal.appendChild(footer);
             overlay.appendChild(modal);
-            
+
             // Render countries list
             const renderCountries = (filter = '') => {
                 countriesContainer.innerHTML = '';
-                
+
                 const countries = Object.keys(COUNTRY_FLAGS)
                     .filter(country => country.includes(filter.toLowerCase()))
                     .sort();
-                
+
                 countries.forEach(country => {
                     const item = document.createElement('div');
                     item.className = 'x-country-item';
                     const isBlocked = this.blockedCountries.has(country);
                     if (isBlocked) item.classList.add('blocked');
-                    
+
                     const flag = this.getFlagEmoji(country);
                     const flagSpan = document.createElement('span');
                     flagSpan.className = 'x-country-flag';
@@ -970,25 +1008,25 @@
                     } else {
                         flagSpan.textContent = flag || '🌍';
                     }
-                    
+
                     const name = document.createElement('span');
                     name.className = 'x-country-name';
                     // Proper title case: capitalize each word
                     name.textContent = country.split(' ').map(word =>
                         word.charAt(0).toUpperCase() + word.slice(1)
                     ).join(' ');
-                    
+
                     const status = document.createElement('span');
                     status.className = 'x-country-status';
                     status.textContent = isBlocked ? 'BLOCKED' : '';
-                    
+
                     item.appendChild(flagSpan);
                     item.appendChild(name);
                     item.appendChild(status);
-                    
+
                     item.addEventListener('click', () => {
                         const wasBlocked = this.blockedCountries.has(country);
-                        
+
                         if (wasBlocked) {
                             this.blockedCountries.delete(country);
                         } else {
@@ -997,32 +1035,35 @@
                         this.saveBlockedCountries();
                         renderCountries(filter);
                         updateStats();
-                        
+
                         // Smart update: only process cached tweets (NO API CALLS)
                         document.querySelectorAll('[data-x-processed][data-x-screen-name]').forEach(el => {
                             const screenName = el.dataset.xScreenName;
                             const cachedInfo = this.cache.get(screenName);
                             if (!cachedInfo || !cachedInfo.location) return;
-                            
+
                             const countryLower = cachedInfo.location.trim().toLowerCase();
                             const tweet = el.closest('article[data-testid="tweet"]');
-                            
+
                             if (countryLower === country) {
                                 // This tweet's country was toggled
                                 if (wasBlocked) {
                                     // Unblocking: show tweet and add badge
                                     if (tweet) tweet.classList.remove('x-tweet-blocked');
-                                    
+
                                     // Add badge if not present (using cached data only)
                                     if (!el.querySelector('.x-info-badge')) {
                                         const badge = document.createElement('span');
                                         badge.className = 'x-info-badge';
-                                        
+
                                         let content = '';
-                                        if (cachedInfo.location) {
-                                            const flag = this.getFlagEmoji(cachedInfo.location);
-                                            if (flag) content += `<span title="${cachedInfo.location}">${flag}</span>`;
-                                            
+                                        const deviceCountry = this.flagFromDevice ? this.getDeviceCountry(cachedInfo.device) : null;
+                                        const flagCountry = deviceCountry || cachedInfo.location;
+                                        if (flagCountry) {
+                                            const flag = this.getFlagEmoji(flagCountry);
+                                            const flagLabel = deviceCountry ? this.formatCountryName(deviceCountry) : cachedInfo.location;
+                                            if (flag) content += `<span title="${flagLabel}">${flag}</span>`;
+
                                             // Add VPN/Proxy indicator if location is not accurate
                                             if (cachedInfo.locationAccurate === false) {
                                                 content += `<span title="Location may not be accurate (VPN/Proxy detected)">🔒</span>`;
@@ -1032,7 +1073,7 @@
                                             const emoji = this.getDeviceEmoji(cachedInfo.device);
                                             content += `<span title="Connected via: ${cachedInfo.device}">${emoji}</span>`;
                                         }
-                                        
+
                                         badge.innerHTML = content;
                                         const insertionPoint = this.findInsertionPoint(el, screenName);
                                         if (insertionPoint) insertionPoint.target.insertBefore(badge, insertionPoint.ref);
@@ -1046,30 +1087,30 @@
                             }
                         });
                     });
-                    
+
                     countriesContainer.appendChild(item);
                 });
             };
-            
+
             renderCountries();
-            
+
             // Search functionality
             search.addEventListener('input', (e) => {
                 renderCountries(e.target.value);
             });
-            
+
             // Close button
             header.querySelector('.x-blocker-close').addEventListener('click', () => {
                 overlay.remove();
             });
-            
+
             // Close on overlay click
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
                     overlay.remove();
                 }
             });
-            
+
             // Add to page
             document.body.appendChild(overlay);
         }
@@ -1101,6 +1142,11 @@
                     this.isEnabled = !this.isEnabled;
                     localStorage.setItem('x_location_enabled', this.isEnabled);
                     console.log(`Extension ${this.isEnabled ? 'enabled' : 'disabled'}`);
+                },
+                toggleFlagFromDevice: () => {
+                    this.flagFromDevice = !this.flagFromDevice;
+                    localStorage.setItem('x_flag_from_device', this.flagFromDevice);
+                    console.log(`Flag source: ${this.flagFromDevice ? 'device (fallback to location)' : 'location'}`);
                 },
                 debug: () => {
                     console.log('Cache Size:', this.cache.size);
