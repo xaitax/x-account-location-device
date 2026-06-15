@@ -263,6 +263,10 @@ async function handleFetchUserInfo({ screenName, csrfToken }) {
         if (error.code === API_ERROR_CODES.NOT_FOUND) {
             cacheNotFound(screenName);
         }
+
+        if (error.code === API_ERROR_CODES.UNAUTHORIZED) {
+            await headersStorage.clear();
+        }
         
         // Return specific error information
         return {
@@ -293,6 +297,10 @@ async function handleFetchHovercardInfo({ screenName, csrfToken }) {
 
         return { success: true, data, source: 'api' };
     } catch (error) {
+        if (error.code === API_ERROR_CODES.UNAUTHORIZED) {
+            await headersStorage.clear();
+        }
+
         return {
             success: false,
             error: error.message,

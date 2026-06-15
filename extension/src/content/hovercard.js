@@ -355,7 +355,7 @@ class HovercardController {
         positionCard(this.card, anchorEl);
 
         // Fetch rich metadata ONLY on hover (forces API), with short TTL caching.
-        this._fetchAndUpdate(anchorEl, screenName, csrfToken).catch(() => {});
+        this._fetchAndUpdate(anchorEl, screenName, csrfToken, info).catch(() => {});
 
         // Keep visible if hovering card
         this.card.removeEventListener('mouseenter', this._handleCardEnter);
@@ -400,7 +400,7 @@ class HovercardController {
         this.hideSoon(120);
     }
 
-    async _fetchAndUpdate(anchorEl, screenName, csrfToken) {
+    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}) {
         const key = String(screenName || '').toLowerCase();
         if (!key) return;
 
@@ -431,7 +431,7 @@ class HovercardController {
         if (!response?.success || !response.data) {
             const msg = response?.error || 'Failed to fetch details';
             if (this.currentAnchor === anchorEl && this.card?.classList.contains('x-posed-hovercard-visible')) {
-                this.card = buildCardContent({ screenName, info: {}, loading: false, errorText: msg });
+                this.card = buildCardContent({ screenName, info: initialInfo, loading: false, errorText: msg });
                 this.card.classList.add('x-posed-hovercard-visible');
                 positionCard(this.card, anchorEl);
             }

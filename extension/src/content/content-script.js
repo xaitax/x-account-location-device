@@ -61,6 +61,36 @@ function debug(...args) {
     }
 }
 
+function fetchUserInfoViaPage(screenName) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    return new Promise(resolve => {
+        const timeout = setTimeout(() => {
+            window.removeEventListener('x-posed-fetch-user-info-result', onResult);
+            resolve({ success: false, error: 'Timed out waiting for page fetch' });
+        }, 10000);
+
+        function onResult(event) {
+            let result;
+            try {
+                result = JSON.parse(event.detail || '{}');
+            } catch {
+                return;
+            }
+
+            if (result.id !== id) return;
+            clearTimeout(timeout);
+            window.removeEventListener('x-posed-fetch-user-info-result', onResult);
+            resolve(result);
+        }
+
+        window.addEventListener('x-posed-fetch-user-info-result', onResult);
+        window.dispatchEvent(new CustomEvent('x-posed-fetch-user-info', {
+            detail: JSON.stringify({ id, screenName })
+        }));
+    });
+}
+
 // ============================================
 // MESSAGING
 // ============================================
@@ -111,13 +141,24 @@ function injectPageScript() {
  */
 function setupPageScriptListener() {
     window.addEventListener('x-posed-headers-captured', async event => {
-        const { headers } = event.detail;
+        let headers;
+        try {
+            ({ headers } = JSON.parse(event.detail || '{}'));
+        } catch {
+            return;
+        }
+
+        if (!headers) return;
         debug('Headers captured from page script');
         
-        await sendMessage({
+        const response = await sendMessage({
             type: MESSAGE_TYPES.CAPTURE_HEADERS,
             payload: { headers }
         });
+
+        if (response?.success && memoizedScanPageFn) {
+            setTimeout(() => memoizedScanPageFn(), 250);
+        }
     });
 }
 
@@ -246,30 +287,41 @@ async function initialize() {
             blockedTags = new Set(blockedTagsResponse.data);
         }
 
-        let domObserverStarted = false;
-        const startDomObservation = () => {
-            if (domObserverStarted || !document.body) return;
-            domObserverStarted = true;
-            createMemoizedFunctions();
-            startObserver(memoizedIsEnabledFn, memoizedProcessElementSafe, memoizedScanPageFn, debug);
-        };
-
-        // Start core DOM processing before optional UI setup. This keeps badge
-        // injection working even if theme/sidebar setup hits a page-specific edge.
-        startDomObservation();
-        if (!domObserverStarted) {
-            document.addEventListener('DOMContentLoaded', startDomObservation, { once: true });
-        }
+        createMemoizedFunctions();
 
         // Inject styles
         injectStyles();
 
-        // Detect and apply theme
-        detectAndApplyTheme(debug);
-        startThemeObserver();
+        let readyWorkStarted = false;
+        const startReadyWork = () => {
+            if (readyWorkStarted) return;
+            if (!document.body) {
+                setTimeout(startReadyWork, 100);
+                return;
+            }
 
-        injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
+            readyWorkStarted = true;
+            startObserver(memoizedIsEnabledFn, memoizedProcessElementSafe, memoizedScanPageFn, debug);
 
+            try {
+                detectAndApplyTheme(debug);
+                startThemeObserver();
+            } catch (error) {
+                console.error('X-Posed theme failed:', error);
+            }
+
+            try {
+                injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
+            } catch (error) {
+                console.error('X-Posed sidebar failed:', error);
+            }
+        };
+
+        if (document.readyState !== 'loading') {
+            startReadyWork();
+        } else {
+            document.addEventListener('DOMContentLoaded', startReadyWork, { once: true });
+        }
     } catch (error) {
         console.error('X-Posed initialization failed:', error);
     }
@@ -296,6 +348,7 @@ function createMemoizedFunctions() {
         get settings() { return settings; },
         get csrfToken() { return csrfToken; },
         sendMessage,
+        fetchUserInfoViaPage,
         debug,
         get debugMode() { return debugMode; }
     });

@@ -442,6 +442,7 @@ export async function processElement(element, {
     settings,
     csrfToken,
     sendMessage,
+    fetchUserInfoViaPage,
     debug,
     debugMode
 }) {
@@ -671,10 +672,21 @@ export async function processElement(element, {
     }
 
     try {
-        const response = await sendMessage({
+        let response = await sendMessage({
             type: MESSAGE_TYPES.FETCH_USER_INFO,
             payload: { screenName, csrfToken }
         });
+
+        if ((response?.code === 'UNAUTHORIZED' || response?.code === 'NO_HEADERS') && fetchUserInfoViaPage) {
+            const pageResponse = await fetchUserInfoViaPage(screenName);
+            if (pageResponse?.success) {
+                response = { ...pageResponse, source: 'page' };
+                await sendMessage({
+                    type: MESSAGE_TYPES.SET_CACHE,
+                    payload: { screenName, data: pageResponse.data }
+                });
+            }
+        }
 
         if (shimmer) shimmer.remove();
 
@@ -710,6 +722,12 @@ export async function processElement(element, {
                 }
             } else if (response?.error) {
                 if (debug) debug(`API error for @${screenName}: ${response.error}`);
+            }
+            if (response?.code === 'UNAUTHORIZED' || response?.code === 'NO_HEADERS') {
+                delete element.dataset.xProcessed;
+                delete element.dataset.xScreenName;
+                processingQueue.delete(screenName);
+                return;
             }
             userInfoCache.set(screenName, null);
             processingQueue.delete(screenName);

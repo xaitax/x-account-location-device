@@ -30,6 +30,11 @@ export const API_ERROR_CODES = {
     UNKNOWN: 'UNKNOWN'
 };
 
+function hasHeader(headers, name) {
+    const wanted = name.toLowerCase();
+    return Object.keys(headers || {}).some(key => key.toLowerCase() === wanted);
+}
+
 /**
  * Request queue for managing concurrent requests
  */
@@ -215,7 +220,7 @@ export class XAPIClient {
      * Set API headers from captured request
      */
     setHeaders(headers) {
-        if (headers && (headers.authorization || headers['authorization'])) {
+        if (hasHeader(headers, 'authorization') && hasHeader(headers, 'x-csrf-token')) {
             this.headers = { ...headers };
             console.log('✅ API headers configured');
             return true;
