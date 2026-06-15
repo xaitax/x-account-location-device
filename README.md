@@ -14,18 +14,21 @@ X already knows where an account posts from. It's tucked inside the "About this 
 
 ## Screenshots
 
-<!-- TODO: replace these four placeholders with real screenshots in docs/ -->
-![Timeline badges](docs/screenshot-badges.png)
-*Flags and device icons sit inline next to every username. No clicking required.*
+![Inline badges and the account dossier](screenshots/timeline.png)
 
-![Account hovercard](docs/screenshot-hovercard.png)
-*Hover the circled-i for the full dossier: location, device, VPN signal, account age, and more.*
+*Country flags and device icons sit inline next to every username. Hover the circled-i for the full dossier: location, device, VPN signal, account age, and more.*
 
-![Blocking modal](docs/screenshot-blocking.png)
-*Hide or highlight posts by country, region, or display-name tag.*
+<p align="center"><img src="screenshots/popup.png" width="320" alt="Quick-settings popup"></p>
 
-![Options page](docs/screenshot-options.png)
-*The dashboard: stats, blocking rules, and full import/export, in light and dark.*
+*The popup: every toggle, the live community-cache count, and one-click support.*
+
+![Block by country, region, or tag](screenshots/blocking.png)
+
+*Hide matching posts, or highlight them and stay aware.*
+
+![The options dashboard](screenshots/options.png)
+
+*Stats, blocking rules, and import/export, behind a clean sidebar.*
 
 ## Features
 
