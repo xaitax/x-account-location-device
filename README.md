@@ -14,11 +14,15 @@ X already knows where an account posts from. It's tucked inside the "About this 
 
 ## Screenshots
 
-![Inline badges and the account dossier](screenshots/timeline.png)
+![Inline badges on the timeline](screenshots/timeline.png)
 
-*Country flags and device icons sit inline next to every username. Hover the circled-i for the full dossier: location, device, VPN signal, account age, and more.*
+*Country flags and device icons land inline next to every account, right in the timeline.*
 
-<p align="center"><img src="screenshots/popup.png" width="320" alt="Quick-settings popup"></p>
+![The account dossier](screenshots/hovercard.png)
+
+*Hover any badge for the full dossier: location, device, VPN/proxy signal, account age, verification, and ID.*
+
+![The quick-settings popup](screenshots/popup.png)
 
 *The popup: every toggle, the live community-cache count, and one-click support.*
 
