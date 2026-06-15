@@ -30,10 +30,6 @@ X already knows where an account posts from. It's tucked inside the "About this 
 
 *Hide matching posts, or highlight them and stay aware.*
 
-![The options dashboard](screenshots/options.png)
-
-*Stats, blocking rules, and import/export, behind a clean sidebar.*
-
 ## Features
 
 **At a glance.** Every account on the timeline gets inline signals next to the username:
