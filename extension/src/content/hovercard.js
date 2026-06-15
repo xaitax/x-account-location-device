@@ -118,7 +118,7 @@ function positionCard(card, anchorEl) {
 
     // Desired placement: right of badge if possible; otherwise above/below.
     const margin = 10;
-    const maxWidth = 340;
+    const maxWidth = Math.min(340, window.innerWidth - margin * 2);
 
     // Temporarily show to measure.
     card.style.left = '0px';
@@ -136,15 +136,16 @@ function positionCard(card, anchorEl) {
     }
 
     if (left < margin) {
-        left = Math.max(margin, rect.left);
         top = rect.bottom + margin;
     }
 
+    left = Math.min(left, window.innerWidth - cardRect.width - margin);
+    left = Math.max(margin, left);
     if (top + cardRect.height > window.innerHeight - margin) {
-        top = Math.max(margin, rect.top - cardRect.height - margin);
+        top = rect.top - cardRect.height - margin;
     }
-
-    if (top < margin) top = margin;
+    top = Math.min(top, window.innerHeight - cardRect.height - margin);
+    top = Math.max(margin, top);
 
     card.style.left = `${Math.round(left)}px`;
     card.style.top = `${Math.round(top)}px`;
