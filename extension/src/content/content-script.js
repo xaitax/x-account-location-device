@@ -246,6 +246,21 @@ async function initialize() {
             blockedTags = new Set(blockedTagsResponse.data);
         }
 
+        let domObserverStarted = false;
+        const startDomObservation = () => {
+            if (domObserverStarted || !document.body) return;
+            domObserverStarted = true;
+            createMemoizedFunctions();
+            startObserver(memoizedIsEnabledFn, memoizedProcessElementSafe, memoizedScanPageFn, debug);
+        };
+
+        // Start core DOM processing before optional UI setup. This keeps badge
+        // injection working even if theme/sidebar setup hits a page-specific edge.
+        startDomObservation();
+        if (!domObserverStarted) {
+            document.addEventListener('DOMContentLoaded', startDomObservation, { once: true });
+        }
+
         // Inject styles
         injectStyles();
 
@@ -253,19 +268,7 @@ async function initialize() {
         detectAndApplyTheme(debug);
         startThemeObserver();
 
-        // Create memoized functions once (not on every call)
-        createMemoizedFunctions();
-        
-        // Start DOM observation when ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                startObserver(memoizedIsEnabledFn, memoizedProcessElementSafe, memoizedScanPageFn, debug);
-                injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
-            });
-        } else {
-            startObserver(memoizedIsEnabledFn, memoizedProcessElementSafe, memoizedScanPageFn, debug);
-            injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
-        }
+        injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
 
     } catch (error) {
         console.error('X-Posed initialization failed:', error);
