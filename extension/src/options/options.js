@@ -5,7 +5,8 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, STORAGE_KEYS, TIMING } from '../shared/constants.js';
-import { getFlagEmoji, formatCountryName, applyTheme, debounce } from '../shared/utils.js';
+import { getFlagEmoji, formatCountryName, debounce } from '../shared/utils.js';
+import { deviceIcon } from '../content/icons.js';
 
 // Region storage uses lowercase keys, but we display proper names
 
@@ -16,6 +17,7 @@ const elements = {
     optDebug: document.getElementById('opt-debug'),
     // Display
     optFlags: document.getElementById('opt-flags'),
+    optFlagDevice: document.getElementById('opt-flag-device'),
     optDevices: document.getElementById('opt-devices'),
     optVpn: document.getElementById('opt-vpn'),
     optCaptureButton: document.getElementById('opt-capture-button'),
@@ -145,9 +147,46 @@ async function initialize() {
 
     // Setup event listeners
     setupEventListeners();
-    
+
+    // Wire up the left sidebar navigation (top-level section switching)
+    setupNav();
+
     // Start rate limit monitor
     startRateLimitMonitor();
+}
+
+/**
+ * Setup left sidebar navigation.
+ * Each nav item (.xp-nav-item[data-target]) shows the matching .xp-panel
+ * and marks itself active. The first panel stays visible by default.
+ */
+function setupNav() {
+    const nav = document.getElementById('xp-nav');
+    if (!nav) return;
+
+    const navItems = Array.from(nav.querySelectorAll('.xp-nav-item'));
+    const panels = Array.from(document.querySelectorAll('.xp-panel'));
+    if (navItems.length === 0 || panels.length === 0) return;
+
+    const showPanel = targetId => {
+        panels.forEach(panel => {
+            panel.classList.toggle('active', panel.id === targetId);
+        });
+        navItems.forEach(item => {
+            item.classList.toggle('active', item.dataset.target === targetId);
+        });
+        // Scroll the content area back to the top when switching sections
+        window.scrollTo({ top: 0, behavior: 'auto' });
+    };
+
+    navItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const targetId = item.dataset.target;
+            if (targetId) {
+                showPanel(targetId);
+            }
+        });
+    });
 }
 
 /**
@@ -217,6 +256,9 @@ async function loadSettings() {
             elements.optEnabled.checked = currentSettings.enabled !== false;
             elements.optDebug.checked = currentSettings.debugMode === true;
             elements.optFlags.checked = currentSettings.showFlags !== false;
+            if (elements.optFlagDevice) {
+                elements.optFlagDevice.checked = currentSettings.flagFromDevice === true;
+            }
             elements.optDevices.checked = currentSettings.showDevices !== false;
             elements.optVpn.checked = currentSettings.showVpnIndicator !== false;
             if (elements.optCaptureButton) {
@@ -724,6 +766,14 @@ async function loadTheme() {
 }
 
 /**
+ * Apply theme to the options page documentElement via data-x-theme.
+ * Only two themes are supported now (light + dark); legacy "dim" maps to dark.
+ */
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-x-theme', theme === 'light' ? 'light' : 'dark');
+}
+
+/**
  * Load statistics data
  */
 async function loadStatistics() {
@@ -897,13 +947,22 @@ function renderStatistics(stats) {
     // Get or create statistics container
     let statsSection = document.getElementById('stats-section');
     if (!statsSection) {
-        // Create statistics section dynamically
-        const cacheSection = document.querySelector('.options-section:has(#cache-size)');
-        if (cacheSection) {
+        // Preferred: render into the dedicated Statistics nav panel body.
+        const statsPanelBody = document.getElementById('stats-panel-body');
+        if (statsPanelBody) {
             statsSection = document.createElement('section');
             statsSection.id = 'stats-section';
             statsSection.className = 'options-section';
-            cacheSection.parentNode.insertBefore(statsSection, cacheSection);
+            statsPanelBody.appendChild(statsSection);
+        } else {
+            // Fallback: create statistics section before the cache section
+            const cacheSection = document.querySelector('.options-section:has(#cache-size)');
+            if (cacheSection) {
+                statsSection = document.createElement('section');
+                statsSection.id = 'stats-section';
+                statsSection.className = 'options-section';
+                cacheSection.parentNode.insertBefore(statsSection, cacheSection);
+            }
         }
     }
     
@@ -1009,10 +1068,13 @@ function renderStatistics(stats) {
         for (const d of stats.topDevices) {
             const deviceStat = document.createElement('div');
             deviceStat.className = 'device-stat';
-            
+
             const iconSpan = document.createElement('span');
             iconSpan.className = 'device-icon';
-            iconSpan.textContent = d.device === 'iOS' ? '🍎' : d.device === 'Android' ? '🤖' : d.device === 'Web' ? '🌐' : '❓';
+            // Render the real Apple/Android/Web SVG glyph from the shared icon set.
+            // deviceIcon() matches on device strings, so map our categories accordingly.
+            const iconKey = d.device === 'iOS' ? 'app store' : d.device === 'Android' ? 'android' : d.device === 'Web' ? 'web' : '';
+            iconSpan.appendChild(deviceIcon(iconKey, 18));
             deviceStat.appendChild(iconSpan);
             
             const nameSpan = document.createElement('span');
@@ -1291,6 +1353,12 @@ function setupEventListeners() {
     elements.optFlags.addEventListener('change', e => {
         saveSettings({ showFlags: e.target.checked });
     });
+
+    if (elements.optFlagDevice) {
+        elements.optFlagDevice.addEventListener('change', e => {
+            saveSettings({ flagFromDevice: e.target.checked });
+        });
+    }
 
     elements.optDevices.addEventListener('change', e => {
         saveSettings({ showDevices: e.target.checked });

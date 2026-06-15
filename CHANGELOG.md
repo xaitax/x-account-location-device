@@ -2,29 +2,57 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [3.0.0] - 2026-06-15
+
+A complete visual redesign, plus all the features and fixes from the 2.6 line, shipped as one major release.
+
+### Redesign
+- Rebuilt every surface on one cohesive "glass" design system: timeline badges, the account hovercard, the blocking modal, the popup, and the options dashboard. Light and dark only (X dropped Dim).
+- New "Mission Control" popup: a compact deck with the live community-cache total, all display toggles, and one-click support.
+- Options reorganized behind a left sidebar.
+- Crisp new device and metadata icons; evidence-capture cards redrawn with vector icons instead of emoji.
+- Bundled typography (Chakra Petch + Martian Mono).
+
+### New Features
+- **Flag from Device**: flag a user by their *device* country (from the X "source" string) instead of their account location, so VPN users are flagged by where the device actually is. Off by default. When on, country/region blocking follows the device country too. Implements [#17](https://github.com/xaitax/x-account-location-device/issues/17), based on PR [#19](https://github.com/xaitax/x-account-location-device/pull/19) by **@AndroidMaster25**.
+- **Community Cloud Cache on by default for new installs**, so flags keep showing through X rate limits. Existing users are unchanged; opt out anytime. Only the usernames you look up are sent, never your identity.
+- The popup now shows the live community-cache total (2.5M+ profiles and counting).
+
+### Bug Fixes
+- **Edge/macOS startup crash**: `detectXTheme()` no longer throws at `document_start` (which silently disabled the extension). Reported by **@ikeyoshy** ([#18](https://github.com/xaitax/x-account-location-device/issues/18)).
+- **Flags vanishing while rate-limited**: transient lookups are no longer negatively cached, so flags return once the limit resets. Reported by **@JoaquinSuez** ([#16](https://github.com/xaitax/x-account-location-device/issues/16)).
+- **Missing "Southeast Asia" region** added. Reported by **@Tapemaster21** ([#20](https://github.com/xaitax/x-account-location-device/issues/20)).
+- **Hovercard off-screen on narrow widths**: it now clamps fully into the viewport. PR [#21](https://github.com/xaitax/x-account-location-device/pull/21) by **@AndroidMaster25**.
+
+### Reliability
+- **Firefox container auth** ([#14](https://github.com/xaitax/x-account-location-device/issues/14)): a single failing lookup no longer breaks *every* hovercard, and lookups now recover inside Firefox containers by retrying from the page's own session. In-page recovery in PR [#22](https://github.com/xaitax/x-account-location-device/pull/22) by **@screwys**; reported by **@Fred-Vatin**.
+- **Hardened startup**: badge injection runs independently of theme/sidebar setup, so one edge case can't stop flags from rendering. PR [#22](https://github.com/xaitax/x-account-location-device/pull/22) by **@screwys**.
+
+---
+
 ## [2.5.0] - 2025-01-28
 
 ### ✨ New Features
-- **Toggle Capture Button** — New option to show/hide the camera button on info badges (PR #11 by @ystolzenburg)
+- **Toggle Capture Button**: New option to show/hide the camera button on info badges (PR #11 by @ystolzenburg)
 
 ### ⚡ Performance
-- **Faster API lookups** — Reduced throttle (300→150ms) and increased concurrency (5→8 parallel requests)
-- **Faster cloud cache** — Reduced batch delay (500→200ms) for quicker responses
-- **Parallelized broadcasts** — Settings updates now 5-10x faster across tabs
-- **Optimized timings** — Snappier search, faster initial page load, reduced theme detection overhead
+- **Faster API lookups**: Reduced throttle (300→150ms) and increased concurrency (5→8 parallel requests)
+- **Faster cloud cache**: Reduced batch delay (500→200ms) for quicker responses
+- **Parallelized broadcasts**: Settings updates now 5-10x faster across tabs
+- **Optimized timings**: Snappier search, faster initial page load, reduced theme detection overhead
 
 ### 💰 Cloud Cost Optimization
-- **Stats endpoint** — No longer lists all KV keys (~70% cost reduction)
-- **Edge caching** — Lookups cached at Cloudflare edge for 1 hour (80% fewer KV reads)
-- **Contribution deduplication** — Skip re-uploads within 24 hours (90% fewer writes)
-- **Server-side rate limiting** — 60 requests/min/IP to prevent abuse
+- **Stats endpoint**: No longer lists all KV keys (~70% cost reduction)
+- **Edge caching**: Lookups cached at Cloudflare edge for 1 hour (80% fewer KV reads)
+- **Contribution deduplication**: Skip re-uploads within 24 hours (90% fewer writes)
+- **Server-side rate limiting**: 60 requests/min/IP to prevent abuse
 
 ---
 
 ## [2.4.0] - 2025-12-28
 
 ### ✨ New Features
-- **Tag-Based Blocking** — Block users based on emojis, symbols, or text patterns in their display names
+- **Tag-Based Blocking**: Block users based on emojis, symbols, or text patterns in their display names
   - Tags are matched against the user's display name (not username)
   - New "Tags" tab in the blocking modal and options page
   - Works alongside existing country and region blocking
@@ -58,13 +86,13 @@ All notable changes to X-Posed will be documented in this file.
 ## [2.2.0] - 2024-11-30
 
 ### ✨ New Features
-- **Region Blocking** — Block entire geographic regions (Africa, Europe, South Asia, etc.)
+- **Region Blocking**: Block entire geographic regions (Africa, Europe, South Asia, etc.)
   - Some X users show regional locations like "South Asia" or "Europe" instead of specific countries
   - New tabbed interface in sidebar modal and options page (Countries | Regions)
   - Geographic globe emojis: 🌍 Africa/Europe/West Asia, 🌎 Americas, 🌏 Asia/Oceania
   - Blocked regions can be managed separately from blocked countries
   - Export/Import now includes blocked regions
-- **Highlight Mode** — NEW alternative to hiding blocked tweets
+- **Highlight Mode**: NEW alternative to hiding blocked tweets
   - Toggle in Options page: "Hide blocked tweets" vs "Highlight blocked tweets"
   - Highlighted tweets shown with subtle amber left border instead of being hidden
   - Useful for users who want to see content but be warned about location
@@ -75,15 +103,15 @@ All notable changes to X-Posed will be documented in this file.
 ## [2.1.0] - 2024-11-29
 
 ### ✨ New Features
-- **Show VPN Users Toggle** — New option (default ON) to show/hide tweets from users detected as using VPN/proxy
+- **Show VPN Users Toggle**: New option (default ON) to show/hide tweets from users detected as using VPN/proxy
   - Available in both popup and options page
   - Instantly hides/shows VPN user tweets without reload
-- **Enhanced Export/Import** — Full configuration backup and restore
+- **Enhanced Export/Import**: Full configuration backup and restore
   - Export now includes: settings, blocked countries, cache with metadata (version, timestamp)
   - New Import function to restore configurations across devices or browsers
   - JSON format with validation and confirmation dialog
-- **Enhanced VPN/Proxy Statistics** — Statistics now show VPN user count with percentage (e.g., `🔒 VPN/Proxy (17%)`)
-- **Rate Limit Status Indicator** — Real-time display in popup and options page showing API rate limit status
+- **Enhanced VPN/Proxy Statistics**: Statistics now show VPN user count with percentage (e.g., `🔒 VPN/Proxy (17%)`)
+- **Rate Limit Status Indicator**: Real-time display in popup and options page showing API rate limit status
 
 ### 🔧 Code Quality
 - Fixed all ESLint warnings (13 → 0)
@@ -175,8 +203,8 @@ All notable changes to X-Posed will be documented in this file.
 - Fixed sidebar "Block Countries" breaking compact layout ([#3](https://github.com/xaitax/x-account-location-device/issues/3))
 
 ### ✨ Enhancements
-- Toggle-able sidebar "Block Countries" link — can be hidden via Options ([#2](https://github.com/xaitax/x-account-location-device/issues/2))
-- Full country blocker UI in Options page — manage blocked countries without visiting X
+- Toggle-able sidebar "Block Countries" link: can be hidden via Options ([#2](https://github.com/xaitax/x-account-location-device/issues/2))
+- Full country blocker UI in Options page: manage blocked countries without visiting X
 - Support for followers/following/verified followers pages
 - Sidebar link adapts automatically on window resize (compact ↔ normal mode)
 
@@ -191,7 +219,7 @@ All notable changes to X-Posed will be documented in this file.
 
 ### ✨ New Features
 - Community Cloud Cache with Cloudflare Workers
-- Evidence Screenshot Generator — capture tweets with metadata overlay (location, device, VPN status, timestamp)
+- Evidence Screenshot Generator: capture tweets with metadata overlay (location, device, VPN status, timestamp)
 - Statistics dashboard with analytics
 - Theme sync (Light/Dim/Dark)
 - Options page with full configuration

@@ -162,7 +162,7 @@ export const MESSAGE_TYPES = {
     BLOCKED_REGIONS_UPDATED: 'BLOCKED_REGIONS_UPDATED',
     BLOCKED_TAGS_UPDATED: 'BLOCKED_TAGS_UPDATED',
     THEME_UPDATED: 'THEME_UPDATED',
-    
+
     // Page script to content script (via custom events)
     HEADERS_CAPTURED: 'X_HEADERS_CAPTURED',
     API_REQUEST: 'X_API_REQUEST'
@@ -172,6 +172,7 @@ export const MESSAGE_TYPES = {
 export const DEFAULT_SETTINGS = {
     enabled: true,
     showFlags: true,
+    flagFromDevice: false,  // Use the device's country for the flag instead of the account location (issue #17); falls back to location for web/unknown
     showDevices: true,
     showVpnIndicator: true,
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
@@ -255,6 +256,7 @@ export const REGION_DATA = [
     { name: 'North America', key: 'north america', flag: '🌎' },
     { name: 'South America', key: 'south america', flag: '🌎' },
     { name: 'South Asia', key: 'south asia', flag: '🌏' },
+    { name: 'Southeast Asia', key: 'southeast asia', flag: '🌏' },
     { name: 'West Asia', key: 'west asia', flag: '🌍' }
 ];
 

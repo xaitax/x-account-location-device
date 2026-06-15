@@ -251,6 +251,32 @@ export function getDeviceEmoji(deviceString) {
 }
 
 /**
+ * Extract the country name from a device/source string.
+ * X's "source" string is formatted "<Country> <Platform> App"
+ * (e.g. "Russian Federation Android App"), so the country is the longest
+ * leading prefix that matches a known COUNTRY_FLAGS key. Web/unknown sources
+ * (e.g. "Web", or legacy "Twitter for iPhone") have no country prefix, so we
+ * return null and let callers fall back to the account location.
+ * @param {string|null|undefined} deviceString - The device/client string from X API
+ * @returns {string|null} - Country name (a COUNTRY_FLAGS key) or null
+ */
+export function getDeviceCountry(deviceString) {
+    if (!deviceString) return null;
+
+    // Peel platform words off the end until the remaining prefix is a known
+    // country (e.g. "russian federation android app" -> "russian federation").
+    // Iterating from the full length down returns the LONGEST matching prefix,
+    // so multi-word countries ("united states") win over shorter coincidences.
+    const words = deviceString.trim().toLowerCase().split(/\s+/);
+    for (let i = words.length; i > 0; i--) {
+        const candidate = words.slice(0, i).join(' ');
+        if (COUNTRY_FLAGS[candidate]) return candidate;
+    }
+
+    return null;
+}
+
+/**
  * Format country name for display (title case).
  * @param {string|null|undefined} country - The country name to format
  * @returns {string} - Formatted country name with first letter of each word capitalized

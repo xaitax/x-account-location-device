@@ -5,17 +5,18 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, TIMING } from '../shared/constants.js';
-import { applyTheme } from '../shared/utils.js';
 
 // DOM Elements
 const elements = {
     toggleEnabled: document.getElementById('toggle-enabled'),
     toggleFlags: document.getElementById('toggle-flags'),
+    toggleFlagDevice: document.getElementById('toggle-flag-device'),
     toggleDevices: document.getElementById('toggle-devices'),
     toggleVpn: document.getElementById('toggle-vpn'),
+    toggleVpnUsers: document.getElementById('toggle-vpn-users'),
+    toggleSidebarLink: document.getElementById('toggle-sidebar-link'),
     toggleCaptureButton: document.getElementById('toggle-capture-button'),
-    statCached: document.getElementById('stat-cached'),
-    statBlocked: document.getElementById('stat-blocked'),
+    statCommunity: document.getElementById('stat-community'),
     btnClearCache: document.getElementById('btn-clear-cache'),
     btnOptions: document.getElementById('btn-options'),
     rateLimitBanner: document.getElementById('rate-limit-banner'),
@@ -104,17 +105,9 @@ function updateRateLimitBanner({ isRateLimited, resetTime, remainingMs }) {
         const title = elements.rateLimitBanner.querySelector('.rate-limit-title');
         if (title) title.textContent = 'Rate Limited';
     } else {
-        // Show "OK" status
-        elements.rateLimitBanner.style.display = 'flex';
-        elements.rateLimitBanner.classList.add('ok');
-        
-        const icon = elements.rateLimitBanner.querySelector('.rate-limit-icon');
-        if (icon) icon.textContent = '✅';
-        
-        const title = elements.rateLimitBanner.querySelector('.rate-limit-title');
-        if (title) title.textContent = 'API Status: OK';
-        
-        elements.rateLimitTime.textContent = 'No rate limits active';
+        // Healthy: hide the banner entirely (the master row already shows status).
+        elements.rateLimitBanner.style.display = 'none';
+        elements.rateLimitBanner.classList.remove('ok');
     }
 }
 
@@ -149,6 +142,15 @@ async function loadTheme() {
 }
 
 /**
+ * Apply theme to the popup's documentElement via data-x-theme.
+ * Only two themes are supported now (light + dark); legacy "dim" maps to dark.
+ */
+function applyTheme(theme) {
+    const normalized = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-x-theme', normalized);
+}
+
+/**
  * Load settings from background
  */
 async function loadSettings() {
@@ -162,8 +164,11 @@ async function loadSettings() {
             
             elements.toggleEnabled.checked = settings.enabled !== false;
             elements.toggleFlags.checked = settings.showFlags !== false;
+            elements.toggleFlagDevice.checked = settings.flagFromDevice === true;
             elements.toggleDevices.checked = settings.showDevices !== false;
             elements.toggleVpn.checked = settings.showVpnIndicator !== false;
+            elements.toggleVpnUsers.checked = settings.showVpnUsers !== false;
+            elements.toggleSidebarLink.checked = settings.showSidebarBlockerLink !== false;
             elements.toggleCaptureButton.checked = settings.showCaptureButton !== false;
         }
     } catch (error) {
@@ -172,33 +177,46 @@ async function loadSettings() {
 }
 
 /**
- * Load statistics from background
+ * Load statistics from background.
+ * The hero shows the COMMUNITY cache total (the proud 2.5M+). If the cloud cache is
+ * unavailable or disabled, it falls back to this device's local cache size.
  */
 async function loadStats() {
     try {
-        // Get cache info
-        const cacheResponse = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_CACHE,
-            payload: {}
+        const serverResp = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.GET_CLOUD_SERVER_STATS
         });
+        const totalEntries = serverResp?.success ? (serverResp.serverStats?.totalEntries || 0) : 0;
 
-        if (cacheResponse?.success) {
-            elements.statCached.textContent = cacheResponse.size || 0;
-        }
-
-        // Get blocked countries
-        const blockedResponse = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES
-        });
-
-        if (blockedResponse?.success) {
-            elements.statBlocked.textContent = blockedResponse.size || 0;
+        if (totalEntries > 0) {
+            elements.statCommunity.textContent = totalEntries.toLocaleString();
+            setHero('Community Cache', 'profiles cached by the community', true);
+        } else {
+            // Fallback: this device's local cache size
+            const cacheResponse = await browserAPI.runtime.sendMessage({
+                type: MESSAGE_TYPES.GET_CACHE,
+                payload: {}
+            });
+            const localSize = cacheResponse?.success ? (cacheResponse.size || 0) : 0;
+            elements.statCommunity.textContent = localSize.toLocaleString();
+            setHero('Cached Users', 'cached on this device', false);
         }
     } catch (error) {
-        console.error('Failed to load stats:', error);
-        elements.statCached.textContent = '-';
-        elements.statBlocked.textContent = '-';
+        console.error('Failed to load cache stats:', error);
+        elements.statCommunity.textContent = '-';
     }
+}
+
+/**
+ * Update the hero caption/subtitle and the COMMUNITY badge visibility.
+ */
+function setHero(cap, sub, isCommunity) {
+    const capEl = document.getElementById('hero-cap');
+    const subEl = document.getElementById('hero-sub');
+    const badgeEl = document.getElementById('hero-badge');
+    if (capEl) capEl.textContent = cap;
+    if (subEl) subEl.textContent = sub;
+    if (badgeEl) badgeEl.style.display = isCommunity ? '' : 'none';
 }
 
 /**
@@ -230,12 +248,24 @@ function setupEventListeners() {
         await saveSettings({ showFlags: e.target.checked });
     });
 
+    elements.toggleFlagDevice.addEventListener('change', async e => {
+        await saveSettings({ flagFromDevice: e.target.checked });
+    });
+
     elements.toggleDevices.addEventListener('change', async e => {
         await saveSettings({ showDevices: e.target.checked });
     });
 
     elements.toggleVpn.addEventListener('change', async e => {
         await saveSettings({ showVpnIndicator: e.target.checked });
+    });
+
+    elements.toggleVpnUsers.addEventListener('change', async e => {
+        await saveSettings({ showVpnUsers: e.target.checked });
+    });
+
+    elements.toggleSidebarLink.addEventListener('change', async e => {
+        await saveSettings({ showSidebarBlockerLink: e.target.checked });
     });
 
     // Capture button toggle
@@ -247,26 +277,34 @@ function setupEventListeners() {
 
     // Clear cache button with confirmation
     elements.btnClearCache.addEventListener('click', async () => {
-        // Get current cache size for confirmation message
-        const cachedCount = elements.statCached.textContent;
-        
+        // The hero shows the COMMUNITY total, not this device — fetch the local size fresh.
+        let localCount = 0;
+        try {
+            const r = await browserAPI.runtime.sendMessage({
+                type: MESSAGE_TYPES.GET_CACHE,
+                payload: {}
+            });
+            localCount = r?.size || 0;
+        } catch { /* ignore — treat as 0 */ }
+
         // Confirm before clearing
-        if (cachedCount !== '0' && cachedCount !== '-') {
-            const confirmed = confirm(`Are you sure you want to clear ${cachedCount} cached users?\n\nThis will require re-fetching data for all users.`);
+        if (localCount > 0) {
+            const confirmed = confirm(`Are you sure you want to clear ${localCount.toLocaleString()} locally cached users?\n\nThis will require re-fetching data for all users.`);
             if (!confirmed) return;
         }
-        
+
         elements.btnClearCache.classList.add('loading');
-        
+
         try {
             // Clear cache by setting empty
             await browserAPI.runtime.sendMessage({
                 type: MESSAGE_TYPES.SET_CACHE,
                 payload: { action: 'clear' }
             });
-            
-            elements.statCached.textContent = '0';
-            
+
+            // Refresh stats (community total is unaffected; local falls to 0)
+            await loadStats();
+
             // Visual feedback - save original children
             const originalChildren = Array.from(elements.btnClearCache.childNodes).map(node => node.cloneNode(true));
             

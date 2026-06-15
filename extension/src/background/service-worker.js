@@ -46,7 +46,7 @@ async function initialize() {
         if (storedHeaders) {
             apiClient.setHeaders(storedHeaders);
         }
-        
+
         initialized = true;
         console.log('✅ Background worker initialized');
         
@@ -263,7 +263,13 @@ async function handleFetchUserInfo({ screenName, csrfToken }) {
         if (error.code === API_ERROR_CODES.NOT_FOUND) {
             cacheNotFound(screenName);
         }
-        
+
+        // Issue #14: drop stale stored headers on auth failure so freshly captured
+        // headers replace them; the content script recovers via the in-page fetch.
+        if (error.code === API_ERROR_CODES.UNAUTHORIZED) {
+            await headersStorage.clear();
+        }
+
         // Return specific error information
         return {
             success: false,
@@ -275,11 +281,30 @@ async function handleFetchUserInfo({ screenName, csrfToken }) {
 }
 
 /**
- * Fetch hovercard info handler
+ * Fetch hovercard info handler.
  *
- * Intentionally forces a live API call so we only pay rate limit cost on user interaction.
+ * Issue #14: this previously ALWAYS forced a live API call, so during a persistent
+ * auth failure (e.g. a Firefox container cookie mismatch) every hovered user — even
+ * ones already cached and rendering a badge fine — showed "Authentication failed".
+ * Now we serve a cached entry first (it already carries the rich meta from the badge
+ * fetch) and only go live on a cache miss, so known users render without a fresh
+ * 401. Uncached users still go live and surface a clear, distinct error in the
+ * hovercard if auth fails.
  */
 async function handleFetchHovercardInfo({ screenName, csrfToken }) {
+    // Serve a cached entry first — but ONLY if it carries the rich hovercard `meta`
+    // (i.e. it came from a live X API fetch). Cloud-sourced entries hold just
+    // location/device/locationAccurate and no meta, so we let those fall through to a
+    // live fetch to enrich the card. This still avoids a fresh 401 for API-sourced
+    // (meta-bearing) known users — the issue #14 goal — without permanently degrading
+    // hovercards for cloud-sourced users.
+    if (userCache.has(screenName)) {
+        const cached = userCache.get(screenName);
+        if (cached && cached.meta) {
+            return { success: true, data: cached, source: 'local' };
+        }
+    }
+
     try {
         const data = await apiClient.fetchUserInfo(screenName, csrfToken);
 
@@ -293,6 +318,11 @@ async function handleFetchHovercardInfo({ screenName, csrfToken }) {
 
         return { success: true, data, source: 'api' };
     } catch (error) {
+        // Issue #14: drop stale stored headers on auth failure (the in-page fetch
+        // fallback in the content script recovers the lookup).
+        if (error.code === API_ERROR_CODES.UNAUTHORIZED) {
+            await headersStorage.clear();
+        }
         return {
             success: false,
             error: error.message,
@@ -836,6 +866,19 @@ async function handleInstalled(details) {
         await browserAPI.storage.local.set({
             [STORAGE_KEYS.LAST_VERSION]: VERSION
         });
+
+        // v3.0.0: enable the community cloud cache by default for NEW installs only.
+        // Existing users keep whatever they had (the update branch never touches it),
+        // so this is not a silent opt-in for current users. It makes flags resilient
+        // to X API rate-limiting out of the box; users can opt out in Options.
+        // initialize() is idempotent and ensures cloudCache exists before we flip it.
+        try {
+            await initialize();
+            await cloudCache.setEnabled(true);
+        } catch (cloudErr) {
+            console.warn('Could not enable cloud cache on install:', cloudErr);
+        }
+
         // Open options page to welcome new users
         browserAPI.runtime.openOptionsPage();
     } else if (details.reason === 'update') {
@@ -966,24 +1009,19 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
 });
 
-// Set up install/update listener (Chrome MV3 style)
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onInstalled) {
-    chrome.runtime.onInstalled.addListener(handleInstalled);
-}
+// Register install/update + startup listeners EXACTLY ONCE.
+// Firefox exposes both a `browser` namespace and a `chrome` alias, so registering
+// on both would double-fire handleInstalled (e.g. open two "What's New" tabs on an
+// update). Prefer `browser` (Firefox) and fall back to `chrome` (Chromium).
+const runtimeNS = (typeof browser !== 'undefined' && browser.runtime) ? browser
+    : (typeof chrome !== 'undefined' && chrome.runtime) ? chrome
+        : null;
 
-// Set up startup listener
-if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onStartup) {
-    chrome.runtime.onStartup.addListener(handleStartup);
+if (runtimeNS?.runtime?.onInstalled) {
+    runtimeNS.runtime.onInstalled.addListener(handleInstalled);
 }
-
-// Firefox compatibility: browser.runtime instead of chrome.runtime
-if (typeof browser !== 'undefined' && browser.runtime) {
-    if (browser.runtime.onInstalled) {
-        browser.runtime.onInstalled.addListener(handleInstalled);
-    }
-    if (browser.runtime.onStartup) {
-        browser.runtime.onStartup.addListener(handleStartup);
-    }
+if (runtimeNS?.runtime?.onStartup) {
+    runtimeNS.runtime.onStartup.addListener(handleStartup);
 }
 
 // Initialize on load

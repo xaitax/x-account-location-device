@@ -1,208 +1,134 @@
-<h1 align="center">🌍 X-Posed</h1>
+<h1 align="center">X-Posed</h1>
 
-<p align="center">
-<strong>See where X users are really posting from.</strong><br>
-Country flags, device info, VPN detection, and powerful filtering — all in one extension.
-</p>
+<p align="center"><b>See where any X account is posting from, without leaving your timeline.</b><br>
+<b>Country, device, and VPN/proxy signals, inline next to every username.</b></p>
 
 <p align="center">
 <a href="https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk"><img src="https://img.shields.io/badge/Chrome-Install-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Chrome Web Store"></a>
 <a href="https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/"><img src="https://img.shields.io/badge/Firefox-Install-FF7139?style=for-the-badge&logo=firefox-browser&logoColor=white" alt="Firefox Add-ons"></a>
 <a href="https://apps.apple.com/us/app/x-posed-location/id6755918713"><img src="https://img.shields.io/badge/App_Store-Install-000000?style=for-the-badge&logo=apple&logoColor=white" alt="App Store"></a>
+<img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT License">
 </p>
 
-<p align="center">
-<a href="https://ko-fi.com/M4M61EP5XL"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support on Ko-fi"></a>
-</p>
+X already knows where an account posts from. It's tucked inside the "About this account" panel almost nobody opens. X-Posed surfaces it for every username on your timeline: a country flag, a device icon, and a VPN/proxy hint, with a one-click dossier and location-aware filtering on top. No extra login, no independent geolocation, nothing beyond what X itself attributes.
 
-<p align="center">
-<img width="800" alt="X-Posed showing country flags and device icons on X timeline" src="https://github.com/user-attachments/assets/53c5c59f-a0f4-4cee-8582-275f9717c807">
-</p>
+## Screenshots
 
----
+<!-- TODO: replace these four placeholders with real screenshots in docs/ -->
+![Timeline badges](docs/screenshot-badges.png)
+*Flags and device icons sit inline next to every username. No clicking required.*
 
-## ✨ Key Features
+![Account hovercard](docs/screenshot-hovercard.png)
+*Hover the circled-i for the full dossier: location, device, VPN signal, account age, and more.*
 
-### 🏳️ Country Flags & Device Detection
+![Blocking modal](docs/screenshot-blocking.png)
+*Hide or highlight posts by country, region, or display-name tag.*
 
-Every tweet shows the author's real location and device at a glance.
+![Options page](docs/screenshot-options.png)
+*The dashboard: stats, blocking rules, and full import/export, in light and dark.*
 
-| Indicator | Meaning |
-|-----------|---------|
-| 🇺🇸 🇬🇧 🇯🇵 | Country flag from X's location data |
-| 🍎 | iOS (iPhone/iPad) |
-| 🤖 | Android |
-| 🌐 | Web browser |
-| 🔒 | VPN/Proxy detected — location may not be accurate |
+## Features
 
-<img width="603" height="1059" alt="image" src="https://github.com/user-attachments/assets/6501f487-9e7f-4aeb-b9c2-69b0e470c949" />
+**At a glance.** Every account on the timeline gets inline signals next to the username:
 
----
+- **Country flag**: the country X attributes to the account, drawn with Twemoji so it looks identical on every OS.
+- **Device icon**: Apple (iPhone / iPad / Mac), Android, or Web.
+- **VPN / proxy signal**: a lock badge when an account's location *may* be masked. It's a heuristic hint, not a verdict, so read it as a possibility rather than proof.
+- **Circled-i**: a compact marker that opens the hover dossier.
 
-### 🚫 Location & Tag Blocking
+**The hover dossier.** Hover the circled-i for a clean glass card with the full picture: location, device, VPN/proxy signal, account creation date and age, user ID, and verification / affiliation. Everything in one place, nothing buried.
 
-Filter your timeline by hiding or highlighting tweets based on location or display name patterns.
+**Take control.** Curate your timeline by where accounts post from:
 
-**Countries** — Block individual countries with one-click selection  
-**Regions** — Block entire geographic areas (Europe, South Asia, Africa, etc.)  
-**Tags** — Block users with specific emojis, symbols, or text in their display names
+- **Block by country, region, or tag**: single countries, multi-country regions (including groups like Southeast Asia), or display-name patterns.
+- **Hide or Highlight**: remove matching posts entirely, or keep them visible with an amber accent so you stay aware without scrolling past blind.
+- **VPN/proxy toggle**: show or hide posts from accounts flagged as possibly masked.
+- **Sidebar link**: optionally inject a "Block Locations" entry straight into X's own navigation.
+- **Flag from Device**: prefer the device's country for the flag instead of the account location (it falls back to location for web/unknown), and let blocking follow device country too.
+- **Import / export**: back up or move your entire configuration in one file.
 
-**Two blocking modes:**
-- **Hide** (default) — Blocked tweets vanish from your feed
-- **Highlight** — Blocked tweets stay visible with a subtle amber border
+**Built for researchers.** *Evidence capture* turns any post into a forensic screenshot: a clean card overlaying location, device, VPN signal, timestamp, source URL, and engagement metrics. Made for OSINT work and source verification.
 
-<img width="485" height="737" alt="image" src="https://github.com/user-attachments/assets/5a79a134-dba5-4699-8087-df4c2dd6f878" />
+**Fast and private.**
 
----
+- **Local cache**: an LRU store (~50k entries, ~2-week expiry, with negative caching for not-found) means an account is never looked up twice.
+- **Optional community cache**: a privacy-first shared cache so flags load instantly and survive X's rate limits. On by default for new installs, fully optional, and entirely under your control. 2.5 million+ profiles cached by the community so far.
+- **Rate-limit aware**: backoff, retries, and a live status indicator keep things smooth when X pushes back.
+- **Light and dark**: auto-matches X's theme. v3.0.0 is a full "glass" redesign with distinctive bundled typography.
+- **No tracking**: no analytics, no IP logging, no separate account.
 
-### 📸 Evidence Screenshot
+## How it works
 
-Capture any tweet with a forensic metadata overlay showing location, device, VPN status, and timestamp.
+1. As you scroll, X-Posed spots usernames on the timeline.
+2. For each one, it reads X's own "About this account" data (via X's `AboutAccountQuery`) using your existing X session. It's the same data you could open by hand, just surfaced automatically.
+3. Results are cached locally (and optionally via the community cache) so repeat lookups are instant and rate limits stay out of your way.
+4. Flags, device icons, and signals are rendered inline, with the full dossier a hover away.
 
-Perfect for researchers, journalists, and OSINT professionals who need to document social media evidence.
+## Install
 
-<img width="690" height="735" alt="image" src="https://github.com/user-attachments/assets/03b80339-cc54-40f6-a8ba-4b65abf673d4" />
+| Platform | Get it |
+| --- | --- |
+| Chrome / Edge / Brave | [Chrome Web Store](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk) |
+| Firefox | [Firefox Add-ons](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/) |
+| iOS / iPadOS | [App Store](https://apps.apple.com/us/app/x-posed-location/id6755918713) |
 
----
-
-### 📊 Statistics Dashboard
-
-See your cached data at a glance:
-- 🌍 **Top countries** — Most common locations in your cache
-- 📱 **Device breakdown** — iOS vs Android vs Web distribution
-- 🔒 **VPN users** — Percentage of users detected with VPN/proxy
-- ☁️ **Cloud stats** — Community cache contribution metrics
-
-<img width="631" height="663" alt="image" src="https://github.com/user-attachments/assets/3c159157-c60e-4bf7-8426-fabbf78d41ca" />
-
----
-
-### 💾 Export & Import
-
-Full backup and restore of your configuration:
-- All settings and preferences
-- Blocked countries, regions, and tags
-- Cached user data
-
-Move between browsers or share configurations across devices.
-
----
-
-## 🚀 Installation
-
-| Browser | Link |
-|---------|------|
-| **Chrome / Edge / Brave** | [Chrome Web Store](https://chromewebstore.google.com/detail/x-account-location-device/oodhljjldjdhcdopjpmfgbaoibpancfk) |
-| **Firefox** | [Firefox Add-ons](https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/) |
-| **iOS / iPadOS** | [App Store](https://apps.apple.com/us/app/x-posed-location/id6755918713) |
-
-**Manual installation:**
+### Build from source
 
 ```bash
 git clone https://github.com/xaitax/x-account-location-device.git
 cd x-account-location-device/extension
 npm install
-npm run build
+npm run build          # builds both dist/chrome and dist/firefox
 ```
 
-Load `dist/chrome` or `dist/firefox` as an unpacked extension.
+Then load it unpacked:
 
----
+- **Chrome / Edge / Brave**: go to `chrome://extensions`, enable Developer mode, click **Load unpacked**, and select `dist/chrome`.
+- **Firefox**: go to `about:debugging` &rarr; This Firefox &rarr; **Load Temporary Add-on**, and select any file inside `dist/firefox`.
 
-## ⚙️ Configuration
-
-**Quick Settings (Popup)** — Click the extension icon for instant toggles:
-- ✅ Enable/disable extension
-- 🏳️ Show/hide country flags
-- 📱 Show/hide device icons
-- 🔒 Show/hide VPN indicator
-- 👁️ Filter VPN user tweets
-- 🗑️ Clear local cache
-
-**Full Options Page** — Right-click the extension icon → Options:
-- **Statistics** — View cached data analytics
-- **Cloud Cache** — Enable community sharing (opt-in)
-- **Location Blocking** — Manage blocked countries and regions
-- **Export/Import** — Backup and restore configuration
-
----
-
-## ☁️ Community Cloud Cache
-
-Optional feature — Share anonymous lookups with other users.
-
-| Benefit | Description |
-|---------|-------------|
-| ⚡ Faster lookups | Instant responses from cached community data |
-| 🛡️ Avoid rate limits | Reduce direct API calls to X |
-| 👥 Community powered | One user's lookup helps everyone |
-
-**Privacy:** Only username → location/device mappings are shared. No personal data, no IP logging.
-
-Enable in **Options → Cloud Cache → Enable Community Cache**.
-
-<img width="489" height="531" alt="image" src="https://github.com/user-attachments/assets/49680ef9-0743-44a3-a1a3-9de0b80761a4" />
-
----
-
-## 🔐 Privacy
-
-| Mode | What happens |
-|------|--------------|
-| **Default** | All data stored locally. API calls go directly to X. No external servers. |
-| **With Cloud Cache** | Username → location mappings shared anonymously. Self-hostable. |
-
-Read the full [Privacy Policy](PRIVACY.md).
-
----
-
-## 🔧 Development
+Handy scripts while hacking:
 
 ```bash
-cd extension
-npm run dev:chrome    # Watch mode for Chrome
-npm run dev:firefox   # Watch mode for Firefox
-npm run build         # Production build
-npm run package       # Create distribution zips
+npm run dev:chrome     # watch-mode rebuild for Chrome
+npm run dev:firefox    # watch-mode rebuild for Firefox
+npm run package        # produce distributable .zip files for both browsers
 ```
 
-**Project Structure:**
-```
-extension/src/
-├── background/   # Service worker, API client
-├── content/      # DOM observer, badge injection
-├── popup/        # Quick settings popup
-├── options/      # Full settings page
-└── shared/       # Constants, utilities, storage
-```
+## Privacy
+
+- X-Posed uses **X's public API with your existing session**. There's no separate account, login, or password.
+- It reads only the "About this account" data X already exposes. It does **not** perform independent geolocation and does **not** touch private data.
+- Lookups are **cached locally**. There's **no IP logging and no tracking or analytics**.
+- The community cache is **optional** and **user-controlled**: a privacy-first shared layer for instant flags, nothing more.
+
+## FAQ
+
+**Does it work on private (protected) accounts?**
+It surfaces whatever X attributes in the "About this account" panel. If X doesn't expose location or device for an account, there's nothing to show.
+
+**Is the location always accurate?**
+No, and we won't pretend otherwise. X-Posed reflects the country X attributes to an account, no more and no less, and the VPN/proxy badge is a *heuristic hint*. Treat both as signals to weigh, not guarantees.
+
+**Do I need to log in or create an account?**
+No. It rides your existing X session in the browser. There's no separate sign-up.
+
+**Is my data shared with anyone?**
+No tracking, no analytics, no IP logging. The only optional sharing is the community cache, which is privacy-first and fully under your control. Turn it off anytime.
+
+**Why didn't a flag appear for someone?**
+Either X exposes no location for that account, or the lookup is still catching up after a rate-limit backoff. Give it a moment, or check the status indicator.
+
+## Contributing
+
+Issues and pull requests are welcome. The extension lives in `extension/`. Run `npm install && npm run dev:chrome` to start hacking, and `npm run lint` before opening a PR. For anything bigger than a fix, open an issue first so we can talk it through.
+
+## License
+
+Released under the [MIT License](LICENSE).
 
 ---
 
-## 📝 Changelog
-
-**v2.5.0** — Latest
-
-### ✨ New
-- **Toggle Capture Button** — Show/hide the camera button on badges
-
-### ⚡ Performance
-- **Faster lookups** — 2x faster API with optimized throttling
-- **Cloud cost savings** — Edge caching & deduplication (~80% reduction)
-
-[View full changelog →](CHANGELOG.md)
-
----
-
-## 👤 Author
-
-**Alexander Hagenah**
-
-[![X](https://img.shields.io/badge/@xaitax-000000?style=flat&logo=x&logoColor=white)](https://x.com/xaitax)
-[![LinkedIn](https://img.shields.io/badge/alexhagenah-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/alexhagenah/)
-[![Website](https://img.shields.io/badge/primepage.de-FF6B6B?style=flat&logo=safari&logoColor=white)](https://primepage.de)
-
----
-
-⭐ **Star this repo if X-Posed helps you!**
-
-**X-Posed** — Know who you're talking to.
+<p align="center">
+Built by <b>Alexander Hagenah</b> &middot; <a href="https://x.com/xaitax">@xaitax</a> &middot; <a href="https://primepage.de">primepage.de</a><br>
+If X-Posed makes your timeline a little more honest, leave a &#11088;. It genuinely helps.
+</p>

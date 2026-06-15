@@ -8,7 +8,8 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { SELECTORS, CSS_CLASSES, TIMING } from '../shared/constants.js';
-import { findInsertionPoint, getFlagEmoji, getDeviceEmoji, debounce, throttle } from '../shared/utils.js';
+import { findInsertionPoint, getFlagEmoji, getDeviceCountry, formatCountryName, debounce, throttle } from '../shared/utils.js';
+import { deviceIcon, glyph } from './icons.js';
 import { showModal } from './modal.js';
 import { captureEvidence } from './evidence-capture.js';
 import { hovercard } from './hovercard.js';
@@ -64,6 +65,13 @@ function registerCleanup(key, fn) {
 export function detectXTheme() {
     if (typeof document === 'undefined') return 'dark';
 
+    // Issue #18: content scripts run at document_start, so on Edge/macOS (and
+    // Firefox) <html>/<body> can still be null here. getComputedStyle(null) throws
+    // a TypeError that the init try/catch swallows, silently disabling the whole
+    // extension. Bail to the default theme until the DOM exists; startThemeObserver
+    // re-runs detection once X mutates <html>/<body> during hydration.
+    if (!document.documentElement || !document.body) return 'dark';
+
     // Check CSS variable first
     const bgColor = window.getComputedStyle(document.documentElement).getPropertyValue('--background-color').trim();
     
@@ -72,7 +80,7 @@ export function detectXTheme() {
             return 'light';
         }
         if (bgColor.includes('21, 32, 43') || bgColor === '#15202b') {
-            return 'dim';
+            return 'dark'; // X removed the "dim" theme; treat any dim-era background as dark
         }
         if (bgColor.includes('0, 0, 0') || bgColor === '#000000' || bgColor === 'black') {
             return 'dark';
@@ -84,7 +92,7 @@ export function detectXTheme() {
     
     if (bodyBg) {
         if (bodyBg.includes('255, 255, 255')) return 'light';
-        if (bodyBg.includes('21, 32, 43')) return 'dim';
+        if (bodyBg.includes('21, 32, 43')) return 'dark'; // X removed the "dim" theme; treat any dim-era background as dark
         if (bodyBg.includes('0, 0, 0')) return 'dark';
     }
     
@@ -92,7 +100,7 @@ export function detectXTheme() {
     const htmlBg = window.getComputedStyle(document.documentElement).backgroundColor;
     if (htmlBg) {
         if (htmlBg.includes('255, 255, 255')) return 'light';
-        if (htmlBg.includes('21, 32, 43')) return 'dim';
+        if (htmlBg.includes('21, 32, 43')) return 'dark'; // X removed the "dim" theme; treat any dim-era background as dark
     }
     
     return 'dark'; // Default
@@ -418,6 +426,15 @@ export function findUserCellInsertionPoint(userCell, screenName) {
 }
 
 /**
+ * Hairline separator span used between badge items.
+ */
+function makeSep() {
+    const sep = document.createElement('span');
+    sep.className = 'x-sep';
+    return sep;
+}
+
+/**
  * Create info badge for a user
  */
 export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null) {
@@ -430,58 +447,70 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     
     let hasContent = false;
 
-    // Add flag
-    if (info.location && settings.showFlags !== false) {
-        const flag = getFlagEmoji(info.location);
-        if (flag) {
-            const flagSpan = document.createElement('span');
-            flagSpan.className = 'x-flag';
-            flagSpan.title = sanitizeText(info.location);
-            
-            // Handle Twemoji img tags safely using DOM methods
-            if (typeof flag === 'string' && flag.startsWith('<img')) {
-                // Parse the trusted Twemoji img tag safely
-                const imgEl = createTwemojiImage(flag, info.location);
-                if (imgEl) {
-                    flagSpan.appendChild(imgEl);
-                } else {
-                    flagSpan.textContent = '🌍'; // Fallback
-                }
-            } else {
-                flagSpan.textContent = flag;
-            }
-            badge.appendChild(flagSpan);
-            hasContent = true;
-        }
+    // Add flag (plus the accompanying VPN lock).
+    // Issue #17: optionally show the flag of the DEVICE's country instead of the
+    // account location. Web/unknown device sources have no country, so we fall back
+    // to the account location. The whole block stays gated on having a flag country,
+    // so with the option OFF (default) and no location, behavior is unchanged — no
+    // stray VPN lock appears for location-less users.
+    if (settings.showFlags !== false) {
+        const deviceCountry = settings.flagFromDevice ? getDeviceCountry(info.device) : null;
+        const flagCountry = deviceCountry || info.location;
+        if (flagCountry) {
+            const flagLabel = deviceCountry ? formatCountryName(deviceCountry) : info.location;
+            const flag = getFlagEmoji(flagCountry);
+            if (flag) {
+                const flagSpan = document.createElement('span');
+                flagSpan.className = 'x-flag';
+                flagSpan.title = sanitizeText(flagLabel);
 
-        // VPN indicator
-        if (info.locationAccurate === false && settings.showVpnIndicator !== false) {
-            const vpnSpan = document.createElement('span');
-            vpnSpan.className = 'x-vpn';
-            vpnSpan.title = 'Location may not be accurate (VPN/Proxy detected)';
-            vpnSpan.textContent = '🔒';
-            badge.appendChild(vpnSpan);
+                // Handle Twemoji img tags safely using DOM methods
+                if (typeof flag === 'string' && flag.startsWith('<img')) {
+                    // Parse the trusted Twemoji img tag safely
+                    const imgEl = createTwemojiImage(flag, flagLabel);
+                    if (imgEl) {
+                        flagSpan.appendChild(imgEl);
+                    } else {
+                        flagSpan.textContent = '🌍'; // Fallback
+                    }
+                } else {
+                    flagSpan.textContent = flag;
+                }
+                badge.appendChild(flagSpan);
+                hasContent = true;
+            }
+
+            // VPN indicator — uses ground-truth locationAccurate regardless of flag source
+            if (info.locationAccurate === false && settings.showVpnIndicator !== false) {
+                badge.appendChild(makeSep());
+                const vpnSpan = document.createElement('span');
+                vpnSpan.className = 'x-vpn';
+                vpnSpan.title = 'Location may not be accurate (VPN/Proxy detected)';
+                vpnSpan.appendChild(glyph('vpn', 13));
+                badge.appendChild(vpnSpan);
+            }
         }
     }
 
-    // Add device
+    // Add device — clear platform icon (Apple / Android / Web / Unknown)
     if (info.device && settings.showDevices !== false) {
-        const emoji = getDeviceEmoji(info.device);
+        if (hasContent) badge.appendChild(makeSep());
         const deviceSpan = document.createElement('span');
         deviceSpan.className = 'x-device';
         deviceSpan.title = 'Connected via: ' + sanitizeText(info.device);
-        deviceSpan.textContent = emoji;
+        deviceSpan.appendChild(deviceIcon(info.device, 15));
         badge.appendChild(deviceSpan);
         hasContent = true;
     }
 
     if (!hasContent) return;
 
-    // Hover hint icon (hidden until badge hover) – indicates there’s a hovercard.
+    // "More info" affordance: a static circled-i. (The hovercard shows full details on
+    // hover; we intentionally do NOT expand any text here so the badge width stays fixed
+    // and the capture button never shifts out from under the cursor.)
     const hint = document.createElement('span');
     hint.className = 'x-hover-hint';
-    hint.title = 'Hover for details';
-    hint.textContent = 'i';
+    hint.appendChild(glyph('info', 14));
     badge.appendChild(hint);
 
     // Capture button

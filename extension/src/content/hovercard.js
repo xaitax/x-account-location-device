@@ -10,6 +10,7 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { CSS_CLASSES, MESSAGE_TYPES, Z_INDEX } from '../shared/constants.js';
+import { deviceIcon, glyph, flagImage } from './icons.js';
 
 const CARD_ID = 'x-posed-hovercard';
 
@@ -75,11 +76,16 @@ function createTag({ label, tone = 'neutral', title = '' }) {
     return tag;
 }
 
-function createRow({ icon, label, value }) {
-    const row = createEl('div', 'x-posed-row');
+function createRow({ icon, label, value, primary = false, alert = false }) {
+    let cls = 'x-posed-row';
+    if (primary) cls += ' x-posed-row--primary';
+    if (alert) cls += ' x-posed-alert';
+    const row = createEl('div', cls);
 
     const left = createEl('div', 'x-posed-row-left');
-    const iconEl = createEl('span', 'x-posed-row-icon', icon);
+    const iconEl = createEl('span', 'x-posed-row-icon');
+    if (icon instanceof Node) iconEl.appendChild(icon);
+    else if (icon) iconEl.textContent = icon;
     const labelEl = createEl('span', 'x-posed-row-label', label);
     left.appendChild(iconEl);
     left.appendChild(labelEl);
@@ -118,7 +124,10 @@ function positionCard(card, anchorEl) {
 
     // Desired placement: right of badge if possible; otherwise above/below.
     const margin = 10;
-    const maxWidth = 340;
+    // Issue #21: never let the inline max-width exceed the viewport, so the card
+    // stays fully visible on narrow/mobile widths. Kept in sync with content.css
+    // (.x-posed-hovercard width:340px / max-width:calc(100vw - 20px)).
+    const maxWidth = Math.min(340, window.innerWidth - margin * 2);
 
     // Temporarily show to measure.
     card.style.left = '0px';
@@ -130,24 +139,51 @@ function positionCard(card, anchorEl) {
     let left = rect.right + margin;
     let top = rect.top - 6;
 
-    // Clamp into viewport.
+    // Prefer flipping to the left of the badge if it would overflow the right edge.
     if (left + cardRect.width > window.innerWidth - margin) {
         left = rect.left - cardRect.width - margin;
     }
 
+    // No horizontal room either side: drop below the badge.
     if (left < margin) {
-        left = Math.max(margin, rect.left);
         top = rect.bottom + margin;
     }
 
-    if (top + cardRect.height > window.innerHeight - margin) {
-        top = Math.max(margin, rect.top - cardRect.height - margin);
-    }
+    // Clamp horizontally so the card is always fully on-screen (both edges).
+    left = Math.min(left, window.innerWidth - cardRect.width - margin);
+    left = Math.max(margin, left);
 
-    if (top < margin) top = margin;
+    // Flip above the badge if it would overflow the bottom edge, then clamp.
+    if (top + cardRect.height > window.innerHeight - margin) {
+        top = rect.top - cardRect.height - margin;
+    }
+    top = Math.min(top, window.innerHeight - cardRect.height - margin);
+    top = Math.max(margin, top);
 
     card.style.left = `${Math.round(left)}px`;
     card.style.top = `${Math.round(top)}px`;
+}
+
+/**
+ * Issue #14: turn an error response into a clear, distinct hovercard message.
+ * A persistent auth failure (common with Firefox multi-account containers, where
+ * the background's cookies don't match the container session) used to show a bare
+ * "Authentication failed" on EVERY user's card, looking like a per-user data
+ * result. Distinguish the cases so the text is actionable.
+ */
+function describeHovercardError(response) {
+    switch (response?.code) {
+        case 'UNAUTHORIZED':
+            return 'Couldn’t authenticate to X. If you use Firefox containers, open X in your default container (or reload x.com).';
+        case 'NO_HEADERS':
+            return 'Waiting to capture your X session — scroll or reload x.com once, then hover again.';
+        case 'RATE_LIMITED':
+            return 'X rate limit reached — try again in a moment.';
+        case 'NOT_FOUND':
+            return 'Account not found.';
+        default:
+            return response?.error || 'Failed to fetch details';
+    }
 }
 
 function buildCardContent({ screenName, info, loading = false, errorText = '' }) {
@@ -159,21 +195,8 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
     // Header
     const header = createEl('div', 'x-posed-card-header');
 
-    const avatarWrap = createEl('div', 'x-posed-avatar-wrap');
-    const avatarUrl = meta.avatarUrl;
-    if (isTrustedTwimgUrl(avatarUrl)) {
-        const img = document.createElement('img');
-        img.className = 'x-posed-avatar';
-        img.src = avatarUrl;
-        img.alt = '';
-        img.loading = 'lazy';
-        img.referrerPolicy = 'no-referrer';
-        avatarWrap.appendChild(img);
-    } else {
-        const fallback = createEl('div', 'x-posed-avatar-fallback', (screenName || '?').slice(0, 1).toUpperCase());
-        avatarWrap.appendChild(fallback);
-    }
-
+    // Avatar intentionally omitted — the cached profile image is often stale/blurry
+    // and adds no forensic value; the dossier leads with the name + signals.
     const titleWrap = createEl('div', 'x-posed-title');
     const nameLine = createEl('div', 'x-posed-name-line');
     const name = safeText(meta.name || screenName, 60);
@@ -207,23 +230,26 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
     titleWrap.appendChild(handleEl);
     if (tags.childNodes.length > 0) titleWrap.appendChild(tags);
 
-    header.appendChild(avatarWrap);
     header.appendChild(titleWrap);
 
     // Body
     const body = createEl('div', 'x-posed-card-body');
 
-    // Always show your core signals first
+    // Primary signals first — Location (with flag), Device (platform icon), VPN.
     if (info?.location) {
-        body.appendChild(createRow({ icon: '📍', label: 'Location', value: safeText(info.location, 80) }));
+        const locVal = createEl('span', 'x-posed-loc');
+        const fimg = flagImage(info.location);
+        if (fimg) locVal.appendChild(fimg);
+        locVal.appendChild(document.createTextNode(safeText(info.location, 80)));
+        body.appendChild(createRow({ icon: glyph('location', 16), label: 'Location', value: locVal, primary: true }));
     }
 
     if (info?.device) {
-        body.appendChild(createRow({ icon: '📱', label: 'Device', value: safeText(info.device, 80) }));
+        body.appendChild(createRow({ icon: deviceIcon(info.device, 16), label: 'Device', value: safeText(info.device, 80), primary: true }));
     }
 
     if (info?.locationAccurate === false) {
-        body.appendChild(createRow({ icon: '🔒', label: 'Signal', value: 'VPN / Proxy suspected' }));
+        body.appendChild(createRow({ icon: glyph('vpn', 16), label: 'Signal', value: 'VPN / Proxy suspected', primary: true, alert: true }));
     }
 
     // Verification summary row (if any signal exists)
@@ -233,31 +259,31 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
     if (meta.identityVerified) verificationBits.push('ID');
     if (meta.protected) verificationBits.push('Protected');
     if (verificationBits.length > 0) {
-        body.appendChild(createRow({ icon: '✅', label: 'Verification', value: verificationBits.join(' · ') }));
+        body.appendChild(createRow({ icon: glyph('verified', 16), label: 'Verification', value: verificationBits.join(' · ') }));
     }
 
     const createdAt = parseCreatedAt(meta.createdAt);
     const ageYears = yearsSince(createdAt);
     if (createdAt) {
         const ageSuffix = typeof ageYears === 'number' ? ` (${ageYears}y)` : '';
-        body.appendChild(createRow({ icon: '🗓️', label: 'Created', value: `${formatShortDate(createdAt)}${ageSuffix}` }));
+        body.appendChild(createRow({ icon: glyph('created', 16), label: 'Created', value: `${formatShortDate(createdAt)}${ageSuffix}` }));
     }
 
     // Verified since
     if (typeof meta.verifiedSinceMsec === 'number' && meta.verifiedSinceMsec > 0) {
         const d = new Date(meta.verifiedSinceMsec);
         if (!Number.isNaN(d.getTime())) {
-            body.appendChild(createRow({ icon: '⏱️', label: 'Verified since', value: formatShortDate(d) }));
+            body.appendChild(createRow({ icon: glyph('clock', 16), label: 'Verified since', value: formatShortDate(d) }));
         }
     }
 
     if (typeof meta.usernameChanges === 'number') {
-        body.appendChild(createRow({ icon: '🔁', label: 'Handle changes', value: String(meta.usernameChanges) }));
+        body.appendChild(createRow({ icon: glyph('swap', 16), label: 'Handle changes', value: String(meta.usernameChanges) }));
     }
 
     // X internal stable user identifier (useful for tracking across handle changes)
     if (meta.restId) {
-        body.appendChild(createRow({ icon: '🆔', label: 'User ID', value: safeText(meta.restId, 40) }));
+        body.appendChild(createRow({ icon: glyph('id', 16), label: 'User ID', value: safeText(meta.restId, 40) }));
     }
 
     if (aff?.name || meta.affiliateUsername) {
@@ -273,21 +299,22 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
             content.appendChild(badgeImg);
         }
 
-        const label = aff?.name || meta.affiliateUsername;
-        content.appendChild(document.createTextNode(safeText(label, 60)));
+        const label = safeText(aff?.name || meta.affiliateUsername, 60);
 
-        // Link out if URL is present
+        // Link the affiliation NAME itself when a URL is present (no separate arrow).
         if (aff?.url && isSafeHttpsUrl(aff.url)) {
             const link = document.createElement('a');
             link.className = 'x-posed-link';
             link.href = aff.url;
             link.target = '_blank';
             link.rel = 'noreferrer noopener';
-            link.textContent = ' ↗';
+            link.textContent = label;
             content.appendChild(link);
+        } else {
+            content.appendChild(document.createTextNode(label));
         }
 
-        body.appendChild(createRow({ icon: '🏢', label: 'Affiliation', value: content }));
+        body.appendChild(createRow({ icon: glyph('affiliation', 16), label: 'Affiliation', value: content }));
     }
 
     // Intentionally omit `profileImageShape` ("Avatar") and `learnMoreUrl` rows:
@@ -304,6 +331,7 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
         body.appendChild(createEl('div', 'x-posed-empty', 'No extra account metadata available.'));
     }
 
+    card.appendChild(createEl('span', 'x-posed-scanline'));
     card.appendChild(header);
     card.appendChild(body);
     return card;
@@ -355,7 +383,8 @@ class HovercardController {
         positionCard(this.card, anchorEl);
 
         // Fetch rich metadata ONLY on hover (forces API), with short TTL caching.
-        this._fetchAndUpdate(anchorEl, screenName, csrfToken).catch(() => {});
+        // Pass the badge's known info so an error card can still show it (issue #14).
+        this._fetchAndUpdate(anchorEl, screenName, csrfToken, info).catch(() => {});
 
         // Keep visible if hovering card
         this.card.removeEventListener('mouseenter', this._handleCardEnter);
@@ -400,7 +429,7 @@ class HovercardController {
         this.hideSoon(120);
     }
 
-    async _fetchAndUpdate(anchorEl, screenName, csrfToken) {
+    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}) {
         const key = String(screenName || '').toLowerCase();
         if (!key) return;
 
@@ -429,9 +458,9 @@ class HovercardController {
         const response = await this.inFlight.get(key);
 
         if (!response?.success || !response.data) {
-            const msg = response?.error || 'Failed to fetch details';
+            const msg = describeHovercardError(response);
             if (this.currentAnchor === anchorEl && this.card?.classList.contains('x-posed-hovercard-visible')) {
-                this.card = buildCardContent({ screenName, info: {}, loading: false, errorText: msg });
+                this.card = buildCardContent({ screenName, info: initialInfo, loading: false, errorText: msg });
                 this.card.classList.add('x-posed-hovercard-visible');
                 positionCard(this.card, anchorEl);
             }

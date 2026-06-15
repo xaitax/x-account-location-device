@@ -15,9 +15,20 @@
     window.__X_POSED_INJECTED__ = true;
 
     const EVENT_HEADERS_CAPTURED = 'x-posed-headers-captured';
+    const EVENT_RESET_HEADERS = 'x-posed-reset-headers';
+    const EVENT_FETCH_USER_INFO = 'x-posed-fetch-user-info';
+    const EVENT_FETCH_USER_INFO_RESULT = 'x-posed-fetch-user-info-result';
     const API_PATTERN = /x\.com\/i\/api\/graphql/;
+    const ABOUT_QUERY_ID = 'XRqGa7EeokUU5kppkh13EA';
 
     let headersCaptured = false;
+    let capturedHeaders = null;
+
+    function hasHeader(headers, name) {
+        if (headers instanceof Headers) return headers.has(name);
+        const wanted = name.toLowerCase();
+        return Object.keys(headers || {}).some(key => key.toLowerCase() === wanted);
+    }
 
     /**
      * Send captured headers to content script
@@ -25,8 +36,7 @@
     function sendHeaders(headers) {
         if (headersCaptured) return;
         
-        // Validate we have auth headers
-        if (!headers || (!headers.authorization && !headers['authorization'])) {
+        if (!hasHeader(headers, 'authorization') || !hasHeader(headers, 'x-csrf-token')) {
             return;
         }
 
@@ -36,14 +46,92 @@
         const headerObj = headers instanceof Headers 
             ? Object.fromEntries(headers.entries()) 
             : { ...headers };
+        capturedHeaders = headerObj;
 
         // Dispatch custom event for content script
         window.dispatchEvent(new CustomEvent(EVENT_HEADERS_CAPTURED, {
-            detail: { headers: headerObj }
+            detail: JSON.stringify({ headers: headerObj })
         }));
 
         console.log('✅ X-Posed: API headers captured');
     }
+
+    window.addEventListener(EVENT_RESET_HEADERS, () => {
+        headersCaptured = false;
+        capturedHeaders = null;
+        console.log('🔄 X-Posed: Headers reset - waiting for next API request');
+    });
+
+    function parseAboutAccount(data) {
+        const user = data?.data?.user_result_by_screen_name?.result;
+        const profile = user?.about_profile;
+
+        return {
+            location: profile?.account_based_in || null,
+            device: profile?.source || null,
+            locationAccurate: profile?.location_accurate !== false,
+            meta: {
+                name: user?.core?.name || null,
+                avatarUrl: user?.avatar?.image_url || null,
+                createdAt: user?.core?.created_at || null,
+                restId: user?.rest_id || null
+            }
+        };
+    }
+
+    window.addEventListener(EVENT_FETCH_USER_INFO, async event => {
+        let request = {};
+        try {
+            request = JSON.parse(event.detail || '{}');
+        } catch {
+            request = {};
+        }
+
+        const { id, screenName } = request;
+
+        try {
+            if (!id || !screenName || !capturedHeaders) {
+                throw new Error('No captured page headers available');
+            }
+
+            const variables = encodeURIComponent(JSON.stringify({ screenName }));
+            const url = `/i/api/graphql/${ABOUT_QUERY_ID}/AboutAccountQuery?variables=${variables}`;
+            const response = await fetch(url, {
+                headers: {
+                    ...capturedHeaders,
+                    'accept-language': 'en-US,en;q=0.9'
+                },
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    headersCaptured = false;
+                    capturedHeaders = null;
+                    window.dispatchEvent(new CustomEvent(EVENT_FETCH_USER_INFO_RESULT, {
+                        detail: JSON.stringify({
+                            id,
+                            success: false,
+                            error: 'Authentication failed',
+                            code: 'UNAUTHORIZED'
+                        })
+                    }));
+                    return;
+                }
+
+                throw new Error(`Page API error: ${response.status}`);
+            }
+
+            window.dispatchEvent(new CustomEvent(EVENT_FETCH_USER_INFO_RESULT, {
+                detail: JSON.stringify({ id, success: true, data: parseAboutAccount(await response.json()) })
+            }));
+        } catch (error) {
+            window.dispatchEvent(new CustomEvent(EVENT_FETCH_USER_INFO_RESULT, {
+                detail: JSON.stringify({ id, success: false, error: error?.message || String(error) })
+            }));
+        }
+    });
 
     /**
      * Safe error logger - only logs in debug scenarios, never throws
@@ -131,8 +219,7 @@
         
         // Force re-capture of headers (useful for debugging)
         resetHeaders: () => {
-            headersCaptured = false;
-            console.log('🔄 X-Posed: Headers reset - waiting for next API request');
+            window.dispatchEvent(new CustomEvent(EVENT_RESET_HEADERS));
         },
         
         // Enable debug mode for error logging

@@ -15,7 +15,7 @@
       "id": "x-posed@xaitax.com",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": ["websiteActivity"]
       }
     }
   },
@@ -51,7 +51,8 @@
       "resources": [
         "page-script.js",
         "modal.js",
-        "styles/content.css"
+        "styles/content.css",
+        "fonts/*.woff2"
       ],
       "matches": [
         "*://*.x.com/*",

@@ -72,6 +72,8 @@ const copyPlugin = copy({
         { src: 'icons/*', dest: `${outputDir}/icons` },
         // Styles
         { src: 'src/styles/*.css', dest: `${outputDir}/styles` },
+        // Bundled fonts (web-accessible)
+        { src: 'src/fonts/*', dest: `${outputDir}/fonts` },
         // Popup
         { src: 'src/popup/popup.html', dest: `${outputDir}/popup` },
         { src: 'src/popup/popup.css', dest: `${outputDir}/popup` },

@@ -4,9 +4,27 @@
  */
 
 import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, isRegion } from '../shared/constants.js';
-import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText } from '../shared/utils.js';
+import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
+
+/**
+ * Resolve the country used for the flag, the xCountry dataset, and country/region
+ * blocking. When the "flag from device" option is on (issue #17) and the device
+ * source string carries a country, that country wins; otherwise we use the
+ * account location. Web/unknown device sources have no country, so we fall back
+ * to location. Returns null when neither is known.
+ * @param {{location?: string, device?: string}|null|undefined} info
+ * @param {boolean} flagFromDevice
+ * @returns {string|null}
+ */
+function effectiveCountry(info, flagFromDevice) {
+    if (flagFromDevice && info?.device) {
+        const deviceCountry = getDeviceCountry(info.device);
+        if (deviceCountry) return deviceCountry;
+    }
+    return info?.location || null;
+}
 
 // ============================================
 // VALIDATION
@@ -442,6 +460,7 @@ export async function processElement(element, {
     settings,
     csrfToken,
     sendMessage,
+    fetchUserInfoViaPage,
     debug,
     debugMode
 }) {
@@ -519,13 +538,14 @@ export async function processElement(element, {
         if (debug) debug(`Using local cache for @${screenName}`);
         const info = userInfoCache.get(screenName);
         if (info) {
-            element.dataset.xCountry = info.location || '';
+            const effCountry = effectiveCountry(info, settings.flagFromDevice);
+            element.dataset.xCountry = effCountry || '';
             element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
-            element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
-                
+            element.dataset.xIsRegion = isRegion(effCountry) ? 'true' : '';
+
             // Handle blocked country or region - only for main tweet author, not quoted tweets
-            if (info.location) {
-                const locationLower = info.location.toLowerCase();
+            if (effCountry) {
+                const locationLower = effCountry.toLowerCase();
                 const isBlockedCountry = blockedCountries.has(locationLower);
                 const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
                 
@@ -595,10 +615,12 @@ export async function processElement(element, {
         if (userInfoCache.has(screenName)) {
             const info = userInfoCache.get(screenName);
             if (info) {
-                element.dataset.xCountry = info.location || '';
-                element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
-                if (info.location) {
-                    const locationLower = info.location.toLowerCase();
+                const effCountry = effectiveCountry(info, settings.flagFromDevice);
+                element.dataset.xCountry = effCountry || '';
+                element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
+                element.dataset.xIsRegion = isRegion(effCountry) ? 'true' : '';
+                if (effCountry) {
+                    const locationLower = effCountry.toLowerCase();
                     const isBlockedCountry = blockedCountries.has(locationLower);
                     const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
                     
@@ -671,10 +693,24 @@ export async function processElement(element, {
     }
 
     try {
-        const response = await sendMessage({
+        let response = await sendMessage({
             type: MESSAGE_TYPES.FETCH_USER_INFO,
             payload: { screenName, csrfToken }
         });
+
+        // Issue #14: if the background can't authenticate (e.g. a Firefox container
+        // cookie mismatch), retry the lookup from the PAGE context — which uses the
+        // page's own correct session — then cache the result via the background.
+        if ((response?.code === 'UNAUTHORIZED' || response?.code === 'NO_HEADERS') && fetchUserInfoViaPage) {
+            const pageResponse = await fetchUserInfoViaPage(screenName);
+            if (pageResponse?.success) {
+                response = { ...pageResponse, source: 'page' };
+                await sendMessage({
+                    type: MESSAGE_TYPES.SET_CACHE,
+                    payload: { screenName, data: pageResponse.data }
+                });
+            }
+        }
 
         if (shimmer) shimmer.remove();
 
@@ -711,7 +747,26 @@ export async function processElement(element, {
             } else if (response?.error) {
                 if (debug) debug(`API error for @${screenName}: ${response.error}`);
             }
-            userInfoCache.set(screenName, null);
+
+            // Issue #14: on auth failure (the in-page fetch fallback above also failed),
+            // clear the processed markers so the element is retried once fresh headers
+            // are captured — rather than being negative-cached for the session.
+            if (response?.code === 'UNAUTHORIZED' || response?.code === 'NO_HEADERS') {
+                delete element.dataset.xProcessed;
+                delete element.dataset.xScreenName;
+                processingQueue.delete(screenName);
+                return;
+            }
+
+            // Issue #16: do NOT negative-cache other TRANSIENT failures (rate-limit,
+            // network) for the session — caching null used to blank the user until LRU
+            // eviction or a reload, even after the condition cleared. Only genuine
+            // misses (not-found/unknown) are negative-cached.
+            const code = response?.code;
+            const isTransient = code === 'RATE_LIMITED' || code === 'NETWORK_ERROR';
+            if (!isTransient) {
+                userInfoCache.set(screenName, null);
+            }
             processingQueue.delete(screenName);
             return;
         }
@@ -720,16 +775,17 @@ export async function processElement(element, {
         if (debug) debug(`Received data for @${screenName}:`, { location: info.location, device: info.device });
         
         userInfoCache.set(screenName, info);
-        
-        element.dataset.xCountry = info.location || '';
+
+        const effCountry = effectiveCountry(info, settings.flagFromDevice);
+        element.dataset.xCountry = effCountry || '';
         element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
-        element.dataset.xIsRegion = isRegion(info.location) ? 'true' : '';
+        element.dataset.xIsRegion = isRegion(effCountry) ? 'true' : '';
 
         // Handle blocked country or region
         // Only block/highlight if this is NOT inside a quote tweet (we only care about main tweet author)
         const isQuote = isInsideQuoteTweet(element);
-        if (info.location && !isQuote) {
-            const locationLower = info.location.toLowerCase();
+        if (effCountry && !isQuote) {
+            const locationLower = effCountry.toLowerCase();
             const isBlockedCountry = blockedCountries.has(locationLower);
             const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
             
@@ -771,7 +827,10 @@ export async function processElement(element, {
             }
         }
     } catch (error) {
-        userInfoCache.set(screenName, null);
+        // Issue #16: a thrown error (e.g. messaging/network blip) is transient, so we
+        // do NOT negative-cache it — the user is retried on a later scan rather than
+        // being blanked for the session.
+        if (debug) debug(`Processing error for @${screenName}: ${error?.message || error}`);
     } finally {
         clearTimeout(processingTimeout);
         processingQueue.delete(screenName);
