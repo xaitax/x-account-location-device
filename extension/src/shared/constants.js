@@ -38,7 +38,7 @@ export const CLOUD_CACHE_CONFIG = {
     BATCH_SIZE: 100,             // Max usernames per lookup request
     BATCH_DELAY_MS: 200,         // Reduced from 500ms for faster UX
     CONTRIBUTE_BATCH_SIZE: 200,  // Max entries per contribute request
-    CONTRIBUTE_DELAY_MS: 30000,  // Delay before contributing (cost savings)
+    CONTRIBUTE_DELAY_MS: 10000,  // Delay before contributing; kept under the ~30s MV3 idle window so queued contributions upload before the background suspends
 
     // Timeouts
     LOOKUP_TIMEOUT_MS: 5000,     // Max time to wait for cloud lookup
@@ -176,7 +176,7 @@ export const DEFAULT_SETTINGS = {
     showDevices: true,
     showVpnIndicator: true,
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
-    showCaptureButton: true,
+    showCaptureButton: false,  // Off by default; enable in the popup/options to show the capture button on badges
     showSidebarBlockerLink: true,
     debugMode: false,
     cloudCacheEnabled: false,  // Opt-in only

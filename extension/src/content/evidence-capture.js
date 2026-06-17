@@ -5,7 +5,8 @@
  */
 
 import { VERSION, Z_INDEX } from '../shared/constants.js';
-import { getCountryCode } from '../shared/utils.js';
+import { getCountryCode, classifyDevice } from '../shared/utils.js';
+import { glyph } from '../content/icons.js';
 
 /**
  * Capture a tweet as evidence with metadata overlay
@@ -285,16 +286,16 @@ async function createEvidenceCanvas(data) {
         ctx.restore();
     }
 
-    // Pick a device icon based on the device string.
+    // Pick a device icon based on the device string. Uses the shared
+    // classifyDevice() ladder so classification stays consistent across the
+    // extension; maps each category onto this Canvas ICONS set.
     function deviceIconFor(device) {
-        const d = (device || '').toLowerCase();
-        if (d.includes('app store') || d.includes('iphone') || d.includes('ipad') || d.includes('ios') || d.includes('mac')) {
-            return ICONS.apple;
+        switch (classifyDevice(device)) {
+            case 'ios': return ICONS.apple;
+            case 'android': return ICONS.android;
+            case 'web':
+            default: return ICONS.web;
         }
-        if (d.includes('android')) {
-            return ICONS.android;
-        }
-        return ICONS.web;
     }
 
     // Configuration - improved spacing
@@ -720,7 +721,9 @@ function showEvidencePreview(canvas, info) {
     
     const titleIcon = document.createElement('span');
     titleIcon.style.marginRight = '8px';
-    titleIcon.textContent = '📸';
+    titleIcon.style.display = 'inline-flex';
+    titleIcon.style.verticalAlign = '-3px';
+    titleIcon.appendChild(glyph('camera', 20));
     title.appendChild(titleIcon);
     title.appendChild(document.createTextNode('Evidence Captured'));
     
@@ -779,10 +782,18 @@ function showEvidencePreview(canvas, info) {
     // Helper to set save button content safely without innerHTML
     const setSaveBtnContent = (isSaved = false) => {
         saveBtn.replaceChildren();
+        const btnIcon = name => {
+            const g = glyph(name, 15);
+            g.style.verticalAlign = '-3px';
+            g.style.marginRight = '6px';
+            return g;
+        };
         if (isSaved) {
-            saveBtn.textContent = '✓ Saved!';
+            saveBtn.appendChild(btnIcon('check'));
+            saveBtn.appendChild(document.createTextNode('Saved!'));
         } else {
-            saveBtn.appendChild(document.createTextNode('💾 Save as PNG '));
+            saveBtn.appendChild(btnIcon('save'));
+            saveBtn.appendChild(document.createTextNode('Save as PNG '));
             const kbd = document.createElement('kbd');
             kbd.style.cssText = 'opacity:0.7;font-size:11px;margin-left:4px';
             kbd.textContent = '↵';

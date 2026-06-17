@@ -18,9 +18,6 @@ import cloudCache from './cloud-cache.js';
 // Track initialization state
 let initialized = false;
 
-// Keep-alive interval for MV3 service workers (Chrome can kill them after 30s of inactivity)
-let keepAliveInterval = null;
-
 // Cache for negative results (users not found) to avoid repeat API calls
 const notFoundCache = new Map();
 const NOT_FOUND_CACHE_MAX_SIZE = 1000;
@@ -49,9 +46,11 @@ async function initialize() {
 
         initialized = true;
         console.log('✅ Background worker initialized');
-        
-        // Start keep-alive mechanism for MV3 service workers
-        startKeepAlive();
+
+        // Periodically purge expired entries from the in-memory not-found cache.
+        // (No keep-alive timer: plain timers don't reset MV3 idle shutdown, and
+        // persistence is already debounced, so SW termination is fine.)
+        startNotFoundCacheCleanup();
     } catch (error) {
         console.error('❌ Background worker initialization failed:', error);
     }
@@ -442,42 +441,57 @@ function handleGetBlockedCountries() {
 }
 
 /**
- * Set blocked countries handler
+ * Generic handler for the blocked-set storages (countries/regions/tags).
+ * Applies the requested mutation, persists, then broadcasts `updatedType`.
+ *
+ * @param {object} store - a BlockedSetStorage singleton
+ * @param {string} updatedType - the *_UPDATED message type to broadcast
+ * @param {object} payload - { action, value, values }
+ *   `value`  - single value for add/remove/toggle
+ *   `values` - array for the bulk 'set' action
  */
-async function handleSetBlockedCountries({ action, country, countries }) {
+async function handleSetBlockedSet(store, updatedType, { action, value, values }) {
     switch (action) {
         case 'add':
-            blockedCountries.add(country);
+            await store.add(value);
             break;
         case 'remove':
-            blockedCountries.remove(country);
+            await store.remove(value);
             break;
         case 'toggle':
-            blockedCountries.toggle(country);
+            await store.toggle(value);
             break;
         case 'clear':
-            await blockedCountries.clear();
+            await store.clear();
             break;
         case 'set':
-            // Replace all blocked countries
-            await blockedCountries.clear();
-            for (const c of countries) {
-                blockedCountries.add(c);
-            }
+            // Replace all in one mutation + one write
+            await store.setAll(values || []);
             break;
     }
-    
-    // Notify all tabs about blocked countries change (parallelized)
+
+    // Notify all tabs about the change (parallelized)
     await broadcastToTabs({
-        type: MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED,
-        payload: blockedCountries.getAll()
+        type: updatedType,
+        payload: store.getAll()
     });
 
     return {
         success: true,
-        data: blockedCountries.getAll(),
-        size: blockedCountries.size
+        data: store.getAll(),
+        size: store.size
     };
+}
+
+/**
+ * Set blocked countries handler
+ */
+async function handleSetBlockedCountries({ action, country, countries }) {
+    return handleSetBlockedSet(blockedCountries, MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED, {
+        action,
+        value: country,
+        values: countries
+    });
 }
 
 /**
@@ -506,87 +520,41 @@ function handleGetBlockedTags() {
  * Set blocked regions handler
  */
 async function handleSetBlockedRegions({ action, region, regions }) {
-    switch (action) {
-        case 'add':
-            blockedRegions.add(region);
-            break;
-        case 'remove':
-            blockedRegions.remove(region);
-            break;
-        case 'toggle':
-            blockedRegions.toggle(region);
-            break;
-        case 'clear':
-            await blockedRegions.clear();
-            break;
-        case 'set':
-            // Replace all blocked regions
-            await blockedRegions.clear();
-            for (const r of regions) {
-                blockedRegions.add(r);
-            }
-            break;
-    }
-    
-    // Notify all tabs about blocked regions change (parallelized)
-    await broadcastToTabs({
-        type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED,
-        payload: blockedRegions.getAll()
+    return handleSetBlockedSet(blockedRegions, MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, {
+        action,
+        value: region,
+        values: regions
     });
-
-    return {
-        success: true,
-        data: blockedRegions.getAll(),
-        size: blockedRegions.size
-    };
 }
 
 /**
  * Set blocked tags handler
  */
 async function handleSetBlockedTags({ action, tag, tags }) {
-    switch (action) {
-        case 'add':
-            blockedTags.add(tag);
-            break;
-        case 'remove':
-            blockedTags.remove(tag);
-            break;
-        case 'toggle':
-            blockedTags.toggle(tag);
-            break;
-        case 'clear':
-            await blockedTags.clear();
-            break;
-        case 'set':
-            // Replace all blocked tags
-            await blockedTags.clear();
-            for (const t of tags) {
-                blockedTags.add(t);
-            }
-            break;
-    }
-    
-    // Notify all tabs about blocked tags change (parallelized)
-    await broadcastToTabs({
-        type: MESSAGE_TYPES.BLOCKED_TAGS_UPDATED,
-        payload: blockedTags.getAll()
+    return handleSetBlockedSet(blockedTags, MESSAGE_TYPES.BLOCKED_TAGS_UPDATED, {
+        action,
+        value: tag,
+        values: tags
     });
-
-    return {
-        success: true,
-        data: blockedTags.getAll(),
-        size: blockedTags.size
-    };
 }
 
 /**
  * Get statistics handler
  */
 function handleGetStatistics() {
-    const cacheEntries = userCache.getAll();
+    // Iterate raw cache entries and project only the fields statistics needs,
+    // instead of getAll() (which spreads the full value object — including the
+    // large `meta` blob — per entry, up to 50k allocations).
+    const cacheEntries = [];
+    userCache.forEach((_screenName, value) => {
+        cacheEntries.push({
+            location: value.location,
+            device: value.device,
+            locationAccurate: value.locationAccurate
+        });
+    });
     const stats = calculateStatistics(cacheEntries);
-    
+
     return {
         success: true,
         data: stats
@@ -785,33 +753,21 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             results.settings = true;
         }
         
-        // Import blocked countries if provided
+        // Import blocked countries if provided (one mutation + one write)
         if (Array.isArray(importBlockedCountries)) {
-            // Clear existing and set new
-            await blockedCountries.clear();
-            for (const country of importBlockedCountries) {
-                blockedCountries.add(country);
-            }
+            await blockedCountries.setAll(importBlockedCountries);
             results.blockedCountries.count = importBlockedCountries.length;
         }
-        
-        // Import blocked regions if provided
+
+        // Import blocked regions if provided (one mutation + one write)
         if (Array.isArray(importBlockedRegions)) {
-            // Clear existing and set new
-            await blockedRegions.clear();
-            for (const region of importBlockedRegions) {
-                blockedRegions.add(region);
-            }
+            await blockedRegions.setAll(importBlockedRegions);
             results.blockedRegions.count = importBlockedRegions.length;
         }
-        
-        // Import blocked tags if provided
+
+        // Import blocked tags if provided (one mutation + one write)
         if (Array.isArray(importBlockedTags)) {
-            // Clear existing and set new
-            await blockedTags.clear();
-            for (const tag of importBlockedTags) {
-                blockedTags.add(tag);
-            }
+            await blockedTags.setAll(importBlockedTags);
             results.blockedTags.count = importBlockedTags.length;
         }
         
@@ -921,40 +877,6 @@ function handleStartup() {
 }
 
 /**
- * Start keep-alive mechanism for MV3 service workers
- * Chrome can terminate service workers after ~30s of inactivity
- */
-function startKeepAlive() {
-    // Clear any existing interval
-    if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-    }
-    
-    // Set up periodic keep-alive
-    keepAliveInterval = setInterval(() => {
-        // Simple operation to keep service worker alive
-        // No logging to avoid console spam
-        void 0;
-    }, TIMING.KEEP_ALIVE_INTERVAL_MS);
-    
-    // Also start periodic cleanup for notFoundCache
-    startNotFoundCacheCleanup();
-}
-
-/**
- * Stop keep-alive mechanism (kept for potential future use/testing)
- */
-// eslint-disable-next-line no-unused-vars
-function stopKeepAlive() {
-    if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-        keepAliveInterval = null;
-        console.log('💓 Service worker keep-alive stopped');
-    }
-    stopNotFoundCacheCleanup();
-}
-
-/**
  * Start periodic cleanup of expired entries in notFoundCache
  * This prevents stale entries from accumulating over time
  */
@@ -979,16 +901,6 @@ function startNotFoundCacheCleanup() {
             console.debug(`🧹 Cleaned ${cleanedCount} expired entries from notFoundCache, size: ${notFoundCache.size}`);
         }
     }, TIMING.NOT_FOUND_CLEANUP_INTERVAL_MS);
-}
-
-/**
- * Stop notFoundCache cleanup
- */
-function stopNotFoundCacheCleanup() {
-    if (notFoundCleanupInterval) {
-        clearInterval(notFoundCleanupInterval);
-        notFoundCleanupInterval = null;
-    }
 }
 
 // Set up message listener
@@ -1022,6 +934,16 @@ if (runtimeNS?.runtime?.onInstalled) {
 }
 if (runtimeNS?.runtime?.onStartup) {
     runtimeNS.runtime.onStartup.addListener(handleStartup);
+}
+
+// Flush deferred writes before the background suspends (reliable on Firefox event
+// pages; best-effort on Chromium MV3). Prevents losing freshly-cached users and
+// queued community-cache contributions on idle termination.
+if (runtimeNS?.runtime?.onSuspend) {
+    runtimeNS.runtime.onSuspend.addListener(() => {
+        try { userCache.save(true); } catch { /* best-effort */ }
+        try { cloudCache.flushContributions(); } catch { /* best-effort */ }
+    });
 }
 
 // Initialize on load

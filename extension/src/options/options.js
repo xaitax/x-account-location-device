@@ -6,7 +6,7 @@
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, STORAGE_KEYS, TIMING } from '../shared/constants.js';
 import { getFlagEmoji, formatCountryName, debounce } from '../shared/utils.js';
-import { deviceIcon } from '../content/icons.js';
+import { deviceIcon, glyph } from '../content/icons.js';
 
 // Region storage uses lowercase keys, but we display proper names
 
@@ -1002,7 +1002,7 @@ function renderStatistics(stats) {
     statsOverview.appendChild(countriesItem);
     
     // VPN item
-    const vpnItem = createStatsOverviewItem(String(stats.vpnCount), `🔒 VPN/Proxy (${vpnPercentage}%)`);
+    const vpnItem = createStatsOverviewItem(String(stats.vpnCount), `VPN/Proxy (${vpnPercentage}%)`);
     statsOverview.appendChild(vpnItem);
     
     statsSection.appendChild(statsOverview);
@@ -1755,7 +1755,7 @@ function updateRateLimitBanner(status) {
     if (status.isRateLimited) {
         banner.style.display = 'flex';
         banner.className = 'rate-limit-banner rate-limited';
-        banner.querySelector('.rate-limit-icon').textContent = '⚠️';
+        banner.querySelector('.rate-limit-icon').replaceChildren(glyph('warn', 18));
         banner.querySelector('.rate-limit-title').textContent = 'Rate Limited';
         
         if (timeEl && status.resetTime) {
@@ -1774,7 +1774,7 @@ function updateRateLimitBanner(status) {
         // Show OK status
         banner.style.display = 'flex';
         banner.className = 'rate-limit-banner rate-ok';
-        banner.querySelector('.rate-limit-icon').textContent = '✅';
+        banner.querySelector('.rate-limit-icon').replaceChildren(glyph('check', 18));
         banner.querySelector('.rate-limit-title').textContent = 'API Status: OK';
         if (timeEl) {
             timeEl.textContent = 'No rate limits active';

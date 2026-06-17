@@ -10,6 +10,7 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { CSS_CLASSES, MESSAGE_TYPES, Z_INDEX } from '../shared/constants.js';
+import { LRUCache } from '../shared/lru-cache.js';
 import { deviceIcon, glyph, flagImage } from './icons.js';
 
 const CARD_ID = 'x-posed-hovercard';
@@ -321,9 +322,9 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
     // they add noise without providing actionable signal.
 
     if (errorText) {
-        body.appendChild(createRow({ icon: '⚠️', label: 'Error', value: safeText(errorText, 120) }));
+        body.appendChild(createRow({ icon: glyph('warn', 16), label: 'Error', value: safeText(errorText, 120) }));
     } else if (loading) {
-        body.appendChild(createRow({ icon: '⏳', label: 'Loading', value: 'Fetching account details…' }));
+        body.appendChild(createRow({ icon: glyph('hourglass', 16), label: 'Loading', value: 'Fetching account details…' }));
     }
 
     // Empty states
@@ -337,31 +338,54 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
     return card;
 }
 
+// Touch / no-hover devices (e.g. Firefox for Android) have no mouseenter/mouseleave,
+// so the dossier opens on tap instead of hover (see attach()).
+const TOUCH = !(typeof window !== 'undefined' && window.matchMedia &&
+    window.matchMedia('(hover: hover)').matches);
+
 class HovercardController {
     constructor() {
         this.card = null;
         this.hideTimeout = null;
         this.currentAnchor = null;
 
-        // Per-session cache to avoid repeated API hits while you hover around
-        this.hoverCache = new Map(); // screenName -> { data, fetchedAt }
+        // Per-session cache to avoid repeated API hits while you hover around.
+        // Bounded LRU so a long browsing session can't grow it without limit
+        // (entries are also TTL-checked on read). screenName -> { data, fetchedAt }
+        this.hoverCache = new LRUCache(200);
         this.inFlight = new Map(); // screenName -> Promise
         this.cacheTtlMs = 60 * 1000; // 60s
+
+        // Coalesce scroll/resize reposition work into a single rAF tick.
+        this._repositionRafId = null;
 
         this._handleCardEnter = this._handleCardEnter.bind(this);
         this._handleCardLeave = this._handleCardLeave.bind(this);
         this._handleScroll = this._handleScroll.bind(this);
+        this._handleOutsideTap = this._handleOutsideTap.bind(this);
     }
 
     attach(badgeEl, { screenName, info, csrfToken = null }) {
         if (!badgeEl || badgeEl.dataset.xPosedHovercardAttached === 'true') return;
         badgeEl.dataset.xPosedHovercardAttached = 'true';
 
-        const onEnter = () => this.show(badgeEl, { screenName, info, csrfToken });
-        const onLeave = () => this.hideSoon();
-
-        badgeEl.addEventListener('mouseenter', onEnter);
-        badgeEl.addEventListener('mouseleave', onLeave);
+        if (TOUCH) {
+            // No hover on touch: tap the badge to toggle the dossier. Stop the tap
+            // from bubbling/navigating to the profile or triggering X's own handlers.
+            badgeEl.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const open = this.currentAnchor === badgeEl &&
+                    this.card?.classList.contains('x-posed-hovercard-visible');
+                if (open) this.hide();
+                else this.show(badgeEl, { screenName, info, csrfToken });
+            });
+        } else {
+            const onEnter = () => this.show(badgeEl, { screenName, info, csrfToken });
+            const onLeave = () => this.hideSoon();
+            badgeEl.addEventListener('mouseenter', onEnter);
+            badgeEl.addEventListener('mouseleave', onLeave);
+        }
 
         // Mark for cleanup by content-script cleanup routines.
         badgeEl.classList.add('x-posed-has-hovercard');
@@ -395,6 +419,10 @@ class HovercardController {
         // Reposition on scroll/resize while visible
         window.addEventListener('scroll', this._handleScroll, true);
         window.addEventListener('resize', this._handleScroll, true);
+
+        // Touch: there is no mouseleave to dismiss, so close on a tap outside the
+        // card or its anchor.
+        if (TOUCH) document.addEventListener('pointerdown', this._handleOutsideTap, true);
     }
 
     hideSoon(delayMs = 120) {
@@ -408,6 +436,11 @@ class HovercardController {
             this.hideTimeout = null;
         }
 
+        if (this._repositionRafId !== null) {
+            cancelAnimationFrame(this._repositionRafId);
+            this._repositionRafId = null;
+        }
+
         if (this.card) {
             this.card.classList.remove('x-posed-hovercard-visible');
             this.card.replaceChildren();
@@ -416,6 +449,7 @@ class HovercardController {
         this.currentAnchor = null;
         window.removeEventListener('scroll', this._handleScroll, true);
         window.removeEventListener('resize', this._handleScroll, true);
+        document.removeEventListener('pointerdown', this._handleOutsideTap, true);
     }
 
     _handleCardEnter() {
@@ -427,6 +461,14 @@ class HovercardController {
 
     _handleCardLeave() {
         this.hideSoon(120);
+    }
+
+    _handleOutsideTap(e) {
+        if (!this.card) return;
+        const t = e.target;
+        if (this.card.contains(t)) return;
+        if (this.currentAnchor && this.currentAnchor.contains(t)) return;
+        this.hide();
     }
 
     async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}) {
@@ -477,11 +519,32 @@ class HovercardController {
     }
 
     _handleScroll() {
-        if (!this.card || !this.currentAnchor || !this.currentAnchor.isConnected) {
-            this.hide();
-            return;
-        }
-        positionCard(this.card, this.currentAnchor);
+        // Coalesce bursts of capture-phase scroll/resize events into one rAF so
+        // we don't call getBoundingClientRect()/reposition on every tick.
+        if (this._repositionRafId !== null) return;
+        this._repositionRafId = requestAnimationFrame(() => {
+            this._repositionRafId = null;
+            if (!this.card || !this.currentAnchor || !this.currentAnchor.isConnected) {
+                this.hide();
+                return;
+            }
+            positionCard(this.card, this.currentAnchor);
+        });
+    }
+
+    /**
+     * Tear down all listeners, timers, pending rAF and cached state. Idempotent.
+     * Registered with the content-script cleanup so SPA navigations/unloads
+     * don't leak the hovercard's global scroll/resize listeners or its cache.
+     */
+    teardown() {
+        this.hide();
+        this.hoverCache.clear();
+        this.inFlight.clear();
+
+        const card = document.getElementById(CARD_ID);
+        if (card) card.remove();
+        this.card = null;
     }
 }
 

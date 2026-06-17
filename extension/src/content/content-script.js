@@ -27,6 +27,8 @@ import {
     cleanupObservers
 } from './observer.js';
 
+import { hovercard } from './hovercard.js';
+
 // ============================================
 // STATE
 // ============================================
@@ -41,6 +43,7 @@ let debugMode = false;
 
 // Cleanup tracking
 let cleanupFunctions = [];
+let isCleanedUp = false;
 
 // Memoized functions (created once, reused)
 let memoizedProcessElementWithContext = null;
@@ -383,11 +386,15 @@ function createMemoizedFunctions() {
 // ============================================
 
 /**
- * Cleanup all resources
+ * Cleanup all resources. Idempotent — safe to invoke more than once
+ * (e.g. both 'pagehide' and 'beforeunload' firing).
  */
 function cleanup() {
+    if (isCleanedUp) return;
+    isCleanedUp = true;
+
     debug('Cleaning up X-Posed resources...');
-    
+
     // Run local cleanup functions
     for (const cleanupFn of cleanupFunctions) {
         try {
@@ -397,16 +404,26 @@ function cleanup() {
         }
     }
     cleanupFunctions = [];
-    
+
     // Cleanup modules
     cleanupUI();
     cleanupObservers();
-    
+
+    // Tear down the hovercard (removes global scroll/resize listeners + cache)
+    try {
+        hovercard.teardown();
+    } catch (error) {
+        console.error('X-Posed: Cleanup error:', error);
+    }
+
     debug('Cleanup complete');
 }
 
-// Handle page unload
+// Handle page unload. 'pagehide' fires reliably on the x.com SPA (and on
+// bfcache navigations) where 'beforeunload' often does not; cleanup() is
+// idempotent so both firing is harmless.
 window.addEventListener('beforeunload', cleanup);
+window.addEventListener('pagehide', cleanup);
 
 // ============================================
 // BOOTSTRAP

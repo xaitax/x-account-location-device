@@ -97,10 +97,6 @@ function updateRateLimitBanner({ isRateLimited, resetTime, remainingMs }) {
         
         elements.rateLimitTime.textContent = `Resets at ${resetDate.toLocaleTimeString()} (${timeStr})`;
         
-        // Update icon
-        const icon = elements.rateLimitBanner.querySelector('.rate-limit-icon');
-        if (icon) icon.textContent = '⚠️';
-        
         // Update title
         const title = elements.rateLimitBanner.querySelector('.rate-limit-title');
         if (title) title.textContent = 'Rate Limited';
@@ -336,8 +332,18 @@ function setupEventListeners() {
 
     // Options button
     elements.btnOptions.addEventListener('click', () => {
-        browserAPI.runtime.openOptionsPage?.() || 
-        window.open(browserAPI.runtime.getURL('options/options.html'));
+        const opened = browserAPI.runtime.openOptionsPage?.();
+        if (!opened) {
+            window.open(browserAPI.runtime.getURL('options/options.html'));
+            return;
+        }
+        // DRAFT (needs on-device check — issue #17): Firefox for Android renders the
+        // toolbar popup as a full page that lingers after the options tab opens, so
+        // the user must hit Back. Closing it lands them on Options cleanly. On desktop
+        // the popup is already dismissed when a tab opens, so this is a no-op there.
+        Promise.resolve(opened).finally(() => {
+            try { window.close(); } catch (_) { /* some platforms block popup self-close */ }
+        });
     });
 
     // Privacy link

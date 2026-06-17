@@ -16,26 +16,26 @@
                 </svg>
             </button>
             <div class="whats-new-content">
-                <h2>🎨 What's New in X-Posed v3.0</h2>
+                <h2>What's New in X-Posed v3.0</h2>
                 <p class="whats-new-subtitle">A complete glass redesign, reliability fixes & a community milestone</p>
 
                 <div class="whats-new-features">
                     <div class="whats-new-feature">
-                        <span class="feature-icon">🎨</span>
+                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l1.7 4.8L18.5 10l-4.8 1.7L12 16.5l-1.7-4.8L5.5 10l4.8-1.7z"/><path d="M18 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg></span>
                         <div class="feature-info">
                             <strong>A complete redesign</strong>
                             <span>Every surface rebuilt on one cohesive glass design: badges, the account hovercard, the blocking modal, the popup, and this settings page. Light &amp; dark.</span>
                         </div>
                     </div>
                     <div class="whats-new-feature">
-                        <span class="feature-icon">🛠️</span>
+                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15.3 6.3a3.6 3.6 0 0 1-4.6 4.6l-6 6a1.8 1.8 0 1 1-2.6-2.6l6-6a3.6 3.6 0 0 1 4.6-4.6L10.4 6 11 7.4l1.4.6 2.9-1.7z"/></svg></span>
                         <div class="feature-info">
                             <strong>Reliability &amp; bug fixes</strong>
                             <span>Fixed an Edge/macOS startup crash, flags vanishing after rate limits, Firefox-container auth, a missing region, and more.</span>
                         </div>
                     </div>
                     <div class="whats-new-feature">
-                        <span class="feature-icon">🌍</span>
+                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5S3.5 15 3.5 9.2C3.5 6.4 5.6 4.5 8.1 4.5c1.7 0 3.1.9 3.9 2.2.8-1.3 2.2-2.2 3.9-2.2 2.5 0 4.6 1.9 4.6 4.7 0 5.8-8.5 11.3-8.5 11.3z"/></svg></span>
                         <div class="feature-info">
                             <strong>2.5M+ flags, thank you</strong>
                             <span>The community cache just passed 2.5 million cached flags. Thank you for being part of it.</span>
@@ -58,7 +58,7 @@
 
         <!-- Rate Limit Status Banner -->
         <div class="rate-limit-banner" id="rate-limit-banner" style="display: none;">
-            <div class="rate-limit-icon">⚠️</div>
+            <div class="rate-limit-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2 1.6 21h20.8z"/><path d="M12 9.5v5M12 17.8h.01"/></svg></div>
             <div class="rate-limit-content">
                 <span class="rate-limit-title">Rate Limited</span>
                 <span class="rate-limit-time" id="rate-limit-time"></span>
@@ -187,7 +187,7 @@
                 <div class="option-row">
                     <div class="option-info">
                         <span class="option-label">Show Device Icons</span>
-                        <span class="option-description">Display device type emoji (📱 💻 🌐)</span>
+                        <span class="option-description">Display device type icons (Apple, Android, Web)</span>
                     </div>
                     <label class="toggle">
                         <input type="checkbox" id="opt-devices" checked>
@@ -198,7 +198,7 @@
                 <div class="option-row">
                     <div class="option-info">
                         <span class="option-label">Show VPN/Proxy Indicator</span>
-                        <span class="option-description">Display 🔒 when location may not be accurate</span>
+                        <span class="option-description">Show a lock icon when location may not be accurate</span>
                     </div>
                     <label class="toggle">
                         <input type="checkbox" id="opt-vpn" checked>
@@ -212,7 +212,7 @@
                         <span class="option-description">Display camera button for evidence screenshots</span>
                     </div>
                     <label class="toggle">
-                        <input type="checkbox" id="opt-capture-button" checked>
+                        <input type="checkbox" id="opt-capture-button">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -288,15 +288,15 @@
                 <!-- Tab Bar -->
                 <div class="blocked-tabs">
                     <button class="blocked-tab active" id="tab-countries">
-                        🌍 Countries
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.3 3.9 5.3 3.9 8.5s-1.4 6.2-3.9 8.5c-2.5-2.3-3.9-5.3-3.9-8.5S9.5 5.8 12 3.5z"/></svg>Countries
                         <span class="blocked-count" id="blocked-count">0</span>
                     </button>
                     <button class="blocked-tab" id="tab-regions">
-                        🗺️ Regions
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4z"/><path d="M9 4v14M15 6v14"/></svg>Regions
                         <span class="blocked-count" id="blocked-regions-count">0</span>
                     </button>
                     <button class="blocked-tab" id="tab-tags">
-                        🏷️ Tags
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4.5a1.5 1.5 0 0 1 1.5-1.5H12a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.6z"/><path d="M7.5 7.5h.01"/></svg>Tags
                         <span class="blocked-count" id="blocked-tags-count">0</span>
                     </button>
                 </div>
@@ -419,7 +419,7 @@
                 <div class="cloud-stats" id="cloud-stats" style="display: none;">
                     <div class="cloud-stat cloud-stat-highlight">
                         <span class="cloud-stat-value" id="cloud-total-entries">-</span>
-                        <span class="cloud-stat-label">☁️ Total in Cloud</span>
+                        <span class="cloud-stat-label"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M7 18.5a4.2 4.2 0 0 1-.3-8.4 5.6 5.6 0 0 1 10.8-1.6A3.8 3.8 0 0 1 17.3 18.5z"/></svg>Total in Cloud</span>
                     </div>
                     <div class="cloud-stat">
                         <span class="cloud-stat-value" id="cloud-lookups">0</span>
@@ -446,7 +446,7 @@
                 </div>
 
                 <div class="cloud-unconfigured" id="cloud-unconfigured" style="display: none;">
-                    <p>⚠️ Cloud cache server not configured. See the <a href="https://github.com/xaitax/x-account-location-device#community-cloud-cache" target="_blank">setup guide</a> to deploy your own server.</p>
+                    <p><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M12 3.2 1.6 21h20.8z"/><path d="M12 9.5v5M12 17.8h.01"/></svg>Cloud cache server not configured. See the <a href="https://github.com/xaitax/x-account-location-device#community-cloud-cache" target="_blank">setup guide</a> to deploy your own server.</p>
                 </div>
             </section>
             </div>

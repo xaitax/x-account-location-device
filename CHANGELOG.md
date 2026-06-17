@@ -2,6 +2,27 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [3.0.1] - 2026-06-17
+
+### Bug Fixes
+- **Highlighted (and blocked) tweets no longer revert when you hover them.** X re-renders a tweet's container on hover and was stripping our styling; the highlight, hide, and VPN-hide states now persist via a marker X can't wipe.
+- **Blocking modal tag filter** no longer shows stale results after a tag is added or removed.
+- **Chrome:** the welcome page (on install) and the "What's New" tab (on update) now open correctly; the cross-browser API shim was missing two methods.
+
+### Firefox for Android
+- Now supported on Firefox for Android. The account dossier opens on tap (no hover needed) and slides up as a bottom sheet, the popup fills the screen, and Android compatibility is declared in the manifest.
+
+### Polish
+- Replaced the last interface emojis (toasts, hovercard, popup and options banners, blocking and settings tabs, evidence-capture buttons) with the drawn glyph set, so every surface renders identically across operating systems.
+
+### Performance & Internals
+- Removed a large amount of duplicated and dead code
+- The local cache now persists only what changed and no longer leaks expiry entries
+- Freshly cached users and queued community-cache contributions now flush before the background suspends, so less is lost on idle
+- Raised the minimum Chrome version to 111 to match the CSS features in use
+
+---
+
 ## [3.0.0] - 2026-06-15
 
 A complete visual redesign, plus all the features and fixes from the 2.6 line, shipped as one major release.

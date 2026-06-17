@@ -243,15 +243,38 @@ body {
 }
 
 .rate-limit-banner.rate-limited {
-    animation: slideIn 0.3s ease-out, pulse-warning-options 2s ease-in-out infinite;
+    position: relative;
+    animation: slideIn 0.3s ease-out;
+}
+
+/* Compositor-friendly pulse: animate opacity/scale of a ring overlay
+   instead of repainting box-shadow spread every frame. */
+.rate-limit-banner.rate-limited::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 6px var(--xp-danger-soft);
+    pointer-events: none;
+    animation: pulse-warning-options 2s ease-in-out infinite;
+    will-change: opacity, transform;
 }
 
 @keyframes pulse-warning-options {
     0%, 100% {
-        box-shadow: 0 0 0 0 var(--xp-danger-soft);
+        opacity: 0;
+        transform: scale(1);
     }
     50% {
-        box-shadow: 0 0 0 6px rgba(0, 0, 0, 0);
+        opacity: 1;
+        transform: scale(1.015);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rate-limit-banner,
+    .rate-limit-banner.rate-limited::after {
+        animation: none !important;
     }
 }
 

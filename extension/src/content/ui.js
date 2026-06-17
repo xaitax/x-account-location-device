@@ -8,8 +8,8 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { SELECTORS, CSS_CLASSES, TIMING } from '../shared/constants.js';
-import { findInsertionPoint, getFlagEmoji, getDeviceCountry, formatCountryName, debounce, throttle } from '../shared/utils.js';
-import { deviceIcon, glyph } from './icons.js';
+import { findInsertionPoint, getDeviceCountry, formatCountryName, debounce, throttle } from '../shared/utils.js';
+import { deviceIcon, glyph, flagImage } from './icons.js';
 import { showModal } from './modal.js';
 import { captureEvidence } from './evidence-capture.js';
 import { hovercard } from './hovercard.js';
@@ -29,22 +29,6 @@ let sidebarCheckTimeout = null;
 
 // Cleanup functions registry - using Map with keys to prevent duplicates and memory leaks
 const cleanupRegistry = new Map();
-
-// Export array-like interface for backward compatibility
-export const uiCleanupFunctions = {
-    push(fn, key = null) {
-        const cleanupKey = key || `cleanup_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-        cleanupRegistry.set(cleanupKey, fn);
-    },
-    get length() {
-        return cleanupRegistry.size;
-    },
-    set length(val) {
-        if (val === 0) {
-            cleanupRegistry.clear();
-        }
-    }
-};
 
 /**
  * Register a cleanup function with a unique key (prevents duplicate registrations)
@@ -169,62 +153,85 @@ function getToastContainer() {
 }
 
 /**
- * Show a toast notification
- * @param {Object} options - Toast options
- * @param {string} options.title - Toast title
- * @param {string} options.message - Toast message (can include HTML)
- * @param {string} options.icon - Emoji icon to display
- * @param {string} options.iconType - Icon type for styling ('warning', 'error', 'success', 'info')
- * @param {number} options.duration - Auto-dismiss duration in ms (default 8000, 0 = no auto-dismiss)
+ * Build the toast close button with safe DOM methods.
+ * @param {HTMLElement} toast - The toast element to dismiss on click
+ * @returns {HTMLButtonElement}
  */
-export function showToast({ title, message, icon = '⏳', iconType = 'warning', duration = 8000 }) {
-    const container = getToastContainer();
-    
-    const toast = document.createElement('div');
-    toast.className = 'x-toast';
-    
-    // Icon
-    const iconEl = document.createElement('div');
-    iconEl.className = `x-toast-icon x-toast-icon-${iconType}`;
-    iconEl.textContent = icon;
-    toast.appendChild(iconEl);
-    
-    // Content
-    const contentEl = document.createElement('div');
-    contentEl.className = 'x-toast-content';
-    
-    const titleEl = document.createElement('div');
-    titleEl.className = 'x-toast-title';
-    titleEl.textContent = title;
-    contentEl.appendChild(titleEl);
-    
-    const messageEl = document.createElement('div');
-    messageEl.className = 'x-toast-message';
-    // Use textContent for safety, construct time badge safely if needed
-    messageEl.textContent = message;
-    contentEl.appendChild(messageEl);
-    
-    toast.appendChild(contentEl);
-    
-    // Close button (built with safe DOM methods)
+function makeToastCloseButton(toast) {
     const closeBtn = document.createElement('button');
     closeBtn.className = 'x-toast-close';
     closeBtn.setAttribute('aria-label', 'Dismiss');
-    
+
     const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     closeSvg.setAttribute('viewBox', '0 0 24 24');
     closeSvg.setAttribute('fill', 'none');
     closeSvg.setAttribute('stroke', 'currentColor');
     closeSvg.setAttribute('stroke-width', '2');
-    
+
     const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     closePath.setAttribute('d', 'M18 6L6 18M6 6l12 12');
     closeSvg.appendChild(closePath);
     closeBtn.appendChild(closeSvg);
-    
+
     closeBtn.addEventListener('click', () => dismissToast(toast));
-    toast.appendChild(closeBtn);
-    
+    return closeBtn;
+}
+
+/**
+ * Show a toast notification
+ * @param {Object} options - Toast options
+ * @param {string} options.title - Toast title
+ * @param {string} options.message - Toast message (rendered as text)
+ * @param {string} [options.timeBadge] - Optional styled time badge appended after
+ *   the message (XSS-safe; rendered via textContent)
+ * @param {SVGElement|string} [options.icon] - Drawn glyph element (preferred) or
+ *   a plain string. Defaults to the hourglass glyph.
+ * @param {string} options.iconType - Icon type for styling ('warning', 'error', 'success', 'info')
+ * @param {number} options.duration - Auto-dismiss duration in ms (default 8000, 0 = no auto-dismiss)
+ */
+export function showToast({ title, message, timeBadge, icon, iconType = 'warning', duration = 8000 }) {
+    const container = getToastContainer();
+
+    const toast = document.createElement('div');
+    toast.className = 'x-toast';
+
+    // Icon — accepts a drawn SVG glyph (preferred) or a plain string
+    const iconEl = document.createElement('div');
+    iconEl.className = `x-toast-icon x-toast-icon-${iconType}`;
+    const iconNode = (icon === undefined || icon === null) ? glyph('hourglass', 20) : icon;
+    if (iconNode instanceof Node) iconEl.appendChild(iconNode);
+    else iconEl.textContent = String(iconNode);
+    toast.appendChild(iconEl);
+
+    // Content
+    const contentEl = document.createElement('div');
+    contentEl.className = 'x-toast-content';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'x-toast-title';
+    titleEl.textContent = title;
+    contentEl.appendChild(titleEl);
+
+    const messageEl = document.createElement('div');
+    messageEl.className = 'x-toast-message';
+    if (timeBadge) {
+        // Message text followed by a styled time badge (both XSS-safe)
+        messageEl.appendChild(document.createTextNode(message + ' '));
+        const timeBadgeEl = document.createElement('span');
+        timeBadgeEl.className = 'x-toast-time';
+        timeBadgeEl.textContent = timeBadge;
+        messageEl.appendChild(timeBadgeEl);
+    } else {
+        // Use textContent for safety
+        messageEl.textContent = message;
+    }
+    contentEl.appendChild(messageEl);
+
+    toast.appendChild(contentEl);
+
+    // Close button (built with safe DOM methods)
+    toast.appendChild(makeToastCloseButton(toast));
+
     // Progress bar for auto-dismiss
     if (duration > 0) {
         const progress = document.createElement('div');
@@ -232,14 +239,14 @@ export function showToast({ title, message, icon = '⏳', iconType = 'warning', 
         progress.style.animationDuration = `${duration}ms`;
         toast.appendChild(progress);
     }
-    
+
     container.appendChild(toast);
-    
+
     // Auto-dismiss
     if (duration > 0) {
         setTimeout(() => dismissToast(toast), duration);
     }
-    
+
     return toast;
 }
 
@@ -265,94 +272,15 @@ export function dismissToast(toast) {
 export function showRateLimitToast(timeUntilReset) {
     // Sanitize the time string to prevent XSS
     const sanitizedTime = sanitizeText(timeUntilReset);
-    
-    showToastWithTimeBadge({
+
+    showToast({
         title: 'Rate Limit Reached',
         message: 'X API limit hit. Resets in',
-        timeBadge: `⏱️ ${sanitizedTime}`,
-        icon: '⚠️',
+        timeBadge: sanitizedTime,
+        icon: glyph('warn', 20),
         iconType: 'warning',
         duration: 8000
     });
-}
-
-/**
- * Show a toast notification with a styled time badge (XSS-safe)
- * @param {Object} options - Toast options with timeBadge for styled time display
- */
-function showToastWithTimeBadge({ title, message, timeBadge, icon = '⏳', iconType = 'warning', duration = 8000 }) {
-    const container = getToastContainer();
-    
-    const toast = document.createElement('div');
-    toast.className = 'x-toast';
-    
-    // Icon
-    const iconEl = document.createElement('div');
-    iconEl.className = `x-toast-icon x-toast-icon-${iconType}`;
-    iconEl.textContent = icon;
-    toast.appendChild(iconEl);
-    
-    // Content
-    const contentEl = document.createElement('div');
-    contentEl.className = 'x-toast-content';
-    
-    const titleEl = document.createElement('div');
-    titleEl.className = 'x-toast-title';
-    titleEl.textContent = title;
-    contentEl.appendChild(titleEl);
-    
-    const messageEl = document.createElement('div');
-    messageEl.className = 'x-toast-message';
-    
-    // Add message text
-    messageEl.appendChild(document.createTextNode(message + ' '));
-    
-    // Add time badge safely using DOM methods
-    if (timeBadge) {
-        const timeBadgeEl = document.createElement('span');
-        timeBadgeEl.className = 'x-toast-time';
-        timeBadgeEl.textContent = timeBadge;
-        messageEl.appendChild(timeBadgeEl);
-    }
-    
-    contentEl.appendChild(messageEl);
-    toast.appendChild(contentEl);
-    
-    // Close button
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'x-toast-close';
-    closeBtn.setAttribute('aria-label', 'Dismiss');
-    
-    const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    closeSvg.setAttribute('viewBox', '0 0 24 24');
-    closeSvg.setAttribute('fill', 'none');
-    closeSvg.setAttribute('stroke', 'currentColor');
-    closeSvg.setAttribute('stroke-width', '2');
-    
-    const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    closePath.setAttribute('d', 'M18 6L6 18M6 6l12 12');
-    closeSvg.appendChild(closePath);
-    closeBtn.appendChild(closeSvg);
-    
-    closeBtn.addEventListener('click', () => dismissToast(toast));
-    toast.appendChild(closeBtn);
-    
-    // Progress bar for auto-dismiss
-    if (duration > 0) {
-        const progress = document.createElement('div');
-        progress.className = 'x-toast-progress';
-        progress.style.animationDuration = `${duration}ms`;
-        toast.appendChild(progress);
-    }
-    
-    container.appendChild(toast);
-    
-    // Auto-dismiss
-    if (duration > 0) {
-        setTimeout(() => dismissToast(toast), duration);
-    }
-    
-    return toast;
 }
 
 // ============================================
@@ -370,37 +298,6 @@ export function sanitizeText(text) {
         const entities = { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' };
         return entities[char] || char;
     }).substring(0, 100);
-}
-
-/**
- * Create a Twemoji image element safely from the getFlagEmoji output
- * Only allows images from trusted Twemoji CDN
- * @param {string} imgTag - HTML img tag string from getFlagEmoji
- * @param {string} altText - Alt text for the image
- * @returns {HTMLImageElement|null} - Safe img element or null
- */
-function createTwemojiImage(imgTag, altText) {
-    // Extract src attribute safely using regex
-    const srcMatch = imgTag.match(/src="(https:\/\/abs-0\.twimg\.com\/emoji\/v2\/svg\/[^"]+\.svg)"/);
-    if (!srcMatch || !srcMatch[1]) {
-        return null;
-    }
-    
-    const src = srcMatch[1];
-    
-    // Validate URL is from trusted Twemoji CDN
-    if (!src.startsWith('https://abs-0.twimg.com/emoji/v2/svg/')) {
-        return null;
-    }
-    
-    // Create image element safely
-    const img = document.createElement('img');
-    img.src = src;
-    img.className = 'x-flag-emoji';
-    img.alt = sanitizeText(altText) || 'flag';
-    img.style.cssText = 'height: 1.2em; vertical-align: -0.2em;';
-    
-    return img;
 }
 
 /**
@@ -436,15 +333,17 @@ function makeSep() {
 
 /**
  * Create info badge for a user
+ * @param {string|null} [effectiveCountry] - Flag/blocking country already computed
+ *   by the observer (effectiveCountry()). Avoids recomputing getDeviceCountry here.
  */
-export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null) {
+export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null, effectiveCountry = null) {
     if (element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`)) {
         return;
     }
 
     const badge = document.createElement('span');
     badge.className = CSS_CLASSES.INFO_BADGE;
-    
+
     let hasContent = false;
 
     // Add flag (plus the accompanying VPN lock).
@@ -454,31 +353,25 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     // so with the option OFF (default) and no location, behavior is unchanged — no
     // stray VPN lock appears for location-less users.
     if (settings.showFlags !== false) {
+        // The observer already computed the effective (device-or-location) country;
+        // reuse it instead of recomputing getDeviceCountry. Fall back to the same
+        // computation only when it wasn't supplied (defensive).
         const deviceCountry = settings.flagFromDevice ? getDeviceCountry(info.device) : null;
-        const flagCountry = deviceCountry || info.location;
+        const flagCountry = effectiveCountry || deviceCountry || info.location;
         if (flagCountry) {
-            const flagLabel = deviceCountry ? formatCountryName(deviceCountry) : info.location;
-            const flag = getFlagEmoji(flagCountry);
-            if (flag) {
-                const flagSpan = document.createElement('span');
-                flagSpan.className = 'x-flag';
-                flagSpan.title = sanitizeText(flagLabel);
+            const flagLabel = deviceCountry ? formatCountryName(deviceCountry) : (info.location || formatCountryName(flagCountry));
+            const flagImg = flagImage(flagCountry);
+            const flagSpan = document.createElement('span');
+            flagSpan.className = 'x-flag';
+            flagSpan.title = sanitizeText(flagLabel);
 
-                // Handle Twemoji img tags safely using DOM methods
-                if (typeof flag === 'string' && flag.startsWith('<img')) {
-                    // Parse the trusted Twemoji img tag safely
-                    const imgEl = createTwemojiImage(flag, flagLabel);
-                    if (imgEl) {
-                        flagSpan.appendChild(imgEl);
-                    } else {
-                        flagSpan.textContent = '🌍'; // Fallback
-                    }
-                } else {
-                    flagSpan.textContent = flag;
-                }
-                badge.appendChild(flagSpan);
-                hasContent = true;
+            if (flagImg) {
+                flagSpan.appendChild(flagImg);
+            } else {
+                flagSpan.textContent = '🌍'; // Unknown country fallback (matches prior behavior)
             }
+            badge.appendChild(flagSpan);
+            hasContent = true;
 
             // VPN indicator — uses ground-truth locationAccurate regardless of flag source
             if (info.locationAccurate === false && settings.showVpnIndicator !== false) {
@@ -519,23 +412,8 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
         captureBtn.className = 'x-capture-btn';
         captureBtn.title = 'Capture evidence screenshot';
         captureBtn.setAttribute('aria-label', 'Capture evidence');
-        
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('width', '14');
-        svg.setAttribute('height', '14');
-        
-        const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path1.setAttribute('fill', 'currentColor');
-        path1.setAttribute('d', 'M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z');
-        
-        const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path2.setAttribute('fill', 'currentColor');
-        path2.setAttribute('d', 'M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z');
-        
-        svg.appendChild(path1);
-        svg.appendChild(path2);
-        captureBtn.appendChild(svg);
+
+        captureBtn.appendChild(glyph('camera', 14));
         badge.appendChild(captureBtn);
 
         captureBtn.addEventListener('click', e => {
@@ -769,12 +647,13 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
         while (svg.firstChild) {
             svg.removeChild(svg.firstChild);
         }
-        // Build SVG content with safe DOM methods
-        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78z');
-        g.appendChild(path);
-        svg.appendChild(g);
+        // Transplant the shield glyph's paths into the cloned <svg> wrapper so we
+        // keep X's existing sizing/classes on the wrapper (24-unit viewBox) while
+        // reusing the shared icon set instead of a hand-built path.
+        const shield = glyph('shield', 24);
+        while (shield.firstChild) {
+            svg.appendChild(shield.firstChild);
+        }
     }
     
     const textDiv = link.querySelector('[dir="ltr"]');

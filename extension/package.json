@@ -1,6 +1,6 @@
 {
   "name": "x-posed-extension",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.",
   "type": "module",
   "scripts": {
@@ -13,8 +13,8 @@
     "build:prod": "cross-env NODE_ENV=production npm run build",
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
-    "package:chrome": "npm run build:chrome && node scripts/zip.js chrome",
-    "package:firefox": "npm run build:firefox && node scripts/zip.js firefox",
+    "package:chrome": "rimraf dist/chrome && npm run build:chrome && node scripts/zip.js chrome",
+    "package:firefox": "rimraf dist/firefox && npm run build:firefox && node scripts/zip.js firefox",
     "package": "npm run package:chrome && npm run package:firefox",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix"

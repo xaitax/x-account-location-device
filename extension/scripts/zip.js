@@ -4,7 +4,7 @@
  * Cross-platform zip script for packaging the extension
  */
 
-import { createWriteStream, existsSync, mkdirSync } from 'fs';
+import { createWriteStream, existsSync, mkdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import archiver from 'archiver';
@@ -33,7 +33,14 @@ const archive = archiver('zip', {
 });
 
 output.on('close', () => {
-    const size = (archive.pointer() / 1024).toFixed(2);
+    // Read the final size from disk (ground truth). archive.pointer() can
+    // intermittently report 0 in this handler depending on stream timing.
+    let bytes = archive.pointer();
+    try {
+        const onDisk = statSync(outputFile).size;
+        if (onDisk > 0) bytes = onDisk;
+    } catch { /* keep the pointer() fallback */ }
+    const size = (bytes / 1024).toFixed(2);
     console.log(`✅ Created ${outputFile} (${size} KB)`);
 });
 

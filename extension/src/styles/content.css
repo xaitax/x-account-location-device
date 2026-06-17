@@ -169,6 +169,27 @@
     pointer-events: auto;
 }
 
+/* Touch / no-hover (e.g. Firefox for Android): the dossier opens on tap and renders
+   as a bottom sheet filling the width, overriding the desktop anchor positioning
+   (the inline top/left set in JS lack !important, so these win). */
+@media (hover: none) {
+    .x-posed-hovercard {
+        left: 0 !important;
+        right: 0 !important;
+        top: auto !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 78vh;
+        overflow-y: auto;
+        border-radius: var(--xp-r-lg) var(--xp-r-lg) 0 0 !important;
+        transform: translateY(100%);
+    }
+    .x-posed-hovercard.x-posed-hovercard-visible {
+        transform: translateY(0) !important;
+    }
+}
+
 /* signature: signal-acquire scanline sweep on open */
 .x-posed-scanline { display: none; }
 .x-posed-hovercard-visible .x-posed-scanline {
@@ -448,6 +469,17 @@
 .x-tweet-highlighted {
     border-left: 3px solid var(--xp-alert) !important;
     background: linear-gradient(90deg, var(--xp-alert-soft) 0%, transparent 15%) !important;
+}
+
+/* Resilient block/highlight: anchored on a persistent marker (data-x-block) on our
+   processed username element, so the ancestor <article> stays styled even after X
+   re-renders it and wipes the class above. */
+article[data-testid="tweet"]:has([data-x-block="highlight"]) {
+    border-left: 3px solid var(--xp-alert) !important;
+    background: linear-gradient(90deg, var(--xp-alert-soft) 0%, transparent 15%) !important;
+}
+article[data-testid="tweet"]:has([data-x-block="hide"]) {
+    display: none !important;
 }
 
 /* Country Blocker Modal Overlay */
@@ -1327,12 +1359,6 @@
     to {
         width: 0%;
     }
-}
-
-/* Toast needs relative positioning for progress bar */
-.x-toast {
-    position: relative;
-    overflow: hidden;
 }
 
 /* Responsive toast */

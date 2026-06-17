@@ -14,6 +14,16 @@
     if (window.__X_POSED_INJECTED__) return;
     window.__X_POSED_INJECTED__ = true;
 
+    // Gate informational logging. Off by default so we don't spam the page
+    // console in production; flip via window.XPosed.enableDebug() (sets
+    // window.XPosedDebug) or by setting DEBUG = true here during development.
+    const DEBUG = false;
+    function debugLog(...args) {
+        if (DEBUG || window.XPosedDebug) {
+            console.log(...args);
+        }
+    }
+
     const EVENT_HEADERS_CAPTURED = 'x-posed-headers-captured';
     const EVENT_RESET_HEADERS = 'x-posed-reset-headers';
     const EVENT_FETCH_USER_INFO = 'x-posed-fetch-user-info';
@@ -53,13 +63,13 @@
             detail: JSON.stringify({ headers: headerObj })
         }));
 
-        console.log('✅ X-Posed: API headers captured');
+        debugLog('✅ X-Posed: API headers captured');
     }
 
     window.addEventListener(EVENT_RESET_HEADERS, () => {
         headersCaptured = false;
         capturedHeaders = null;
-        console.log('🔄 X-Posed: Headers reset - waiting for next API request');
+        debugLog('🔄 X-Posed: Headers reset - waiting for next API request');
     });
 
     function parseAboutAccount(data) {
@@ -210,9 +220,10 @@
      * to ensure consistency with constants.js
      */
     window.XPosed = {
-        // This version string is replaced at build time via @rollup/plugin-replace
-        // See rollup.config.js for the replacement configuration
-        version: '2.0.2',
+        // This placeholder is replaced at build time via @rollup/plugin-replace
+        // (rollup.config.js maps __BUILD_VERSION__ -> package.json version),
+        // matching how constants.js sources VERSION.
+        version: '__BUILD_VERSION__',
         
         // Check if headers are captured
         hasHeaders: () => headersCaptured,
@@ -237,7 +248,7 @@
         // Debug info
         debug: () => {
             console.log('X-Posed Debug Info:', {
-                version: '2.0.2',
+                version: '__BUILD_VERSION__',
                 headersCaptured,
                 injected: true,
                 debugMode: !!window.XPosedDebug
@@ -245,5 +256,5 @@
         }
     };
 
-    console.log('🚀 X-Posed: Page script loaded');
+    debugLog('🚀 X-Posed: Page script loaded');
 })();

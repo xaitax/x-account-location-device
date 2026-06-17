@@ -112,29 +112,6 @@ export class LRUCache {
     values() {
         return this.cache.values();
     }
-
-    /**
-     * Convert cache to a plain object
-     * @returns {Object<string, V>}
-     */
-    toObject() {
-        const obj = {};
-        for (const [key, value] of this.cache) {
-            obj[key] = value;
-        }
-        return obj;
-    }
-
-    /**
-     * Load entries from a plain object
-     * @param {Object<string, V>} obj - Object with entries to load
-     */
-    fromObject(obj) {
-        this.clear();
-        for (const [key, value] of Object.entries(obj)) {
-            this.set(key, value);
-        }
-    }
 }
 
 export default LRUCache;

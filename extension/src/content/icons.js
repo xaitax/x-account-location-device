@@ -6,6 +6,7 @@
  */
 
 import { COUNTRY_FLAGS } from '../shared/constants.js';
+import { classifyDevice } from '../shared/utils.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -115,6 +116,91 @@ const GLYPHS = {
         const s = base(size, true);
         s.appendChild(el('path', { d: 'M7 7h11l-3-3M17 17H6l3 3' }));
         return s;
+    },
+    camera(size) {
+        const s = base(size, false);
+        s.appendChild(el('path', { d: 'M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z' }));
+        s.appendChild(el('path', { d: 'M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z' }));
+        return s;
+    },
+    shield(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z' }));
+        return s;
+    },
+    close(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M6 6 L18 18' }));
+        s.appendChild(el('path', { d: 'M18 6 L6 18' }));
+        return s;
+    },
+    warn(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M12 3.2 1.6 21h20.8z' }));
+        s.appendChild(el('path', { d: 'M12 9.5v5M12 17.8h.01' }));
+        return s;
+    },
+    globe(size) {
+        const s = base(size, true);
+        s.appendChild(el('circle', { cx: '12', cy: '12', r: '8.5' }));
+        s.appendChild(el('path', { d: 'M3.5 12h17M12 3.5c2.5 2.3 3.9 5.3 3.9 8.5s-1.4 6.2-3.9 8.5c-2.5-2.3-3.9-5.3-3.9-8.5S9.5 5.8 12 3.5z' }));
+        return s;
+    },
+    map(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4z' }));
+        s.appendChild(el('path', { d: 'M9 4v14M15 6v14' }));
+        return s;
+    },
+    tag(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4.5a1.5 1.5 0 0 1 1.5-1.5H12a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.6z' }));
+        s.appendChild(el('path', { d: 'M7.5 7.5h.01' }));
+        return s;
+    },
+    cloud(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M7 18.5a4.2 4.2 0 0 1-.3-8.4 5.6 5.6 0 0 1 10.8-1.6A3.8 3.8 0 0 1 17.3 18.5z' }));
+        return s;
+    },
+    lock(size) {
+        const s = base(size, true);
+        s.appendChild(el('rect', { x: '4.8', y: '10.5', width: '14.4', height: '10', rx: '2' }));
+        s.appendChild(el('path', { d: 'M8 10.5V7.2a4 4 0 0 1 8 0v3.3M12 14.3v2.6' }));
+        return s;
+    },
+    hourglass(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M6.5 3h11M6.5 21h11' }));
+        s.appendChild(el('path', { d: 'M7.5 3c0 4.8 4.5 6 4.5 9s-4.5 4.2-4.5 9M16.5 3c0 4.8-4.5 6-4.5 9s4.5 4.2 4.5 9' }));
+        return s;
+    },
+    wrench(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M15.3 6.3a3.6 3.6 0 0 1-4.6 4.6l-6 6a1.8 1.8 0 1 1-2.6-2.6l6-6a3.6 3.6 0 0 1 4.6-4.6L10.4 6 11 7.4l1.4.6 2.9-1.7z' }));
+        return s;
+    },
+    sparkles(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M12 3.5l1.7 4.8L18.5 10l-4.8 1.7L12 16.5l-1.7-4.8L5.5 10l4.8-1.7z' }));
+        s.appendChild(el('path', { d: 'M18 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z' }));
+        return s;
+    },
+    save(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M5.5 3.5h11L20.5 7.5v12a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z' }));
+        s.appendChild(el('path', { d: 'M7.5 3.5v5h7v-5M7.5 20.5v-6h9v6' }));
+        return s;
+    },
+    check(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M4.5 12.5l4.5 4.5 10.5-10.5' }));
+        return s;
+    },
+    heart(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M12 20.5S3.5 15 3.5 9.2C3.5 6.4 5.6 4.5 8.1 4.5c1.7 0 3.1.9 3.9 2.2.8-1.3 2.2-2.2 3.9-2.2 2.5 0 4.6 1.9 4.6 4.7 0 5.8-8.5 11.3-8.5 11.3z' }));
+        return s;
     }
 };
 
@@ -125,16 +211,19 @@ const GLYPHS = {
  * @returns {SVGElement}
  */
 export function deviceIcon(deviceString, size = 15) {
-    const d = (deviceString || '').toLowerCase();
-    if (d.includes('app store')) return apple(size);
-    if (d.includes('android')) return android(size);
-    if (d.includes('web') || d === 'x' || d === 'twitter') return web(size);
-    return unknownDevice(size);
+    switch (classifyDevice(deviceString)) {
+        case 'ios': return apple(size);
+        case 'android': return android(size);
+        case 'web': return web(size);
+        default: return unknownDevice(size);
+    }
 }
 
 /**
  * Return an SVG element for a named glyph (info, vpn, location, verified,
- * created, id, affiliation). Falls back to the info glyph.
+ * created, id, affiliation, clock, swap, camera, shield, close, warn, globe,
+ * map, tag, cloud, lock, hourglass, wrench, sparkles, save, check, heart).
+ * Falls back to the info glyph.
  * @param {string} name
  * @param {number} size
  * @returns {SVGElement}

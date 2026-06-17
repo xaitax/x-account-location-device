@@ -118,35 +118,6 @@ export function cancelIdleCallback(id) {
 }
 
 /**
- * Process items in batches using idle callback
- */
-export async function processBatch(items, processor, batchSize = 10) {
-    const results = [];
-    
-    for (let i = 0; i < items.length; i += batchSize) {
-        const batch = items.slice(i, i + batchSize);
-        
-        await new Promise(resolve => {
-            requestIdleCallback(async deadline => {
-                for (const item of batch) {
-                    if (deadline.timeRemaining() > 0 || deadline.didTimeout) {
-                        try {
-                            const result = await processor(item);
-                            results.push(result);
-                        } catch (error) {
-                            console.error('Batch processing error:', error);
-                        }
-                    }
-                }
-                resolve();
-            }, { timeout: 100 });
-        });
-    }
-    
-    return results;
-}
-
-/**
  * Detect if the current platform is Windows
  * Uses modern userAgentData API with fallback to userAgent parsing
  * @returns {boolean}
@@ -227,27 +198,18 @@ export function getCountryCode(location) {
 }
 
 /**
- * Get device emoji based on device string.
- * Categories: iOS (🍎), Android (🤖), Web (🌐), Unknown (❓)
+ * Classify a device/source string into a normalized platform category.
+ * Unifies the device-classification ladders duplicated across the codebase.
  * @param {string|null|undefined} deviceString - The device/client string from X API
- * @returns {string|null} - Device emoji or null if no device string
+ * @returns {'ios'|'android'|'web'|'unknown'} - Normalized device category
  */
-export function getDeviceEmoji(deviceString) {
-    if (!deviceString) return null;
-    
-    const d = deviceString.toLowerCase();
-    
-    // iOS devices (App Store = iPhone/iPad)
-    if (d.includes('app store')) return '🍎';
-    
-    // Android devices
-    if (d.includes('android')) return '🤖';
-    
-    // Web clients (could be desktop or mobile browser - we can't distinguish)
-    if (d.includes('web') || d === 'x' || d === 'twitter') return '🌐';
-    
-    // Unknown device type
-    return '❓';
+export function classifyDevice(deviceString) {
+    const d = (deviceString || '').toLowerCase();
+
+    if (d.includes('android')) return 'android';
+    if (['app store', 'iphone', 'ipad', 'ios', 'mac', 'os x'].some(t => d.includes(t))) return 'ios';
+    if (d.includes('web')) return 'web';
+    return 'unknown';
 }
 
 /**
@@ -450,204 +412,12 @@ export function createElement(tag, attributes = {}, children = []) {
 }
 
 /**
- * Wait for an element to appear in the DOM using MutationObserver.
- * @param {string} selector - CSS selector for the element
- * @param {number} [timeout=10000] - Maximum time to wait in milliseconds
- * @param {Document|HTMLElement} [parent=document] - Parent element to search in
- * @returns {Promise<HTMLElement>} - Resolves with the element or rejects on timeout
- */
-export function waitForElement(selector, timeout = 10000, parent = document) {
-    return new Promise((resolve, reject) => {
-        const element = parent.querySelector(selector);
-        if (element) {
-            resolve(element);
-            return;
-        }
-
-        const observer = new MutationObserver((mutations, obs) => {
-            const element = parent.querySelector(selector);
-            if (element) {
-                obs.disconnect();
-                resolve(element);
-            }
-        });
-
-        observer.observe(parent === document ? document.body : parent, {
-            childList: true,
-            subtree: true
-        });
-
-        setTimeout(() => {
-            observer.disconnect();
-            reject(new Error(`Element ${selector} not found within ${timeout}ms`));
-        }, timeout);
-    });
-}
-
-/**
  * Sleep helper - returns a Promise that resolves after the specified time.
  * @param {number} ms - Time to sleep in milliseconds
  * @returns {Promise<void>}
  */
 export function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Retry a function with exponential backoff.
- * @template T
- * @param {() => Promise<T>} fn - The async function to retry
- * @param {number} [maxRetries=3] - Maximum number of retry attempts
- * @param {number} [baseDelay=1000] - Base delay in ms (doubles each retry)
- * @returns {Promise<T>} - The function result
- * @throws {Error} - The last error if all retries fail
- */
-export async function retry(fn, maxRetries = 3, baseDelay = 1000) {
-    let lastError;
-    
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            lastError = error;
-            if (attempt < maxRetries - 1) {
-                const delay = baseDelay * Math.pow(2, attempt);
-                await sleep(delay);
-            }
-        }
-    }
-    
-    throw lastError;
-}
-
-/**
- * Simple event emitter
- */
-export class EventEmitter {
-    constructor() {
-        this.events = new Map();
-    }
-
-    on(event, listener) {
-        if (!this.events.has(event)) {
-            this.events.set(event, new Set());
-        }
-        this.events.get(event).add(listener);
-        return () => this.off(event, listener);
-    }
-
-    off(event, listener) {
-        if (this.events.has(event)) {
-            this.events.get(event).delete(listener);
-        }
-    }
-
-    emit(event, ...args) {
-        if (this.events.has(event)) {
-            for (const listener of this.events.get(event)) {
-                try {
-                    listener(...args);
-                } catch (error) {
-                    console.error(`Event listener error for ${event}:`, error);
-                }
-            }
-        }
-    }
-
-    once(event, listener) {
-        const onceWrapper = (...args) => {
-            this.off(event, onceWrapper);
-            listener(...args);
-        };
-        return this.on(event, onceWrapper);
-    }
-}
-
-/**
- * Generate unique ID
- */
-export function generateId() {
-    return `x-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-}
-
-/**
- * Safe JSON parse with fallback
- */
-export function safeJsonParse(str, fallback = null) {
-    try {
-        return JSON.parse(str);
-    } catch {
-        return fallback;
-    }
-}
-
-/**
- * Check if object is empty
- */
-export function isEmpty(obj) {
-    if (!obj) return true;
-    if (Array.isArray(obj)) return obj.length === 0;
-    if (typeof obj === 'object') return Object.keys(obj).length === 0;
-    return false;
-}
-
-/**
- * Detect and apply X's current theme
- * X uses data-theme attribute on the <html> element: "dark", "dim", or "light"
- */
-export function detectXTheme() {
-    // First check if we're in a content script context with access to X's DOM
-    if (typeof document !== 'undefined') {
-        const htmlElement = document.documentElement;
-        const xTheme = htmlElement.getAttribute('data-theme');
-        
-        if (xTheme) {
-            return xTheme; // "dark", "dim", or "light"
-        }
-        
-        // Fallback: check background color
-        const bgColor = window.getComputedStyle(document.body).backgroundColor;
-        if (bgColor) {
-            // X dark: rgb(0, 0, 0), dim: rgb(21, 32, 43), light: rgb(255, 255, 255)
-            if (bgColor === 'rgb(0, 0, 0)') return 'dark';
-            if (bgColor === 'rgb(21, 32, 43)' || bgColor.includes('21, 32, 43')) return 'dim';
-            if (bgColor === 'rgb(255, 255, 255)') return 'light';
-        }
-    }
-    
-    // Default to dark
-    return 'dark';
-}
-
-/**
- * Apply theme to an HTML document
- */
-export function applyTheme(theme, doc = document) {
-    doc.documentElement.setAttribute('data-theme', theme);
-}
-
-/**
- * Set up theme sync observer (for content scripts)
- * Watches X's theme changes and notifies callback
- */
-export function observeThemeChanges(callback) {
-    if (typeof document === 'undefined') return null;
-    
-    const observer = new MutationObserver(mutations => {
-        for (const mutation of mutations) {
-            if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
-                const newTheme = document.documentElement.getAttribute('data-theme');
-                callback(newTheme);
-            }
-        }
-    });
-    
-    observer.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['data-theme']
-    });
-    
-    return observer;
 }
 
 /**
@@ -726,20 +496,8 @@ export function calculateStatistics(cacheEntries) {
  * @returns {string} - Device category name
  */
 function getDeviceCategory(deviceString) {
-    if (!deviceString) return 'Unknown';
-    
-    const d = deviceString.toLowerCase();
-    
-    // iOS devices (App Store = iPhone/iPad)
-    if (d.includes('app store')) return 'iOS';
-    
-    // Android devices
-    if (d.includes('android')) return 'Android';
-    
-    // Web clients (desktop or mobile browser)
-    if (d.includes('web') || d === 'x' || d === 'twitter') return 'Web';
-    
-    return 'Unknown';
+    const labels = { ios: 'iOS', android: 'Android', web: 'Web', unknown: 'Unknown' };
+    return labels[classifyDevice(deviceString)];
 }
 
 /**

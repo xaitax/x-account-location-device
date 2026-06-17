@@ -12,8 +12,9 @@ import { LRUCache } from './lru-cache.js';
  */
 class UserCacheStorage {
     constructor() {
+        // Each in-memory LRU value is an envelope `{ value, expiry }` so that the
+        // per-entry expiry is freed automatically when the LRU evicts an entry.
         this.cache = new LRUCache(CACHE_CONFIG.MAX_ENTRIES);
-        this.expiryMap = new Map(); // Track individual entry expiry times
         this.dirty = false;
         this.loaded = false;
         this.saveTimeoutId = null;
@@ -23,26 +24,26 @@ class UserCacheStorage {
         try {
             const result = await browserAPI.storage.local.get(STORAGE_KEYS.CACHE);
             const stored = result[STORAGE_KEYS.CACHE];
-            
+
             if (stored && typeof stored === 'object') {
                 const now = Date.now();
                 let loadedCount = 0;
                 let expiredCount = 0;
-                
-                // Load non-expired entries with their original expiry times
+
+                // Load non-expired entries with their original expiry times,
+                // keeping the persisted `{ value, expiry }` shape in memory.
                 for (const [key, data] of Object.entries(stored)) {
                     if (data && data.expiry > now && data.value) {
-                        this.cache.set(key, data.value);
-                        this.expiryMap.set(key, data.expiry); // Preserve original expiry
+                        this.cache.set(key, { value: data.value, expiry: data.expiry });
                         loadedCount++;
                     } else if (data && data.expiry <= now) {
                         expiredCount++;
                     }
                 }
-                
+
                 console.log(`📦 Loaded ${loadedCount} cached user entries (${expiredCount} expired)`);
             }
-            
+
             this.loaded = true;
         } catch (error) {
             console.error('Failed to load user cache:', error);
@@ -51,8 +52,9 @@ class UserCacheStorage {
     }
 
     async save(force = false) {
+        // Dirty-gated: skip the whole rebuild+write when nothing changed.
         if (!this.dirty && !force) return;
-        
+
         // Clear any pending save
         if (this.saveTimeoutId) {
             clearTimeout(this.saveTimeoutId);
@@ -60,20 +62,18 @@ class UserCacheStorage {
         }
 
         try {
-            const now = Date.now();
-            const defaultExpiry = now + CACHE_CONFIG.EXPIRY_MS;
             const exportData = {};
-            
-            for (const [key, value] of this.cache.entries()) {
-                // Use existing expiry if available, otherwise use default
-                const expiry = this.expiryMap.get(key) || defaultExpiry;
-                exportData[key] = { value, expiry };
+
+            // The in-memory value is already `{ value, expiry }`, matching the
+            // persisted format — no per-entry expiry lookup needed.
+            for (const [key, entry] of this.cache.entries()) {
+                exportData[key] = { value: entry.value, expiry: entry.expiry };
             }
-            
+
             await browserAPI.storage.local.set({
                 [STORAGE_KEYS.CACHE]: exportData
             });
-            
+
             this.dirty = false;
         } catch (error) {
             console.error('Failed to save user cache:', error);
@@ -82,7 +82,7 @@ class UserCacheStorage {
 
     scheduleSave() {
         if (this.saveTimeoutId) return;
-        
+
         this.saveTimeoutId = setTimeout(() => {
             this.saveTimeoutId = null;
             this.save();
@@ -90,13 +90,13 @@ class UserCacheStorage {
     }
 
     get(screenName) {
-        return this.cache.get(screenName);
+        const entry = this.cache.get(screenName);
+        return entry ? entry.value : undefined;
     }
 
     set(screenName, data) {
-        this.cache.set(screenName, data);
-        // Set fresh expiry for new/updated entries
-        this.expiryMap.set(screenName, Date.now() + CACHE_CONFIG.EXPIRY_MS);
+        // Set fresh expiry for new/updated entries; expiry lives in the envelope.
+        this.cache.set(screenName, { value: data, expiry: Date.now() + CACHE_CONFIG.EXPIRY_MS });
         this.dirty = true;
         this.scheduleSave();
     }
@@ -108,7 +108,6 @@ class UserCacheStorage {
     delete(screenName) {
         const result = this.cache.delete(screenName);
         if (result) {
-            this.expiryMap.delete(screenName);
             this.dirty = true;
             this.scheduleSave();
         }
@@ -117,7 +116,6 @@ class UserCacheStorage {
 
     async clear() {
         this.cache.clear();
-        this.expiryMap.clear();
         this.dirty = true;
         await this.save(true);
     }
@@ -126,317 +124,174 @@ class UserCacheStorage {
         return this.cache.size;
     }
 
+    /**
+     * Iterate raw entries without allocating an object per entry.
+     * Callback receives (screenName, value) for each cached user.
+     * Prefer this over getAll() when computing aggregates.
+     * @param {(screenName: string, value: object) => void} callback
+     */
+    forEach(callback) {
+        for (const [key, entry] of this.cache.entries()) {
+            callback(key, entry.value);
+        }
+    }
+
     getAll() {
-        return Array.from(this.cache.entries()).map(([key, value]) => ({
+        return Array.from(this.cache.entries()).map(([key, entry]) => ({
             screenName: key,
-            ...value
+            ...entry.value
         }));
     }
 }
 
 /**
- * Blocked countries storage
+ * Generic Set-backed blocked-value storage.
+ *
+ * Consolidates the previously near-identical BlockedCountries/Regions/Tags
+ * classes. Parameterized by:
+ *   - storageKey: the chrome.storage key to persist under
+ *   - label:      human-readable label for log lines
+ *   - normalize:  function applied to incoming values before storing/looking up
+ *                 (countries/regions: trim + lowercase; tags: trim, case-kept)
+ *
+ * normalize returns a falsy value to reject the input (e.g. empty after trim).
  */
-class BlockedCountriesStorage {
-    constructor() {
-        this.countries = new Set();
+class BlockedSetStorage {
+    constructor({ storageKey, label, normalize }) {
+        this.values = new Set();
         this.loaded = false;
+        this.storageKey = storageKey;
+        this.label = label;
+        this.normalize = normalize;
     }
 
     async load() {
         try {
-            const result = await browserAPI.storage.local.get(STORAGE_KEYS.BLOCKED_COUNTRIES);
-            const stored = result[STORAGE_KEYS.BLOCKED_COUNTRIES];
-            
+            const result = await browserAPI.storage.local.get(this.storageKey);
+            const stored = result[this.storageKey];
+
             if (Array.isArray(stored)) {
-                this.countries = new Set(stored);
-                console.log(`🚫 Loaded ${this.countries.size} blocked countries`);
+                this.values = new Set(stored);
+                console.log(`🚫 Loaded ${this.values.size} ${this.label}`);
             }
-            
+
             this.loaded = true;
         } catch (error) {
-            console.error('Failed to load blocked countries:', error);
+            console.error(`Failed to load ${this.label}:`, error);
             this.loaded = true;
         }
     }
 
     async save() {
         try {
-            const array = Array.from(this.countries);
+            const array = Array.from(this.values);
             await browserAPI.storage.local.set({
-                [STORAGE_KEYS.BLOCKED_COUNTRIES]: array
+                [this.storageKey]: array
             });
-            console.log(`💾 Saved ${array.length} blocked countries`);
+            console.log(`💾 Saved ${array.length} ${this.label}`);
         } catch (error) {
-            console.error('Failed to save blocked countries:', error);
-        }
-    }
-
-    isBlocked(country) {
-        if (!country) return false;
-        return this.countries.has(country.trim().toLowerCase());
-    }
-
-    add(country) {
-        const normalized = country.trim().toLowerCase();
-        if (!this.countries.has(normalized)) {
-            this.countries.add(normalized);
-            this.save();
-            return true;
-        }
-        return false;
-    }
-
-    remove(country) {
-        const normalized = country.trim().toLowerCase();
-        if (this.countries.has(normalized)) {
-            this.countries.delete(normalized);
-            this.save();
-            return true;
-        }
-        return false;
-    }
-
-    toggle(country) {
-        const normalized = country.trim().toLowerCase();
-        if (this.countries.has(normalized)) {
-            this.countries.delete(normalized);
-        } else {
-            this.countries.add(normalized);
-        }
-        this.save();
-        return this.countries.has(normalized);
-    }
-
-    clear() {
-        this.countries.clear();
-        return this.save();
-    }
-
-    get size() {
-        return this.countries.size;
-    }
-
-    getAll() {
-        return Array.from(this.countries);
-    }
-
-    has(country) {
-        return this.isBlocked(country);
-    }
-}
-
-/**
- * Blocked regions storage (similar to blocked countries but for regions)
- */
-class BlockedRegionsStorage {
-    constructor() {
-        this.regions = new Set();
-        this.loaded = false;
-    }
-
-    async load() {
-        try {
-            const result = await browserAPI.storage.local.get(STORAGE_KEYS.BLOCKED_REGIONS);
-            const stored = result[STORAGE_KEYS.BLOCKED_REGIONS];
-            
-            if (Array.isArray(stored)) {
-                this.regions = new Set(stored);
-                console.log(`🚫 Loaded ${this.regions.size} blocked regions`);
-            }
-            
-            this.loaded = true;
-        } catch (error) {
-            console.error('Failed to load blocked regions:', error);
-            this.loaded = true;
-        }
-    }
-
-    async save() {
-        try {
-            const array = Array.from(this.regions);
-            await browserAPI.storage.local.set({
-                [STORAGE_KEYS.BLOCKED_REGIONS]: array
-            });
-            console.log(`💾 Saved ${array.length} blocked regions`);
-        } catch (error) {
-            console.error('Failed to save blocked regions:', error);
-        }
-    }
-
-    isBlocked(region) {
-        if (!region) return false;
-        return this.regions.has(region.trim().toLowerCase());
-    }
-
-    add(region) {
-        const normalized = region.trim().toLowerCase();
-        if (!this.regions.has(normalized)) {
-            this.regions.add(normalized);
-            this.save();
-            return true;
-        }
-        return false;
-    }
-
-    remove(region) {
-        const normalized = region.trim().toLowerCase();
-        if (this.regions.has(normalized)) {
-            this.regions.delete(normalized);
-            this.save();
-            return true;
-        }
-        return false;
-    }
-
-    toggle(region) {
-        const normalized = region.trim().toLowerCase();
-        if (this.regions.has(normalized)) {
-            this.regions.delete(normalized);
-        } else {
-            this.regions.add(normalized);
-        }
-        this.save();
-        return this.regions.has(normalized);
-    }
-
-    clear() {
-        this.regions.clear();
-        return this.save();
-    }
-
-    get size() {
-        return this.regions.size;
-    }
-
-    getAll() {
-        return Array.from(this.regions);
-    }
-
-    has(region) {
-        return this.isBlocked(region);
-    }
-}
-
-/**
- * Blocked tags storage (for emoji/symbol-based blocking)
- * Tags are stored as-is (emoji characters, symbols, or short text patterns)
- */
-class BlockedTagsStorage {
-    constructor() {
-        this.tags = new Set();
-        this.loaded = false;
-    }
-
-    async load() {
-        try {
-            const result = await browserAPI.storage.local.get(STORAGE_KEYS.BLOCKED_TAGS);
-            const stored = result[STORAGE_KEYS.BLOCKED_TAGS];
-            
-            if (Array.isArray(stored)) {
-                this.tags = new Set(stored);
-                console.log(`🏷️ Loaded ${this.tags.size} blocked tags`);
-            }
-            
-            this.loaded = true;
-        } catch (error) {
-            console.error('Failed to load blocked tags:', error);
-            this.loaded = true;
-        }
-    }
-
-    async save() {
-        try {
-            const array = Array.from(this.tags);
-            await browserAPI.storage.local.set({
-                [STORAGE_KEYS.BLOCKED_TAGS]: array
-            });
-            console.log(`💾 Saved ${array.length} blocked tags`);
-        } catch (error) {
-            console.error('Failed to save blocked tags:', error);
+            console.error(`Failed to save ${this.label}:`, error);
         }
     }
 
     /**
-     * Check if a tag is blocked
-     * @param {string} tag - The tag to check
-     * @returns {boolean} - True if blocked
+     * Replace the entire in-memory set from an array/iterable and persist once.
+     * Mutates the Set a single time and performs exactly one write.
+     * @param {Iterable<string>} valuesIterable
+     * @returns {Promise<void>}
      */
-    isBlocked(tag) {
-        if (!tag) return false;
-        return this.tags.has(tag);
+    setAll(valuesIterable) {
+        const next = new Set();
+        if (valuesIterable) {
+            for (const value of valuesIterable) {
+                const normalized = this.normalize(value);
+                if (normalized) {
+                    next.add(normalized);
+                }
+            }
+        }
+        this.values = next;
+        return this.save();
+    }
+
+    isBlocked(value) {
+        if (!value) return false;
+        const normalized = this.normalize(value);
+        if (!normalized) return false;
+        return this.values.has(normalized);
+    }
+
+    add(value) {
+        const normalized = this.normalize(value);
+        if (normalized && !this.values.has(normalized)) {
+            this.values.add(normalized);
+            return this.save();
+        }
+        return Promise.resolve();
+    }
+
+    remove(value) {
+        const normalized = this.normalize(value);
+        if (normalized && this.values.has(normalized)) {
+            this.values.delete(normalized);
+            return this.save();
+        }
+        return Promise.resolve();
+    }
+
+    toggle(value) {
+        const normalized = this.normalize(value);
+        if (!normalized) return Promise.resolve();
+        if (this.values.has(normalized)) {
+            this.values.delete(normalized);
+        } else {
+            this.values.add(normalized);
+        }
+        return this.save();
     }
 
     /**
-     * Check if any of the given tags are blocked
-     * @param {string[]} tagsToCheck - Array of tags to check
-     * @returns {string|null} - The first blocked tag found, or null
+     * Check if any of the given values are blocked.
+     * @param {string[]} valuesToCheck - Array of values to check
+     * @returns {string|null} - The first blocked value found, or null
      */
-    findBlockedTag(tagsToCheck) {
-        if (!tagsToCheck || !Array.isArray(tagsToCheck)) return null;
-        for (const tag of tagsToCheck) {
-            if (this.tags.has(tag)) {
-                return tag;
+    findBlocked(valuesToCheck) {
+        if (!valuesToCheck || !Array.isArray(valuesToCheck)) return null;
+        for (const value of valuesToCheck) {
+            if (this.isBlocked(value)) {
+                return this.normalize(value);
             }
         }
         return null;
     }
 
-    add(tag) {
-        if (!tag || typeof tag !== 'string') return false;
-        const trimmed = tag.trim();
-        if (!trimmed) return false;
-        
-        if (!this.tags.has(trimmed)) {
-            this.tags.add(trimmed);
-            this.save();
-            return true;
-        }
-        return false;
-    }
-
-    remove(tag) {
-        if (!tag) return false;
-        const trimmed = tag.trim();
-        if (this.tags.has(trimmed)) {
-            this.tags.delete(trimmed);
-            this.save();
-            return true;
-        }
-        return false;
-    }
-
-    toggle(tag) {
-        if (!tag) return false;
-        const trimmed = tag.trim();
-        if (!trimmed) return false;
-        
-        if (this.tags.has(trimmed)) {
-            this.tags.delete(trimmed);
-        } else {
-            this.tags.add(trimmed);
-        }
-        this.save();
-        return this.tags.has(trimmed);
-    }
-
     clear() {
-        this.tags.clear();
+        this.values.clear();
         return this.save();
     }
 
     get size() {
-        return this.tags.size;
+        return this.values.size;
     }
 
     getAll() {
-        return Array.from(this.tags);
+        return Array.from(this.values);
     }
 
-    has(tag) {
-        return this.isBlocked(tag);
+    has(value) {
+        return this.isBlocked(value);
     }
 }
+
+// Normalizers: countries/regions are trimmed + lowercased; tags keep their case.
+const normalizeLower = value => {
+    if (!value || typeof value !== 'string') return '';
+    return value.trim().toLowerCase();
+};
+const normalizeTag = value => {
+    if (!value || typeof value !== 'string') return '';
+    return value.trim();
+};
 
 /**
  * Settings storage
@@ -570,14 +425,26 @@ class HeadersStorage {
 
 // Export singleton instances
 export const userCache = new UserCacheStorage();
-export const blockedCountries = new BlockedCountriesStorage();
-export const blockedRegions = new BlockedRegionsStorage();
-export const blockedTags = new BlockedTagsStorage();
+export const blockedCountries = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_COUNTRIES,
+    label: 'blocked countries',
+    normalize: normalizeLower
+});
+export const blockedRegions = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_REGIONS,
+    label: 'blocked regions',
+    normalize: normalizeLower
+});
+export const blockedTags = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_TAGS,
+    label: 'blocked tags',
+    normalize: normalizeTag
+});
 export const settings = new SettingsStorage();
 export const headersStorage = new HeadersStorage();
 
 // Export classes for testing
-export { LRUCache, UserCacheStorage, BlockedCountriesStorage, BlockedRegionsStorage, BlockedTagsStorage, SettingsStorage, HeadersStorage };
+export { LRUCache, UserCacheStorage, BlockedSetStorage, SettingsStorage, HeadersStorage };
 
 /**
  * Initialize all storage modules

@@ -5,7 +5,8 @@
  */
 
 import { COUNTRY_LIST, REGION_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
-import { getFlagEmoji, formatCountryName, createElement, debounce, extractTagsFromText, COMMON_PROFILE_TAGS } from '../shared/utils.js';
+import { formatCountryName, createElement, debounce, extractTagsFromText, COMMON_PROFILE_TAGS } from '../shared/utils.js';
+import { glyph, flagImage } from './icons.js';
 
 // Track blocked sets globally for proper syncing
 let localBlockedCountries = null;
@@ -186,21 +187,11 @@ function createHeader(onClose) {
 
     // Create title with shield icon
     const title = createElement('h2', { className: 'x-blocker-title' });
-    
-    // Create SVG using DOM methods (safe)
-    const titleSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    titleSvg.setAttribute('viewBox', '0 0 24 24');
-    titleSvg.setAttribute('width', '24');
-    titleSvg.setAttribute('height', '24');
+
+    // Shield glyph from the shared icon set (XSS-safe, currentColor)
+    const titleSvg = glyph('shield', 24);
     titleSvg.style.cssText = 'display: inline-block; vertical-align: middle; margin-right: 8px;';
-    
-    const titleG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    const titlePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    titlePath.setAttribute('fill', 'currentColor');
-    titlePath.setAttribute('d', 'M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78zm-9-1.04l-1.41 1.41L10.5 14.5l6-6-1.41-1.41-4.59 4.58z');
-    titleG.appendChild(titlePath);
-    titleSvg.appendChild(titleG);
-    
+
     title.appendChild(titleSvg);
     title.appendChild(document.createTextNode('Blocking'));
 
@@ -209,20 +200,9 @@ function createHeader(onClose) {
         className: 'x-blocker-close',
         'aria-label': 'Close'
     });
-    
-    const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    closeSvg.setAttribute('viewBox', '0 0 24 24');
-    closeSvg.setAttribute('width', '20');
-    closeSvg.setAttribute('height', '20');
-    
-    const closeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    closePath.setAttribute('fill', 'currentColor');
-    closePath.setAttribute('d', 'M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z');
-    closeG.appendChild(closePath);
-    closeSvg.appendChild(closeG);
-    closeBtn.appendChild(closeSvg);
-    
+
+    closeBtn.appendChild(glyph('close', 20));
+
     closeBtn.addEventListener('click', onClose);
 
     header.appendChild(title);
@@ -237,11 +217,19 @@ function createHeader(onClose) {
 function createTabBar() {
     const tabBar = createElement('div', { className: 'x-blocker-tabs' });
 
+    const tabIcon = name => {
+        const g = glyph(name, 15);
+        g.style.verticalAlign = '-2px';
+        g.style.marginRight = '5px';
+        return g;
+    };
+
     const countriesTab = createElement('button', {
         className: 'x-blocker-tab active',
         'data-tab': 'countries'
     });
-    countriesTab.appendChild(document.createTextNode('🌍 Countries '));
+    countriesTab.appendChild(tabIcon('globe'));
+    countriesTab.appendChild(document.createTextNode('Countries '));
     const countriesCount = createElement('span', { 
         className: 'x-blocker-tab-count', 
         id: 'modal-countries-count',
@@ -253,7 +241,8 @@ function createTabBar() {
         className: 'x-blocker-tab',
         'data-tab': 'regions'
     });
-    regionsTab.appendChild(document.createTextNode('🗺️ Regions '));
+    regionsTab.appendChild(tabIcon('map'));
+    regionsTab.appendChild(document.createTextNode('Regions '));
     const regionsCount = createElement('span', { 
         className: 'x-blocker-tab-count', 
         id: 'modal-regions-count',
@@ -265,7 +254,8 @@ function createTabBar() {
         className: 'x-blocker-tab',
         'data-tab': 'tags'
     });
-    tagsTab.appendChild(document.createTextNode('🏷️ Tags '));
+    tagsTab.appendChild(tabIcon('tag'));
+    tagsTab.appendChild(document.createTextNode('Tags '));
     const tagsCount = createElement('span', { 
         className: 'x-blocker-tab-count', 
         id: 'modal-tags-count',
@@ -515,6 +505,9 @@ function createTagBody(blockedTags, onAction) {
                         for (const t of response.data) {
                             localBlockedTags.add(t);
                         }
+                        // Invalidate cache to force re-render (blockedTags mutated)
+                        cachedFilteredTags = null;
+                        cachedTagFilter = '';
                         renderCommonTags();
                         renderTags();
                         updateStats(localBlockedTags.size, 'tags');
@@ -675,23 +668,15 @@ function createCountryItem(country, blockedCountries, onAction) {
         className: `x-country-item${isBlocked ? ' blocked' : ''}`
     });
 
-    // Flag - using safe DOM methods
+    // Flag - using safe DOM methods (Twemoji <img> via the shared icon set)
     const flagSpan = createElement('span', { className: 'x-country-flag' });
-    const flag = getFlagEmoji(country);
-    if (typeof flag === 'string' && flag.startsWith('<img')) {
-        const srcMatch = flag.match(/src="(https:\/\/abs-0\.twimg\.com\/emoji\/v2\/svg\/[^"]+\.svg)"/);
-        if (srcMatch && srcMatch[1]) {
-            const imgEl = document.createElement('img');
-            imgEl.src = srcMatch[1];
-            imgEl.className = 'x-flag-emoji';
-            imgEl.alt = country;
-            imgEl.style.cssText = 'height: 1.2em; vertical-align: -0.2em;';
-            flagSpan.appendChild(imgEl);
-        } else {
-            flagSpan.textContent = '🌍';
-        }
+    const flagImg = flagImage(country);
+    if (flagImg) {
+        flagImg.alt = country;
+        flagImg.style.cssText = 'height: 1.2em; vertical-align: -0.2em;';
+        flagSpan.appendChild(flagImg);
     } else {
-        flagSpan.textContent = flag || '🌍';
+        flagSpan.textContent = '🌍';
     }
 
     // Name
@@ -827,6 +812,9 @@ function createFooter(blockedCountries, blockedRegions, blockedTags, onCountryAc
                 const response = await onTagAction('clear');
                 if (response?.success) {
                     blockedTags.clear();
+                    // Invalidate cache to force re-render (blockedTags mutated)
+                    cachedFilteredTags = null;
+                    cachedTagFilter = '';
                     renderTags();
                     updateStats(0, 'tags');
                 }

@@ -36,7 +36,18 @@ const browserAPI = (() => {
                 onMessage: chrome.runtime.onMessage,
                 getURL: chrome.runtime.getURL.bind(chrome.runtime),
                 id: chrome.runtime.id,
-                getManifest: chrome.runtime.getManifest.bind(chrome.runtime)
+                getManifest: chrome.runtime.getManifest.bind(chrome.runtime),
+                openOptionsPage: () => {
+                    return new Promise((resolve, reject) => {
+                        chrome.runtime.openOptionsPage(() => {
+                            if (chrome.runtime.lastError) {
+                                reject(new Error(chrome.runtime.lastError.message));
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
+                }
             },
             storage: {
                 local: {
@@ -109,6 +120,17 @@ const browserAPI = (() => {
                             }
                         });
                     });
+                },
+                create: createProps => {
+                    return new Promise((resolve, reject) => {
+                        chrome.tabs.create(createProps, tab => {
+                            if (chrome.runtime.lastError) {
+                                reject(new Error(chrome.runtime.lastError.message));
+                            } else {
+                                resolve(tab);
+                            }
+                        });
+                    });
                 }
             },
             scripting: chrome.scripting ? {
@@ -135,7 +157,8 @@ const browserAPI = (() => {
             onMessage: { addListener: () => {} },
             getURL: () => '',
             id: '',
-            getManifest: () => ({})
+            getManifest: () => ({}),
+            openOptionsPage: () => Promise.resolve()
         },
         storage: {
             local: {
@@ -148,7 +171,8 @@ const browserAPI = (() => {
         },
         tabs: {
             query: () => Promise.resolve([]),
-            sendMessage: () => Promise.resolve()
+            sendMessage: () => Promise.resolve(),
+            create: () => Promise.resolve()
         }
     };
 })();
