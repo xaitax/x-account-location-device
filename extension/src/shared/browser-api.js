@@ -177,42 +177,5 @@ const browserAPI = (() => {
     };
 })();
 
-/**
- * Check if we're running in an extension context
- */
-export const isExtensionContext = () => {
-    try {
-        return !!(browserAPI.runtime && browserAPI.runtime.id);
-    } catch {
-        return false;
-    }
-};
-
-/**
- * Check if we're in a background/service worker context
- */
-export const isBackgroundContext = () => {
-    return typeof ServiceWorkerGlobalScope !== 'undefined' || 
-           (typeof window === 'undefined' && isExtensionContext());
-};
-
-/**
- * Check if we're in a content script context
- */
-export const isContentScriptContext = () => {
-    return typeof window !== 'undefined' && 
-           isExtensionContext() && 
-           !isBackgroundContext();
-};
-
-/**
- * Get browser type
- */
-export const getBrowserType = () => {
-    if (isFirefox) return 'firefox';
-    if (isChrome) return 'chrome';
-    return 'unknown';
-};
-
-export { browserAPI, isFirefox, isChrome };
+export { browserAPI };
 export default browserAPI;

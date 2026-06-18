@@ -7,30 +7,6 @@
 import { COUNTRY_FLAGS } from './constants.js';
 
 /**
- * Unified logging utility with consistent formatting.
- * Provides debug, info, warn, error levels with extension prefix.
- * @type {{
- *   debug: (...args: any[]) => void,
- *   info: (...args: any[]) => void,
- *   warn: (...args: any[]) => void,
- *   error: (...args: any[]) => void,
- *   setDebugMode: (enabled: boolean) => void
- * }}
- */
-export const logger = (() => {
-    let debugEnabled = false;
-    const PREFIX = 'X-Posed:';
-    
-    return {
-        setDebugMode: enabled => { debugEnabled = enabled; },
-        debug: (...args) => { if (debugEnabled) console.log('🔍', PREFIX, ...args); },
-        info: (...args) => { console.log('ℹ️', PREFIX, ...args); },
-        warn: (...args) => { console.warn('⚠️', PREFIX, ...args); },
-        error: (...args) => { console.error('❌', PREFIX, ...args); }
-    };
-})();
-
-/**
  * Debounce function - delays execution until after wait milliseconds have elapsed
  * since the last time the debounced function was invoked.
  * @template {Function} T
@@ -84,37 +60,6 @@ export function throttle(func, wait) {
             }, remaining);
         }
     };
-}
-
-/**
- * Request idle callback with fallback
- * @param {IdleRequestCallback} callback - Function to call when idle
- * @param {{timeout?: number}} [options] - Options with optional timeout
- * @returns {number} - Handle for cancellation
- */
-export function requestIdleCallback(callback, options = {}) {
-    if (typeof window !== 'undefined' && window.requestIdleCallback) {
-        return window.requestIdleCallback(callback, options);
-    }
-    // Fallback for browsers without requestIdleCallback (Safari, older Firefox)
-    const timeout = options.timeout || 50;
-    const start = Date.now();
-    return setTimeout(() => {
-        callback({
-            didTimeout: Date.now() - start >= timeout,
-            timeRemaining: () => Math.max(0, timeout - (Date.now() - start))
-        });
-    }, 1);
-}
-
-/**
- * Cancel idle callback with fallback
- */
-export function cancelIdleCallback(id) {
-    if (typeof window !== 'undefined' && window.cancelIdleCallback) {
-        return window.cancelIdleCallback(id);
-    }
-    return clearTimeout(id);
 }
 
 /**

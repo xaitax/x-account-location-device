@@ -40,7 +40,6 @@
     {
       "resources": [
         "page-script.js",
-        "modal.js",
         "styles/content.css",
         "fonts/*.woff2"
       ],

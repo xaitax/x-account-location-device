@@ -5,7 +5,7 @@
  */
 
 import { COUNTRY_LIST, REGION_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
-import { formatCountryName, createElement, debounce, extractTagsFromText, COMMON_PROFILE_TAGS } from '../shared/utils.js';
+import { formatCountryName, createElement, debounce, COMMON_PROFILE_TAGS } from '../shared/utils.js';
 import { glyph, flagImage } from './icons.js';
 
 // Track blocked sets globally for proper syncing

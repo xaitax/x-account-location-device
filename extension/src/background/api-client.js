@@ -501,17 +501,6 @@ export class XAPIClient {
     }
 
     /**
-     * Get queue statistics
-     */
-    getStats() {
-        return {
-            pending: this.queue.pendingCount,
-            active: this.queue.activeCount,
-            hasHeaders: this.hasHeaders()
-        };
-    }
-
-    /**
      * Get rate limit status
      * @returns {{isRateLimited: boolean, resetTime: number|null, remainingMs: number|null}}
      */
@@ -527,13 +516,6 @@ export class XAPIClient {
         };
     }
 
-    /**
-     * Clear pending requests
-     */
-    clearQueue() {
-        this.queue.clear();
-        this.deduplicator.clear();
-    }
 }
 
 // Export singleton instance

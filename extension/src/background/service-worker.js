@@ -943,6 +943,7 @@ if (runtimeNS?.runtime?.onSuspend) {
     runtimeNS.runtime.onSuspend.addListener(() => {
         try { userCache.save(true); } catch { /* best-effort */ }
         try { cloudCache.flushContributions(); } catch { /* best-effort */ }
+        try { cloudCache.forceSaveStats(); } catch { /* best-effort */ }
     });
 }
 

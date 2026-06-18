@@ -22,7 +22,7 @@ let themeObserver = null;
 let toastContainer = null;
 let sidebarObserver = null;
 let currentNav = null;
-let resizeTimeout = null;
+let resizeHandler = null;
 let sidebarModifying = false;
 let sidebarCheckInterval = null;
 let sidebarCheckTimeout = null;
@@ -578,12 +578,12 @@ function observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRe
  * Handle window resize
  */
 function setupResizeHandler(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
-    let resizeHandler = null;
-    
+    // resizeHandler is module-scoped, so a re-run (e.g. after a settings change)
+    // removes the previous listener instead of leaking it.
     if (resizeHandler) {
         window.removeEventListener('resize', resizeHandler);
     }
-    
+
     resizeHandler = debounce(() => {
         if (!currentNav || settings.showSidebarBlockerLink === false) return;
         
@@ -804,9 +804,4 @@ export function cleanupUI() {
         }
     }
     cleanupRegistry.clear();
-    
-    if (resizeTimeout) {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = null;
-    }
 }

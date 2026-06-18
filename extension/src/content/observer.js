@@ -3,7 +3,7 @@
  * Handles DOM observation, user processing, and caching
  */
 
-import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, isRegion } from '../shared/constants.js';
+import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING } from '../shared/constants.js';
 import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
@@ -49,8 +49,6 @@ function applyInfoToElement(element, screenName, info, opts) {
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
-    element.dataset.xVpn = info.locationAccurate === false ? 'true' : '';
-    element.dataset.xIsRegion = isRegion(effCountry) ? 'true' : '';
 
     const loggedInUser = getLoggedInUsername();
     const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
@@ -609,7 +607,6 @@ export async function processElement(element, {
         const displayName = extractDisplayName(element);
         if (displayName && hasBlockedTag(displayName, blockedTags)) {
             element.dataset.xTagBlocked = 'true';
-            element.dataset.xDisplayName = displayName;
 
             const isQuote = isInsideQuoteTweet(element, tweet);
             const loggedInUser = getLoggedInUsername();

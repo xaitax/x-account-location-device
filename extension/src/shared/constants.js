@@ -283,25 +283,3 @@ export function isRegion(location) {
     return Object.hasOwn(REGION_FLAGS, location.toLowerCase());
 }
 
-/**
- * Get flag/globe emoji for any location (country or region)
- * @param {string} location - Location string
- * @returns {string} - Emoji flag/globe or default globe
- */
-export function getLocationEmoji(location) {
-    if (!location) return '🌍';
-    const normalized = location.toLowerCase();
-    
-    // Check countries first
-    if (COUNTRY_FLAGS[normalized]) {
-        return COUNTRY_FLAGS[normalized];
-    }
-    
-    // Check regions
-    if (REGION_FLAGS[normalized]) {
-        return REGION_FLAGS[normalized];
-    }
-    
-    // Default globe
-    return '🌍';
-}
