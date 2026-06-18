@@ -14,7 +14,8 @@ import {
     startThemeObserver,
     injectSidebarLink,
     removeSidebarLink,
-    cleanupUI
+    cleanupUI,
+    showToast
 } from './ui.js';
 
 import {
@@ -28,6 +29,7 @@ import {
 } from './observer.js';
 
 import { hovercard } from './hovercard.js';
+import { glyph } from './icons.js';
 
 // ============================================
 // STATE
@@ -260,6 +262,30 @@ async function handleBackgroundMessage(type, payload) {
 // ============================================
 
 /**
+ * After a "Share evidence" action opens X's composer in a new tab, this tab's
+ * content script reminds the user that their evidence image is on the clipboard.
+ * The flag (a timestamp) is written by evidence-capture just before window.open;
+ * the post-share toast would otherwise fire on the now-background origin tab.
+ */
+async function maybeShowPasteHint() {
+    try {
+        const res = await browserAPI.storage.local.get('xpPasteHint');
+        const t = res?.xpPasteHint;
+        if (!t || Date.now() - t > 20000) return;
+        await browserAPI.storage.local.remove('xpPasteHint');
+        setTimeout(() => {
+            showToast({
+                title: 'Evidence is on your clipboard',
+                message: 'Press Ctrl / ⌘ + V to attach it to your post, then post.',
+                icon: glyph('copy', 20),
+                iconType: 'info',
+                duration: 12000
+            });
+        }, 1200);
+    } catch (_) { /* hint is best-effort */ }
+}
+
+/**
  * Initialize the content script
  */
 async function initialize() {
@@ -291,6 +317,9 @@ async function initialize() {
         }
         
         console.log(`✅ X-Posed initialized (enabled: ${isEnabled}, debug: ${debugMode})`);
+
+        // If we arrived here from a "Share evidence" action, remind the user to paste.
+        maybeShowPasteHint();
 
         if (blockedResponse?.success) {
             blockedCountries = new Set(blockedResponse.data);

@@ -2,6 +2,11 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [3.1.0] - 2026-06-17
+
+### New Feature
+- **Share evidence to X.** Turn any account into a one-click evidence card (country flag, device, VPN/proxy signal, account age, and handle changes) and quote it, reply with it, or post it to your own timeline. The card is copied to your clipboard (or shared natively on mobile) and X's composer opens prefilled; you review and post. Click the card to enlarge it. Every share is opt-in and human-confirmed; nothing is posted automatically. The badge's capture button is now a share button.
+
 ## [3.0.1] - 2026-06-17
 
 ### Bug Fixes

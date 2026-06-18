@@ -201,6 +201,40 @@ const GLYPHS = {
         const s = base(size, true);
         s.appendChild(el('path', { d: 'M12 20.5S3.5 15 3.5 9.2C3.5 6.4 5.6 4.5 8.1 4.5c1.7 0 3.1.9 3.9 2.2.8-1.3 2.2-2.2 3.9-2.2 2.5 0 4.6 1.9 4.6 4.7 0 5.8-8.5 11.3-8.5 11.3z' }));
         return s;
+    },
+    reply(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M9 17l-5-5 5-5' }));
+        s.appendChild(el('path', { d: 'M4 12h11a5 5 0 0 1 5 5v1' }));
+        return s;
+    },
+    plus(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M12 5v14M5 12h14' }));
+        return s;
+    },
+    copy(size) {
+        const s = base(size, true);
+        s.appendChild(el('rect', { x: '9', y: '9', width: '11', height: '11', rx: '2' }));
+        s.appendChild(el('path', { d: 'M5 15V5a2 2 0 0 1 2-2h10' }));
+        return s;
+    },
+    share(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7' }));
+        s.appendChild(el('path', { d: 'M16 6l-4-4-4 4M12 2v13' }));
+        return s;
+    },
+    xLogo(size) {
+        const s = base(size, false);
+        s.appendChild(el('path', { d: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z' }));
+        return s;
+    },
+    zoom(size) {
+        const s = base(size, true);
+        s.appendChild(el('circle', { cx: '11', cy: '11', r: '7' }));
+        s.appendChild(el('path', { d: 'M20.5 20.5 16 16M11 8.2v5.6M8.2 11h5.6' }));
+        return s;
     }
 };
 
@@ -222,8 +256,8 @@ export function deviceIcon(deviceString, size = 15) {
 /**
  * Return an SVG element for a named glyph (info, vpn, location, verified,
  * created, id, affiliation, clock, swap, camera, shield, close, warn, globe,
- * map, tag, cloud, lock, hourglass, wrench, sparkles, save, check, heart).
- * Falls back to the info glyph.
+ * map, tag, cloud, lock, hourglass, wrench, sparkles, save, check, heart,
+ * reply, plus, copy, share, xLogo, zoom). Falls back to the info glyph.
  * @param {string} name
  * @param {number} size
  * @returns {SVGElement}

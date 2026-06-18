@@ -50,7 +50,7 @@ X already knows where an account posts from. It's tucked inside the "About this 
 - **Flag from Device**: prefer the device's country for the flag instead of the account location (it falls back to location for web/unknown), and let blocking follow device country too.
 - **Import / export**: back up or move your entire configuration in one file.
 
-**Built for researchers.** *Evidence capture* turns any post into a forensic screenshot: a clean card overlaying location, device, VPN signal, timestamp, source URL, and engagement metrics. Made for OSINT work and source verification.
+**Built for researchers.** *Share evidence* turns any post into a clean card overlaying location, device, VPN/proxy signal, account age, and engagement metrics, then lets you quote it, reply with it, or post it to your own timeline in one click (or just save the PNG). Human-confirmed and opt-in, made for OSINT work and source verification.
 
 **Fast and private.**
 

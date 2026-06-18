@@ -404,16 +404,15 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     const hint = document.createElement('span');
     hint.className = 'x-hover-hint';
     hint.appendChild(glyph('info', 14));
-    badge.appendChild(hint);
 
-    // Capture button
+    // Share button — added before the circled-i so the (i) stays the last item.
     if (settings.showCaptureButton !== false) {
         const captureBtn = document.createElement('button');
         captureBtn.className = 'x-capture-btn';
-        captureBtn.title = 'Capture evidence screenshot';
-        captureBtn.setAttribute('aria-label', 'Capture evidence');
+        captureBtn.title = 'Share evidence';
+        captureBtn.setAttribute('aria-label', 'Share evidence');
 
-        captureBtn.appendChild(glyph('camera', 14));
+        captureBtn.appendChild(glyph('share', 14));
         badge.appendChild(captureBtn);
 
         captureBtn.addEventListener('click', e => {
@@ -428,6 +427,9 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
             }
         });
     }
+
+    // Circled-i is always the last item in the badge.
+    badge.appendChild(hint);
 
     const insertionPoint = isUserCell
         ? findUserCellInsertionPoint(element, screenName)
@@ -654,6 +656,10 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
         while (shield.firstChild) {
             svg.appendChild(shield.firstChild);
         }
+        // The shield is an outline glyph, but this <svg> is cloned from X's fill-style
+        // nav icon and X's own CSS sets the fill (which beats SVG presentation
+        // attributes). The `.x-blocker-nav-link svg` rule in content.css forces stroke
+        // mode with !important so it renders as an outline, not a filled blob.
     }
     
     const textDiv = link.querySelector('[dir="ltr"]');

@@ -7,6 +7,8 @@
 import { VERSION, Z_INDEX } from '../shared/constants.js';
 import { getCountryCode, classifyDevice } from '../shared/utils.js';
 import { glyph } from '../content/icons.js';
+import { showToast } from './ui.js';
+import browserAPI from '../shared/browser-api.js';
 
 /**
  * Capture a tweet as evidence with metadata overlay
@@ -45,11 +47,11 @@ export async function captureEvidence(tweetElement, userInfo, screenName) {
         // Remove loading toast
         loadingToast.remove();
         
-        // Show preview modal
-        showEvidencePreview(canvas, {
+        // Open the share sheet (preview + caption + quote/reply/post)
+        showShareSheet(canvas, {
             screenName,
-            captureTime,
-            tweetUrl: tweetData.tweetUrl
+            tweetUrl: tweetData.tweetUrl,
+            location: userInfo?.location
         });
         
     } catch (error) {
@@ -695,162 +697,270 @@ function wrapText(ctx, text, maxWidth, font) {
     return lines;
 }
 
-/**
- * Show evidence preview modal
- */
-function showEvidencePreview(canvas, info) {
-    // Remove existing modal if any
-    const existingModal = document.querySelector('.x-evidence-modal-overlay');
-    if (existingModal) existingModal.remove();
-    
-    // Create overlay
-    const overlay = document.createElement('div');
-    overlay.className = 'x-evidence-modal-overlay';
-    
-    // Create modal
-    const modal = document.createElement('div');
-    modal.className = 'x-evidence-modal';
-    
-    // Header - using safe DOM methods
-    const header = document.createElement('div');
-    header.className = 'x-evidence-header';
-    
-    // Create title
-    const title = document.createElement('h2');
-    title.className = 'x-evidence-title';
-    
-    const titleIcon = document.createElement('span');
-    titleIcon.style.marginRight = '8px';
-    titleIcon.style.display = 'inline-flex';
-    titleIcon.style.verticalAlign = '-3px';
-    titleIcon.appendChild(glyph('camera', 20));
-    title.appendChild(titleIcon);
-    title.appendChild(document.createTextNode('Evidence Captured'));
-    
-    // Create close button
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'x-evidence-close';
-    closeBtn.setAttribute('aria-label', 'Close');
-    
-    const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    closeSvg.setAttribute('viewBox', '0 0 24 24');
-    closeSvg.setAttribute('width', '20');
-    closeSvg.setAttribute('height', '20');
-    
-    const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    closePath.setAttribute('fill', 'currentColor');
-    closePath.setAttribute('d', 'M10.59 12L4.54 5.96l1.42-1.42L12 10.59l6.04-6.05 1.42 1.42L13.41 12l6.05 6.04-1.42 1.42L12 13.41l-6.04 6.05-1.42-1.42L10.59 12z');
-    closeSvg.appendChild(closePath);
-    closeBtn.appendChild(closeSvg);
-    
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-    
-    // Body with preview
-    const body = document.createElement('div');
-    body.className = 'x-evidence-body';
-    
-    const preview = document.createElement('div');
-    preview.className = 'x-evidence-preview';
-    
-    // Convert canvas to image for preview
-    const img = document.createElement('img');
-    img.src = canvas.toDataURL('image/png');
-    img.alt = 'Evidence screenshot';
-    preview.appendChild(img);
-    
-    body.appendChild(preview);
-    
-    // Footer with actions
-    const footer = document.createElement('div');
-    footer.className = 'x-evidence-footer';
-    
-    // Filename preview
-    const filename = generateFilename(info.screenName);
-    const filenameDiv = document.createElement('div');
-    filenameDiv.className = 'x-evidence-filename';
-    filenameDiv.textContent = filename;
-    
-    // Button container - only save button
-    const buttonContainer = document.createElement('div');
-    buttonContainer.className = 'x-evidence-buttons';
-    
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'x-evidence-btn x-evidence-btn-primary';
-    saveBtn.title = 'Save image (Enter)';
-    
-    // Helper to set save button content safely without innerHTML
-    const setSaveBtnContent = (isSaved = false) => {
-        saveBtn.replaceChildren();
-        const btnIcon = name => {
-            const g = glyph(name, 15);
-            g.style.verticalAlign = '-3px';
-            g.style.marginRight = '6px';
-            return g;
-        };
-        if (isSaved) {
-            saveBtn.appendChild(btnIcon('check'));
-            saveBtn.appendChild(document.createTextNode('Saved!'));
-        } else {
-            saveBtn.appendChild(btnIcon('save'));
-            saveBtn.appendChild(document.createTextNode('Save as PNG '));
-            const kbd = document.createElement('kbd');
-            kbd.style.cssText = 'opacity:0.7;font-size:11px;margin-left:4px';
-            kbd.textContent = '↵';
-            saveBtn.appendChild(kbd);
+// ---- share sheet: quote / reply / post with the evidence image ----
+
+// Touch / no-hover devices (e.g. Firefox for Android) use the native share sheet.
+const TOUCH = !(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(hover: hover)').matches);
+let lastShareMode = 'quote';
+
+function statusIdFromUrl(url) {
+    const m = /\/status\/(\d+)/.exec(url || '');
+    return m ? m[1] : null;
+}
+
+// Synchronous data-URL -> Blob so clipboard write / window.open / share can all
+// fire inside the click gesture (an async toBlob would trip popup + clipboard guards).
+function dataUrlToBlob(dataUrl) {
+    const parts = dataUrl.split(',');
+    const mime = (/:(.*?);/.exec(parts[0]) || [])[1] || 'image/png';
+    const bin = atob(parts[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+}
+
+// Initiated synchronously within a gesture; resolves true if the image landed.
+function copyImage(blob) {
+    try {
+        if (navigator.clipboard && window.ClipboardItem) {
+            return navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })])
+                .then(() => true).catch(() => false);
         }
+    } catch (_) { /* clipboard unavailable */ }
+    return Promise.resolve(false);
+}
+
+// X's official compose intent. Quote = caption + their tweet URL (X embeds it as a
+// quote); Reply = caption under their post; New = a standalone post.
+function buildIntentUrl(mode, caption, tweetUrl, statusId) {
+    const p = new URLSearchParams();
+    p.set('text', caption || '');
+    if (mode === 'reply' && statusId) p.set('in_reply_to', statusId);
+    else if (mode === 'quote' && tweetUrl) p.set('url', tweetUrl);
+    return 'https://x.com/intent/post?' + p.toString();
+}
+
+function defaultCaption(location) {
+    const where = location && location !== 'Unknown' ? location : null;
+    return where
+        ? `This account posts from ${where}. (via X-Posed)`
+        : 'Where this account actually posts from. (via X-Posed)';
+}
+
+/**
+ * Show the share sheet: preview the evidence image, edit a caption, and post it to
+ * X as a quote / reply / new post (or copy / save). Replaces the old save-only
+ * evidence modal; the capture engine (createEvidenceCanvas) is reused unchanged.
+ */
+function showShareSheet(canvas, info) {
+    document.querySelector('.x-share-overlay')?.remove();
+
+    const ce = (tag, cls, txt) => {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (typeof txt === 'string') n.textContent = txt;
+        return n;
     };
-    
-    // Set initial content
-    setSaveBtnContent(false);
-    
-    const performSave = () => {
+
+    const statusId = statusIdFromUrl(info.tweetUrl);
+    const filename = generateFilename(info.screenName);
+
+    const overlay = ce('div', 'x-share-overlay');
+    const sheet = ce('div', 'x-share-sheet');
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Share evidence');
+    sheet.appendChild(ce('div', 'x-share-scan'));
+    const pad = ce('div', 'x-share-pad');
+
+    // header
+    const head = ce('div', 'x-share-head');
+    const hico = ce('div', 'x-share-ico');
+    hico.appendChild(glyph('shield', 17));
+    const htitle = ce('div', 'x-share-title', 'Share evidence');
+    htitle.appendChild(ce('small', null, 'Quote · reply · post'));
+    const closeBtn = ce('button', 'x-share-close');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.appendChild(glyph('close', 16));
+    head.appendChild(hico);
+    head.appendChild(htitle);
+    head.appendChild(closeBtn);
+
+    // evidence preview (click to enlarge)
+    const preview = ce('div', 'x-share-preview');
+    preview.title = 'Click to enlarge';
+    const img = ce('img');
+    img.src = canvas.toDataURL('image/png');
+    img.alt = 'Evidence';
+    preview.appendChild(img);
+    const zoomHint = ce('span', 'x-share-zoomhint');
+    zoomHint.appendChild(glyph('zoom', 15));
+    preview.appendChild(zoomHint);
+    preview.addEventListener('click', () => {
+        const zoom = ce('div', 'x-share-zoom');
+        const big = ce('img');
+        big.src = canvas.toDataURL('image/png');
+        big.alt = 'Evidence';
+        zoom.appendChild(big);
+        zoom.addEventListener('click', () => zoom.remove());
+        document.body.appendChild(zoom);
+    });
+
+    // caption
+    const capWrap = ce('div', 'x-share-capwrap');
+    const cap = ce('textarea', 'x-share-cap');
+    cap.maxLength = 280;
+    cap.value = defaultCaption(info.location);
+    const count = ce('span', 'x-share-count');
+    const updCount = () => { count.textContent = cap.value.length + '/280'; };
+    cap.addEventListener('input', updCount);
+    updCount();
+    capWrap.appendChild(cap);
+    capWrap.appendChild(count);
+
+    // modes
+    const modeWrap = ce('div', 'x-share-modes');
+    modeWrap.appendChild(ce('span', 'x-share-modelbl', 'Share as'));
+    const seg = ce('div', 'x-share-seg');
+    seg.appendChild(ce('span', 'x-share-pill'));
+    const MODES = [
+        { key: 'quote', ico: 'swap', mt: 'Quote', ms: 'your timeline', desc: 'Posts to your timeline with their tweet embedded.' },
+        { key: 'reply', ico: 'reply', mt: 'Reply', ms: 'under post', desc: 'Replies directly under their post — they get notified.' },
+        { key: 'post', ico: 'plus', mt: 'New post', ms: 'mention them', desc: 'A fresh post on your timeline mentioning the account.' }
+    ];
+    const desc = ce('div', 'x-share-desc');
+    const btns = [];
+    let mode = MODES.some(m => m.key === lastShareMode) ? lastShareMode : 'quote';
+    const selectMode = (key, i) => {
+        mode = key;
+        lastShareMode = key;
+        seg.style.setProperty('--i', String(i));
+        btns.forEach((b, j) => b.setAttribute('aria-selected', j === i ? 'true' : 'false'));
+        desc.textContent = MODES[i].desc;
+    };
+    MODES.forEach((m, i) => {
+        const b = ce('button');
+        b.type = 'button';
+        b.appendChild(glyph(m.ico, 15));
+        b.appendChild(ce('span', 'x-share-mt', m.mt));
+        b.appendChild(ce('span', 'x-share-ms', m.ms));
+        b.addEventListener('click', () => selectMode(m.key, i));
+        btns.push(b);
+        seg.appendChild(b);
+    });
+    modeWrap.appendChild(seg);
+    modeWrap.appendChild(desc);
+    selectMode(mode, MODES.findIndex(m => m.key === mode));
+
+    // actions
+    const actions = ce('div', 'x-share-actions');
+    const shareBtn = ce('button', 'x-share-primary');
+    shareBtn.type = 'button';
+    shareBtn.appendChild(glyph('xLogo', 17));
+    shareBtn.appendChild(ce('span', null, 'Share on X'));
+    const copyBtn = ce('button', 'x-share-ghost');
+    copyBtn.type = 'button';
+    copyBtn.title = 'Copy image';
+    copyBtn.appendChild(glyph('copy', 17));
+    const saveBtn = ce('button', 'x-share-ghost');
+    saveBtn.type = 'button';
+    saveBtn.title = 'Save PNG';
+    saveBtn.appendChild(glyph('save', 17));
+    actions.appendChild(shareBtn);
+    actions.appendChild(copyBtn);
+    actions.appendChild(saveBtn);
+
+    const hedge = ce('p', 'x-share-hedge', TOUCH
+        ? 'Share attaches the image to your X post via your phone’s share sheet. Location may be approximate.'
+        : 'Share copies the evidence to your clipboard and opens X. Paste it (Ctrl/⌘+V), then post. Location may be approximate.');
+
+    // Two-column body on PC (preview | controls); stacks on mobile.
+    const sbody = ce('div', 'x-share-body');
+    const side = ce('div', 'x-share-side');
+    side.appendChild(ce('span', 'x-share-caplbl', 'Caption'));
+    side.appendChild(capWrap);
+    side.appendChild(modeWrap);
+    side.appendChild(actions);
+    sbody.appendChild(preview);
+    sbody.appendChild(side);
+
+    pad.appendChild(head);
+    pad.appendChild(sbody);
+    pad.appendChild(hedge);
+    sheet.appendChild(pad);
+    overlay.appendChild(sheet);
+
+    const close = () => {
+        overlay.remove();
+        document.removeEventListener('keydown', onKey);
+    };
+    function onKey(e) {
+        if (e.key === 'Escape') close();
+        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doShare(); }
+    }
+    closeBtn.onclick = close;
+    overlay.onclick = e => { if (e.target === overlay) close(); };
+    document.addEventListener('keydown', onKey);
+
+    // The flow runs synchronously inside the click so window.open / share / clipboard
+    // all keep the user-gesture activation.
+    function doShare() {
+        const caption = cap.value;
+        const blob = dataUrlToBlob(canvas.toDataURL('image/png'));
+
+        if (TOUCH) {
+            try {
+                const file = new File([blob], 'x-posed-evidence.png', { type: 'image/png' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    navigator.share({ files: [file], text: caption + (info.tweetUrl ? ' ' + info.tweetUrl : '') })
+                        .catch(() => { /* user cancelled */ });
+                    close();
+                    return;
+                }
+            } catch (_) { /* fall through to the desktop path */ }
+        }
+
+        const clip = copyImage(blob);
+        // Flag the X tab we are about to open so its content script reminds the user
+        // to paste — a toast here would fire on this now-background tab and be missed.
+        try { browserAPI.storage.local.set({ xpPasteHint: Date.now() }); } catch (_) { /* ignore */ }
+        const win = window.open(buildIntentUrl(mode, caption, info.tweetUrl, statusId), '_blank');
+        close();
+        if (!win) {
+            // Pop-up blocked: the composer never opened, so surface status in this tab.
+            clip.then(copied => showToast({
+                title: 'Pop-up blocked',
+                message: copied
+                    ? 'Your evidence is copied — open a post and paste it (Ctrl/⌘+V).'
+                    : 'Allow pop-ups for x.com, or use Save to attach the image.',
+                icon: glyph('warn', 20),
+                iconType: 'warning',
+                duration: 9000
+            }));
+        }
+    }
+
+    shareBtn.onclick = doShare;
+    copyBtn.onclick = () => {
+        const blob = dataUrlToBlob(canvas.toDataURL('image/png'));
+        copyImage(blob).then(ok => showToast({
+            title: ok ? 'Image copied' : 'Copy unavailable',
+            message: ok ? 'Paste it into a post, DM, or anywhere.' : 'Your browser blocked image copy — use Save.',
+            icon: glyph(ok ? 'copy' : 'warn', 20),
+            iconType: ok ? 'success' : 'warning',
+            duration: 4000
+        }));
+    };
+    saveBtn.onclick = () => {
         const link = document.createElement('a');
         link.download = filename;
         link.href = canvas.toDataURL('image/png');
         link.click();
-        
-        setSaveBtnContent(true);
-        saveBtn.style.background = '#00ba7c';
-        setTimeout(() => {
-            setSaveBtnContent(false);
-            saveBtn.style.background = '';
-        }, 2000);
+        showToast({ title: 'Saved evidence PNG', message: filename, icon: glyph('check', 20), iconType: 'success', duration: 4000 });
     };
-    
-    saveBtn.onclick = performSave;
-    
-    buttonContainer.appendChild(saveBtn);
-    
-    footer.appendChild(filenameDiv);
-    footer.appendChild(buttonContainer);
-    
-    // Assemble modal
-    modal.appendChild(header);
-    modal.appendChild(body);
-    modal.appendChild(footer);
-    overlay.appendChild(modal);
-    
-    // Event listeners
-    closeBtn.onclick = () => overlay.remove();
-    overlay.onclick = e => {
-        if (e.target === overlay) overlay.remove();
-    };
-    
-    // Keyboard shortcuts: Escape to close, Enter to save
-    const keyHandler = e => {
-        if (e.key === 'Escape') {
-            overlay.remove();
-            document.removeEventListener('keydown', keyHandler);
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            performSave();
-        }
-    };
-    document.addEventListener('keydown', keyHandler);
-    
-    // Add to page
+
     document.body.appendChild(overlay);
+    setTimeout(() => cap.focus(), 60);
 }
 
 /**

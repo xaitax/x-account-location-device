@@ -176,7 +176,7 @@ export const DEFAULT_SETTINGS = {
     showDevices: true,
     showVpnIndicator: true,
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
-    showCaptureButton: false,  // Off by default; enable in the popup/options to show the capture button on badges
+    showCaptureButton: true,  // The badge "Share" button (capture + quote/reply/post to X)
     showSidebarBlockerLink: true,
     debugMode: false,
     cloudCacheEnabled: false,  // Opt-in only
