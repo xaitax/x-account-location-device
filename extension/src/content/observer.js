@@ -579,6 +579,11 @@ export async function processElement(element, {
         }
     }
     
+    // Re-derive tag-blocking from scratch on every (re)processing pass. X recycles
+    // timeline rows, so a stale data-x-tag-blocked left by a previous occupant would
+    // otherwise wrongly re-block an innocent user on the next blocked-tags update.
+    delete element.dataset.xTagBlocked;
+
     element.dataset.xProcessed = 'true';
     element.dataset.xScreenName = screenName;
 

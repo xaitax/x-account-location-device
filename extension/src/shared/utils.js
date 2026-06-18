@@ -509,6 +509,14 @@ function getDeviceCategory(deviceString) {
  * @param {string|null|undefined} text - The text to extract tags from (display name, bio, etc.)
  * @returns {string[]} - Array of unique tags/emojis found
  */
+// Hoisted to module scope so these (especially the heavy Unicode-property emoji
+// regex) compile once, not on every call — extractTagsFromText runs per username when
+// blocked tags are configured. Used only via String.prototype.match, which neither
+// reads nor advances lastIndex, so sharing these /g instances across calls is safe.
+const EMOJI_TAG_RE = /(?:\p{Emoji_Presentation}|\p{Emoji}️|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Component})+(?:‍(?:\p{Emoji_Presentation}|\p{Emoji}️|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Component})+)*/gu;
+const BRACKET_TAG_RE = /\[([^\]]{1,20})\]|\(([^)]{1,20})\)/g;
+const HASHTAG_TAG_RE = /#(\w{2,20})/g;
+
 export function extractTagsFromText(text) {
     if (!text || typeof text !== 'string') return [];
     
@@ -521,10 +529,10 @@ export function extractTagsFromText(text) {
     // - Skin tone modifiers
     // - Compound emojis with ZWJ (👨‍👩‍👧)
     // - Emoji with variation selectors
-    const emojiRegex = /(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Component})+(?:\u200D(?:\p{Emoji_Presentation}|\p{Emoji}\uFE0F|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Component})+)*/gu;
+    // (emoji pattern hoisted to EMOJI_TAG_RE at module scope)
     
     // Extract all emojis
-    const emojiMatches = text.match(emojiRegex);
+    const emojiMatches = text.match(EMOJI_TAG_RE);
     if (emojiMatches) {
         for (const emoji of emojiMatches) {
             // Skip common punctuation that might match as emoji components
@@ -540,7 +548,7 @@ export function extractTagsFromText(text) {
     // Also extract common symbolic patterns users put in names
     // These are patterns like: ⭐, ✨, 🔥, 💀, etc. that might not be caught above
     // And text-based tags in brackets/parentheses like: [BOT], (parody), etc.
-    const bracketPatterns = text.match(/\[([^\]]{1,20})\]|\(([^)]{1,20})\)/g);
+    const bracketPatterns = text.match(BRACKET_TAG_RE);
     if (bracketPatterns) {
         for (const pattern of bracketPatterns) {
             tags.add(pattern);
@@ -549,7 +557,7 @@ export function extractTagsFromText(text) {
     
     // Extract hashtag-like patterns without the #
     // E.g., in "John #MAGA Smith" we extract "MAGA"
-    const hashtagMatches = text.match(/#(\w{2,20})/g);
+    const hashtagMatches = text.match(HASHTAG_TAG_RE);
     if (hashtagMatches) {
         for (const hashtag of hashtagMatches) {
             tags.add(hashtag);

@@ -48,7 +48,7 @@ class RequestQueue {
         this.lastRequestTime = 0;
         this.queue = [];
         this.rateLimitReset = 0;
-        this.processing = false;
+        this.scheduled = false;
     }
 
     async add(request) {
@@ -58,35 +58,42 @@ class RequestQueue {
         });
     }
 
-    async process() {
-        if (this.processing || this.queue.length === 0) return;
+    // Dispatcher: starts one queued request if concurrency + pacing allow, then
+    // schedules the next start. Requests run concurrently (up to maxConcurrent); only
+    // their START times are paced by minInterval, so we get real parallelism without
+    // firing a burst that trips X's rate limits. (Previously a single `processing`
+    // lock spanned each request's whole lifetime, so effective concurrency was 1.)
+    process() {
+        if (this.queue.length === 0) return;
         if (this.activeRequests >= this.maxConcurrent) return;
 
-        // Check rate limit
         const now = Date.now();
+
+        // Global rate-limit cooldown.
         if (this.rateLimitReset > now) {
-            const waitTime = Math.min(this.rateLimitReset - now, 60000);
-            setTimeout(() => this.process(), waitTime);
+            this.scheduleProcess(Math.min(this.rateLimitReset - now, 60000));
             return;
         }
 
-        // Check min interval
+        // Pace request starts (not their lifetimes) by minInterval.
         const timeSinceLast = now - this.lastRequestTime;
         if (timeSinceLast < this.minInterval) {
-            setTimeout(() => this.process(), this.minInterval - timeSinceLast);
+            this.scheduleProcess(this.minInterval - timeSinceLast);
             return;
         }
 
-        this.processing = true;
         const item = this.queue.shift();
-        if (!item) {
-            this.processing = false;
-            return;
-        }
+        if (!item) return;
 
         this.activeRequests++;
         this.lastRequestTime = Date.now();
+        this.runItem(item); // intentionally not awaited, so more requests can start
 
+        // Start the next queued request after the pacing interval, while this one runs.
+        if (this.queue.length > 0) this.scheduleProcess(this.minInterval);
+    }
+
+    async runItem(item) {
         try {
             const result = await item.request();
             item.resolve(result);
@@ -97,12 +104,20 @@ class RequestQueue {
             item.reject(error);
         } finally {
             this.activeRequests--;
-            this.processing = false;
-            // Continue processing queue
-            if (this.queue.length > 0) {
-                setTimeout(() => this.process(), 0);
-            }
+            // A slot just freed — pump again (coalesced into the single pending timer).
+            if (this.queue.length > 0) this.scheduleProcess(0);
         }
+    }
+
+    // Coalesce pumps into one pending timer so bursts of add()/completions don't
+    // stack timers; pacing is still enforced by the checks in process().
+    scheduleProcess(delay) {
+        if (this.scheduled) return;
+        this.scheduled = true;
+        setTimeout(() => {
+            this.scheduled = false;
+            this.process();
+        }, delay);
     }
 
     setRateLimit(resetTime) {

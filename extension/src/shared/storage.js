@@ -70,12 +70,19 @@ class UserCacheStorage {
                 exportData[key] = { value: entry.value, expiry: entry.expiry };
             }
 
+            // Clear the dirty flag for THIS snapshot before the async write (the
+            // snapshot build above is synchronous, so nothing interleaves). A set()
+            // that lands during the await re-sets dirty=true and arms a fresh timer,
+            // and must not be clobbered by a post-await reset — so we do NOT touch
+            // dirty after the write succeeds.
+            this.dirty = false;
+
             await browserAPI.storage.local.set({
                 [STORAGE_KEYS.CACHE]: exportData
             });
-
-            this.dirty = false;
         } catch (error) {
+            // Write failed — re-mark dirty so the snapshot is retried and not lost.
+            this.dirty = true;
             console.error('Failed to save user cache:', error);
         }
     }
