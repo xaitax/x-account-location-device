@@ -577,11 +577,6 @@ export async function processElement(element, {
         }
     }
     
-    // Re-derive tag-blocking from scratch on every (re)processing pass. X recycles
-    // timeline rows, so a stale data-x-tag-blocked left by a previous occupant would
-    // otherwise wrongly re-block an innocent user on the next blocked-tags update.
-    delete element.dataset.xTagBlocked;
-
     element.dataset.xProcessed = 'true';
     element.dataset.xScreenName = screenName;
 
@@ -606,8 +601,6 @@ export async function processElement(element, {
     if (blockedTags && blockedTags.size > 0) {
         const displayName = extractDisplayName(element);
         if (displayName && hasBlockedTag(displayName, blockedTags)) {
-            element.dataset.xTagBlocked = 'true';
-
             const isQuote = isInsideQuoteTweet(element, tweet);
             const loggedInUser = getLoggedInUsername();
             const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
@@ -837,19 +830,24 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
  */
 function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}) {
     const highlightMode = settings.highlightBlockedTweets === true;
+    const hasTags = blockedTags && blockedTags.size > 0;
 
     document.querySelectorAll('[data-x-screen-name]').forEach(element => {
-        const location = element.dataset.xCountry;
-        
-        if (!location) return;
-        
         const tweet = element.closest(SELECTORS.TWEET);
         if (!tweet) return;
-        
-        const locationLower = location.toLowerCase();
-        const isBlockedCountry = blockedCountries.has(locationLower);
-        const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
-        const isBlocked = isBlockedCountry || isBlockedRegion || element.dataset.xTagBlocked === 'true';
+
+        const location = element.dataset.xCountry;
+        const locationLower = location ? location.toLowerCase() : '';
+        const isBlockedCountry = locationLower !== '' && blockedCountries.has(locationLower);
+        const isBlockedRegion = locationLower !== '' && blockedRegions && blockedRegions.has(locationLower);
+
+        // Re-derive tag-blocking from the CURRENT blocked-tags set against the live
+        // display name (the row is still on screen). This is what makes adding OR
+        // removing a tag re-apply to already-rendered tweets — and, because we never
+        // trust a cached flag, a recycled row can't inherit a previous occupant's block.
+        const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
+
+        const isBlocked = isBlockedCountry || isBlockedRegion || isTagBlocked;
 
         // Persistent marker for CSS :has() so the article stays styled even after X
         // re-renders it and strips our class.
