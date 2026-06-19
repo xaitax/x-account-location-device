@@ -22,6 +22,10 @@ X already knows where an account posts from. It's tucked inside the "About this 
 
 *Hover any badge for the full dossier: location, device, VPN/proxy signal, account age, verification, and ID.*
 
+![Share evidence to X](screenshots/share.png)
+
+*One click turns any account into an evidence card — flag, device, VPN/proxy, account age — ready to quote, reply, or post.*
+
 ![The quick-settings popup](screenshots/popup.png)
 
 *The popup: every toggle, the live community-cache count, and one-click support.*
