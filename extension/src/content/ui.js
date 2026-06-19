@@ -406,7 +406,10 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     hint.appendChild(glyph('info', 14));
 
     // Share button — added before the circled-i so the (i) stays the last item.
-    if (settings.showCaptureButton !== false) {
+    // Skipped on UserCell badges (follower/following lists, People search): the
+    // capture flow needs an enclosing tweet article, which those rows don't have,
+    // so the button would render but silently do nothing on click.
+    if (settings.showCaptureButton !== false && !isUserCell) {
         const captureBtn = document.createElement('button');
         captureBtn.className = 'x-capture-btn';
         captureBtn.title = 'Share evidence';

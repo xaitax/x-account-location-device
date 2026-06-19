@@ -81,8 +81,10 @@ class UserCacheStorage {
                 [STORAGE_KEYS.CACHE]: exportData
             });
         } catch (error) {
-            // Write failed — re-mark dirty so the snapshot is retried and not lost.
+            // Write failed — re-mark dirty AND re-arm a save so the snapshot is retried
+            // autonomously, not only on the next cache mutation.
             this.dirty = true;
+            this.scheduleSave();
             console.error('Failed to save user cache:', error);
         }
     }

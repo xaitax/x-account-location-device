@@ -271,7 +271,7 @@ async function maybeShowPasteHint() {
     try {
         const res = await browserAPI.storage.local.get('xpPasteHint');
         const t = res?.xpPasteHint;
-        if (!t || Date.now() - t > 20000) return;
+        if (!t || Date.now() - t > 15000) return;
         await browserAPI.storage.local.remove('xpPasteHint');
         setTimeout(() => {
             showToast({

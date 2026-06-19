@@ -732,11 +732,19 @@ function copyImage(blob) {
 
 // X's official compose intent. Quote = caption + their tweet URL (X embeds it as a
 // quote); Reply = caption under their post; New = a standalone post.
-function buildIntentUrl(mode, caption, tweetUrl, statusId) {
+function buildIntentUrl(mode, caption, tweetUrl, statusId, screenName) {
     const p = new URLSearchParams();
-    p.set('text', caption || '');
-    if (mode === 'reply' && statusId) p.set('in_reply_to', statusId);
-    else if (mode === 'quote' && tweetUrl) p.set('url', tweetUrl);
+    let text = caption || '';
+    if (mode === 'reply' && statusId) {
+        p.set('in_reply_to', statusId);
+    } else if (mode === 'quote' && tweetUrl) {
+        p.set('url', tweetUrl);
+    } else if (mode === 'post' && screenName) {
+        // "New post" is a standalone tweet that mentions the account. The @handle goes
+        // at the end (not leading) so X does not treat the post as a reply.
+        text = `${text} @${screenName}`.trim();
+    }
+    p.set('text', text);
     return 'https://x.com/intent/post?' + p.toString();
 }
 
@@ -892,15 +900,28 @@ function showShareSheet(canvas, info) {
 
     const close = () => {
         overlay.remove();
+        document.querySelector('.x-share-zoom')?.remove();
         document.removeEventListener('keydown', onKey);
     };
     function onKey(e) {
-        if (e.key === 'Escape') close();
-        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doShare(); }
+        if (e.key === 'Escape') {
+            // Escape closes the zoom overlay first (if open), then the sheet.
+            const zoom = document.querySelector('.x-share-zoom');
+            if (zoom) { zoom.remove(); return; }
+            close();
+        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doShare(); }
     }
     closeBtn.onclick = close;
     overlay.onclick = e => { if (e.target === overlay) close(); };
     document.addEventListener('keydown', onKey);
+
+    // Save the rendered evidence PNG (shared by the Save button and the mobile fallback).
+    const saveImage = () => {
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    };
 
     // The flow runs synchronously inside the click so window.open / share / clipboard
     // all keep the user-gesture activation.
@@ -909,35 +930,50 @@ function showShareSheet(canvas, info) {
         const blob = dataUrlToBlob(canvas.toDataURL('image/png'));
 
         if (TOUCH) {
-            try {
-                const file = new File([blob], 'x-posed-evidence.png', { type: 'image/png' });
-                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    navigator.share({ files: [file], text: caption + (info.tweetUrl ? ' ' + info.tweetUrl : '') })
-                        .catch(() => { /* user cancelled */ });
-                    close();
-                    return;
-                }
-            } catch (_) { /* fall through to the desktop path */ }
+            const file = new File([blob], 'x-posed-evidence.png', { type: 'image/png' });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                close();
+                navigator.share({ files: [file], text: caption + (info.tweetUrl ? ' ' + info.tweetUrl : '') })
+                    .catch(err => {
+                        if (err && err.name === 'AbortError') return; // user cancelled — no fallback needed
+                        // A real share failure — save the image so the user still has a path.
+                        saveImage();
+                        showToast({ title: 'Share failed — image saved', message: `${filename} — attach it to your post.`, icon: glyph('save', 20), iconType: 'warning', duration: 7000 });
+                    });
+                return;
+            }
+            // No file-level Web Share here, and mobile browsers usually block clipboard
+            // image writes too — so save the PNG to attach manually rather than pretend.
+            close();
+            saveImage();
+            showToast({ title: 'Image saved', message: `${filename} — attach it to your X post.`, icon: glyph('save', 20), iconType: 'info', duration: 7000 });
+            return;
         }
 
         const clip = copyImage(blob);
-        // Flag the X tab we are about to open so its content script reminds the user
-        // to paste — a toast here would fire on this now-background tab and be missed.
-        try { browserAPI.storage.local.set({ xpPasteHint: Date.now() }); } catch (_) { /* ignore */ }
-        const win = window.open(buildIntentUrl(mode, caption, info.tweetUrl, statusId), '_blank');
+        const win = window.open(buildIntentUrl(mode, caption, info.tweetUrl, statusId, info.screenName), '_blank');
         close();
-        if (!win) {
-            // Pop-up blocked: the composer never opened, so surface status in this tab.
-            clip.then(copied => showToast({
-                title: 'Pop-up blocked',
-                message: copied
-                    ? 'Your evidence is copied — open a post and paste it (Ctrl/⌘+V).'
-                    : 'Allow pop-ups for x.com, or use Save to attach the image.',
-                icon: glyph('warn', 20),
-                iconType: 'warning',
-                duration: 9000
-            }));
-        }
+        clip.then(copied => {
+            if (win && copied) {
+                // Composer opened AND the image really landed on the clipboard: flag the new
+                // X tab so its content script reminds the user to paste. Set only on success
+                // so a failed copy can't produce a misleading "Evidence is on your clipboard".
+                try { browserAPI.storage.local.set({ xpPasteHint: Date.now() }); } catch (_) { /* ignore */ }
+            } else if (!win) {
+                // Pop-up blocked: the composer never opened — surface status in this tab.
+                showToast({
+                    title: 'Pop-up blocked',
+                    message: copied
+                        ? 'Your evidence is copied — open a post and paste it (Ctrl/⌘+V).'
+                        : 'Allow pop-ups for x.com, or use Save to attach the image.',
+                    icon: glyph('warn', 20),
+                    iconType: 'warning',
+                    duration: 9000
+                });
+            }
+            // win && !copied: composer opened but the clipboard write failed — no hint flag
+            // (nothing to paste); the user can fall back to Save.
+        });
     }
 
     shareBtn.onclick = doShare;
@@ -952,10 +988,7 @@ function showShareSheet(canvas, info) {
         }));
     };
     saveBtn.onclick = () => {
-        const link = document.createElement('a');
-        link.download = filename;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
+        saveImage();
         showToast({ title: 'Saved evidence PNG', message: filename, icon: glyph('check', 20), iconType: 'success', duration: 4000 });
     };
 
