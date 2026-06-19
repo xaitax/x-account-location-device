@@ -773,6 +773,10 @@ function showShareSheet(canvas, info) {
     const statusId = statusIdFromUrl(info.tweetUrl);
     const filename = generateFilename(info.screenName);
 
+    // Encode the (immutable) rendered canvas once; preview, zoom, clipboard, share, and
+    // save all reuse this single data URL instead of re-running toDataURL each time.
+    const previewDataUrl = canvas.toDataURL('image/png');
+
     const overlay = ce('div', 'x-share-overlay');
     const sheet = ce('div', 'x-share-sheet');
     sheet.setAttribute('role', 'dialog');
@@ -798,7 +802,7 @@ function showShareSheet(canvas, info) {
     const preview = ce('div', 'x-share-preview');
     preview.title = 'Click to enlarge';
     const img = ce('img');
-    img.src = canvas.toDataURL('image/png');
+    img.src = previewDataUrl;
     img.alt = 'Evidence';
     preview.appendChild(img);
     const zoomHint = ce('span', 'x-share-zoomhint');
@@ -807,7 +811,7 @@ function showShareSheet(canvas, info) {
     preview.addEventListener('click', () => {
         const zoom = ce('div', 'x-share-zoom');
         const big = ce('img');
-        big.src = canvas.toDataURL('image/png');
+        big.src = previewDataUrl;
         big.alt = 'Evidence';
         zoom.appendChild(big);
         zoom.addEventListener('click', () => zoom.remove());
@@ -919,7 +923,7 @@ function showShareSheet(canvas, info) {
     const saveImage = () => {
         const link = document.createElement('a');
         link.download = filename;
-        link.href = canvas.toDataURL('image/png');
+        link.href = previewDataUrl;
         link.click();
     };
 
@@ -927,7 +931,7 @@ function showShareSheet(canvas, info) {
     // all keep the user-gesture activation.
     function doShare() {
         const caption = cap.value;
-        const blob = dataUrlToBlob(canvas.toDataURL('image/png'));
+        const blob = dataUrlToBlob(previewDataUrl);
 
         if (TOUCH) {
             const file = new File([blob], 'x-posed-evidence.png', { type: 'image/png' });
@@ -978,7 +982,7 @@ function showShareSheet(canvas, info) {
 
     shareBtn.onclick = doShare;
     copyBtn.onclick = () => {
-        const blob = dataUrlToBlob(canvas.toDataURL('image/png'));
+        const blob = dataUrlToBlob(previewDataUrl);
         copyImage(blob).then(ok => showToast({
             title: ok ? 'Image copied' : 'Copy unavailable',
             message: ok ? 'Paste it into a post, DM, or anywhere.' : 'Your browser blocked image copy — use Save.',

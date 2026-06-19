@@ -145,11 +145,9 @@ class RequestQueue {
  * Prevents unbounded memory growth from concurrent requests
  */
 class RequestDeduplicator {
-    constructor(maxSize = 200, timeoutMs = 30000) {
+    constructor(maxSize = 200) {
         this.pending = new Map();
-        this.timeouts = new Map(); // Track cleanup timeouts
         this.maxSize = maxSize;
-        this.timeoutMs = timeoutMs;
     }
 
     async dedupe(key, requestFn) {
@@ -168,25 +166,15 @@ class RequestDeduplicator {
             }
         }
 
-        // Create new promise with proper cleanup
+        // Create new promise; clean up on settle. The maxSize eviction above is the
+        // backstop against a never-settling request leaking its entry (and the MV3
+        // worker is torn down on idle, clearing everything), so no per-request timer.
         const promise = requestFn()
             .finally(() => {
                 this._cleanup(key);
             });
 
         this.pending.set(key, promise);
-        
-        // Set a cleanup timeout as a safety net in case finally doesn't run
-        // (e.g., if the promise is garbage collected before completion)
-        const timeoutId = setTimeout(() => {
-            if (this.pending.has(key)) {
-                console.warn(`⚠️ RequestDeduplicator: Timeout cleanup for ${key}`);
-                this._cleanup(key);
-            }
-        }, this.timeoutMs);
-        
-        this.timeouts.set(key, timeoutId);
-        
         return promise;
     }
 
@@ -196,13 +184,6 @@ class RequestDeduplicator {
      */
     _cleanup(key) {
         this.pending.delete(key);
-        
-        // Clear the timeout if it exists
-        const timeoutId = this.timeouts.get(key);
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            this.timeouts.delete(key);
-        }
     }
 
     has(key) {
@@ -210,11 +191,6 @@ class RequestDeduplicator {
     }
 
     clear() {
-        // Clear all timeouts
-        for (const timeoutId of this.timeouts.values()) {
-            clearTimeout(timeoutId);
-        }
-        this.timeouts.clear();
         this.pending.clear();
     }
     

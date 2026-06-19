@@ -148,11 +148,13 @@ export function getCountryCode(location) {
  * @param {string|null|undefined} deviceString - The device/client string from X API
  * @returns {'ios'|'android'|'web'|'unknown'} - Normalized device category
  */
+const IOS_SOURCE_TOKENS = ['app store', 'iphone', 'ipad', 'ios', 'mac', 'os x'];
+
 export function classifyDevice(deviceString) {
     const d = (deviceString || '').toLowerCase();
 
     if (d.includes('android')) return 'android';
-    if (['app store', 'iphone', 'ipad', 'ios', 'mac', 'os x'].some(t => d.includes(t))) return 'ios';
+    if (IOS_SOURCE_TOKENS.some(t => d.includes(t))) return 'ios';
     if (d.includes('web')) return 'web';
     return 'unknown';
 }
@@ -167,20 +169,28 @@ export function classifyDevice(deviceString) {
  * @param {string|null|undefined} deviceString - The device/client string from X API
  * @returns {string|null} - Country name (a COUNTRY_FLAGS key) or null
  */
+// Memoize per source string: device strings come from X's fixed "source" format, so
+// the distinct set is small and bounded. Avoids the split + O(words^2) scan on every
+// badge when "flag from device" is enabled (both the observer and createBadge call it).
+const _deviceCountryCache = new Map();
+
 export function getDeviceCountry(deviceString) {
     if (!deviceString) return null;
+    if (_deviceCountryCache.has(deviceString)) return _deviceCountryCache.get(deviceString);
 
     // Peel platform words off the end until the remaining prefix is a known
     // country (e.g. "russian federation android app" -> "russian federation").
     // Iterating from the full length down returns the LONGEST matching prefix,
     // so multi-word countries ("united states") win over shorter coincidences.
     const words = deviceString.trim().toLowerCase().split(/\s+/);
+    let result = null;
     for (let i = words.length; i > 0; i--) {
         const candidate = words.slice(0, i).join(' ');
-        if (COUNTRY_FLAGS[candidate]) return candidate;
+        if (COUNTRY_FLAGS[candidate]) { result = candidate; break; }
     }
 
-    return null;
+    _deviceCountryCache.set(deviceString, result);
+    return result;
 }
 
 /**
@@ -234,13 +244,26 @@ export function extractUsername(element) {
  * Get the logged-in username from the DOM
  * @returns {string|null} - The username (without @) or null
  */
+// The logged-in username is stable per session; cache it briefly so the per-tweet
+// isSelf check doesn't run a document-wide querySelector on every badge. A short TTL
+// lets it self-heal after an account switch without needing a navigation hook.
+let _loggedInUser = null;
+let _loggedInUserAt = 0;
+const LOGGED_IN_USER_TTL_MS = 5000;
+
 export function getLoggedInUsername() {
+    const now = Date.now();
+    if (_loggedInUser !== null && now - _loggedInUserAt < LOGGED_IN_USER_TTL_MS) {
+        return _loggedInUser;
+    }
     // Try to find the profile link in the sidebar
     const profileLink = document.querySelector('[data-testid="AppTabBar_Profile_Link"]');
     if (profileLink) {
         const href = profileLink.getAttribute('href');
         if (href && href.startsWith('/')) {
-            return href.substring(1);
+            _loggedInUser = href.substring(1);
+            _loggedInUserAt = now;
+            return _loggedInUser;
         }
     }
     return null;

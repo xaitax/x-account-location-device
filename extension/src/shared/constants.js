@@ -36,7 +36,8 @@ export const CLOUD_CACHE_CONFIG = {
 
     // Batch settings - balanced for cost and speed
     BATCH_SIZE: 100,             // Max usernames per lookup request
-    BATCH_DELAY_MS: 200,         // Reduced from 500ms for faster UX
+    BATCH_DELAY_MS: 200,         // Idle debounce before a lookup batch flushes
+    LOOKUP_MAX_WAIT_MS: 500,     // Hard cap: flush even if lookups keep arriving, so continuous scroll can't starve the batch
     CONTRIBUTE_BATCH_SIZE: 200,  // Max entries per contribute request
     CONTRIBUTE_DELAY_MS: 10000,  // Delay before contributing; kept under the ~30s MV3 idle window so queued contributions upload before the background suspends
 

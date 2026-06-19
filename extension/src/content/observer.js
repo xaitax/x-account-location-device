@@ -440,8 +440,11 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug) {
                     }
                 }
 
-                // Query descendants with combined selector (single DOM query)
-                if (node.querySelectorAll) {
+                // Query descendants with combined selector (single DOM query).
+                // Skip leaf nodes (no element children): they can't contain a match, and
+                // X emits constant churn of such nodes (icons, text spans, animation
+                // layers) during scroll. The self-check above already covers the node itself.
+                if (node.querySelectorAll && node.firstElementChild) {
                     const elements = node.querySelectorAll(COMBINED_USER_SELECTOR);
                     for (let i = 0; i < elements.length; i++) {
                         const el = elements[i];

@@ -189,9 +189,31 @@ function cacheNotFound(screenName) {
 }
 
 /**
- * Fetch user info handler
+ * In-flight dedup for concurrent FETCH_USER_INFO messages: the observer fires one per
+ * visible username, so the same author across several on-screen tweets would otherwise
+ * each run the whole local→cloud→API pipeline (and each wait on the cloud batch).
+ * Concurrent callers for the same screen name share a single promise.
  */
-async function handleFetchUserInfo({ screenName, csrfToken }) {
+const inFlightUserFetches = new Map();
+
+function handleFetchUserInfo(args) {
+    const key = (args?.screenName || '').toLowerCase();
+    if (!key) return _resolveUserInfo(args);
+
+    const existing = inFlightUserFetches.get(key);
+    if (existing) return existing;
+
+    const promise = _resolveUserInfo(args).finally(() => {
+        inFlightUserFetches.delete(key);
+    });
+    inFlightUserFetches.set(key, promise);
+    return promise;
+}
+
+/**
+ * Resolve user info: not-found cache → local cache → cloud cache → X API.
+ */
+async function _resolveUserInfo({ screenName, csrfToken }) {
     // 0. Check not-found cache first (avoid repeat API calls for non-existent users)
     if (isNotFoundCached(screenName)) {
         return {
@@ -420,8 +442,9 @@ async function broadcastToTabs(message) {
 async function handleSetSettings(newSettings) {
     await settings.set(newSettings);
 
-    // Notify all tabs about settings change (parallelized)
-    await broadcastToTabs({
+    // Notify all tabs (fire-and-forget): the caller's response shouldn't wait on a
+    // tabs.query + per-tab message round-trip, and the broadcast already swallows errors.
+    broadcastToTabs({
         type: MESSAGE_TYPES.SETTINGS_UPDATED,
         payload: settings.get()
     });
@@ -470,8 +493,8 @@ async function handleSetBlockedSet(store, updatedType, { action, value, values }
             break;
     }
 
-    // Notify all tabs about the change (parallelized)
-    await broadcastToTabs({
+    // Notify all tabs (fire-and-forget — don't block the caller's response on it).
+    broadcastToTabs({
         type: updatedType,
         payload: store.getAll()
     });
@@ -589,7 +612,7 @@ async function handleSetTheme({ theme }) {
         });
 
         // Notify all tabs about theme change (parallelized)
-        await broadcastToTabs({
+        broadcastToTabs({
             type: MESSAGE_TYPES.THEME_UPDATED,
             payload: theme
         });

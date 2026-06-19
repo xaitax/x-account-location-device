@@ -18,6 +18,7 @@ class CloudCacheClient {
         this.apiUrl = CLOUD_CACHE_CONFIG.API_URL;
         this.lookupBatch = new Set();
         this.lookupBatchTimeout = null;
+        this.lookupBatchFirstAt = 0; // When the current un-flushed batch started (for the max-wait cap)
         this.lookupBatchResolvers = []; // Array of resolve functions waiting for batch
         this.contributionQueue = new Map(); // username -> data
         this.contributeTimeout = null;
@@ -75,11 +76,8 @@ class CloudCacheClient {
 
         console.log(`☁️ Cloud Cache: ${this.enabled ? 'enabled' : 'disabled'}`);
 
-        // Warm cache on startup when cloud cache is enabled.
-        if (this.enabled && this.isConfigured()) {
-            this.refreshServerStats({ timeoutMs: 15000 }).catch(() => {});
-        }
-
+        // Server stats are loaded from storage above and refreshed lazily by the Options
+        // page (stale-while-revalidate), so no eager network fetch on every worker start.
         return this.enabled;
     }
 
@@ -202,7 +200,10 @@ class CloudCacheClient {
             return new Map();
         }
 
-        // Add to batch
+        // Add to batch (record when this un-flushed batch started, for the max-wait cap)
+        if (this.lookupBatch.size === 0) {
+            this.lookupBatchFirstAt = Date.now();
+        }
         for (const username of usernames) {
             this.lookupBatch.add(username.toLowerCase());
         }
@@ -211,15 +212,31 @@ class CloudCacheClient {
         return new Promise(resolve => {
             // Add this resolver to the list of waiting callers
             this.lookupBatchResolvers.push(resolve);
-            
-            // Reset the batch timer (debounce)
+
+            // Flush at once when the batch is full instead of waiting on the debounce.
+            if (this.lookupBatch.size >= CLOUD_CACHE_CONFIG.BATCH_SIZE) {
+                if (this.lookupBatchTimeout) {
+                    clearTimeout(this.lookupBatchTimeout);
+                    this.lookupBatchTimeout = null;
+                }
+                this.executeBatchedLookup();
+                return;
+            }
+
+            // Trailing debounce, but capped by a max wait: a steady stream of single-user
+            // lookups (continuous scroll) keeps resetting the 200ms timer, which would
+            // otherwise starve the batch from ever flushing. The cap forces it through.
             if (this.lookupBatchTimeout) {
                 clearTimeout(this.lookupBatchTimeout);
             }
-            
+            const elapsed = Date.now() - this.lookupBatchFirstAt;
+            const delay = Math.max(0, Math.min(
+                CLOUD_CACHE_CONFIG.BATCH_DELAY_MS,
+                CLOUD_CACHE_CONFIG.LOOKUP_MAX_WAIT_MS - elapsed
+            ));
             this.lookupBatchTimeout = setTimeout(() => {
                 this.executeBatchedLookup();
-            }, CLOUD_CACHE_CONFIG.BATCH_DELAY_MS);
+            }, delay);
         });
     }
 
@@ -234,6 +251,7 @@ class CloudCacheClient {
         this.lookupBatch.clear();
         this.lookupBatchResolvers = [];
         this.lookupBatchTimeout = null;
+        this.lookupBatchFirstAt = 0;
 
         if (batch.length === 0) {
             // Resolve all callers with empty result

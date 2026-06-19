@@ -244,13 +244,24 @@ const GLYPHS = {
  * @param {number} size
  * @returns {SVGElement}
  */
+// Cache built icon templates and return clones — cloneNode is cheaper than re-running
+// the createElementNS/setAttribute chains for the identical icon on every badge.
+const _deviceIconCache = new Map();
+
 export function deviceIcon(deviceString, size = 15) {
-    switch (classifyDevice(deviceString)) {
-        case 'ios': return apple(size);
-        case 'android': return android(size);
-        case 'web': return web(size);
-        default: return unknownDevice(size);
+    const category = classifyDevice(deviceString);
+    const key = `${category}@${size}`;
+    let tpl = _deviceIconCache.get(key);
+    if (!tpl) {
+        switch (category) {
+            case 'ios': tpl = apple(size); break;
+            case 'android': tpl = android(size); break;
+            case 'web': tpl = web(size); break;
+            default: tpl = unknownDevice(size);
+        }
+        _deviceIconCache.set(key, tpl);
     }
+    return tpl.cloneNode(true);
 }
 
 /**
@@ -262,8 +273,16 @@ export function deviceIcon(deviceString, size = 15) {
  * @param {number} size
  * @returns {SVGElement}
  */
+const _glyphCache = new Map();
+
 export function glyph(name, size = 16) {
-    return (GLYPHS[name] || GLYPHS.info)(size);
+    const key = `${name}@${size}`;
+    let tpl = _glyphCache.get(key);
+    if (!tpl) {
+        tpl = (GLYPHS[name] || GLYPHS.info)(size);
+        _glyphCache.set(key, tpl);
+    }
+    return tpl.cloneNode(true);
 }
 
 /**
