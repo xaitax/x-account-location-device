@@ -179,6 +179,7 @@ export const DEFAULT_SETTINGS = {
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
     showCaptureButton: true,  // The badge "Share" button (capture + quote/reply/post to X)
     showSidebarBlockerLink: true,
+    openChangelogOnUpdate: true,  // Open the "What's New"/changelog tab after a major/minor update (issue #24)
     debugMode: false,
     cloudCacheEnabled: false,  // Opt-in only
     highlightBlockedTweets: false  // If true, highlight instead of hide blocked tweets

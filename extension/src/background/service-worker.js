@@ -214,6 +214,10 @@ function handleFetchUserInfo(args) {
  * Resolve user info: not-found cache → local cache → cloud cache → X API.
  */
 async function _resolveUserInfo({ screenName, csrfToken }) {
+    // Issue #23 diagnostic: trace which source (local/cloud/api) supplied the country and
+    // how stale a cloud hit was, so the next flag/pop-up mismatch can be pinned down.
+    const debug23 = settings.get('debugMode') === true;
+
     // 0. Check not-found cache first (avoid repeat API calls for non-existent users)
     if (isNotFoundCached(screenName)) {
         return {
@@ -227,6 +231,7 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
     // 1. Check local cache first
     if (userCache.has(screenName)) {
         const cached = userCache.get(screenName);
+        if (debug23) console.log(`[xposed#23] @${screenName} source=local loc=${cached?.location}`);
         return {
             success: true,
             data: cached,
@@ -241,7 +246,8 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
             const cloudResults = await cloudCache.lookup([screenName]);
             if (cloudResults.has(screenName.toLowerCase())) {
                 const cloudData = cloudResults.get(screenName.toLowerCase());
-                
+                if (debug23) console.log(`[xposed#23] @${screenName} source=cloud loc=${cloudData?.location} ageMs=${Date.now() - (cloudData?.timestamp || 0)}`);
+
                 // Store in local cache for future use
                 userCache.set(screenName, cloudData);
                 
@@ -261,7 +267,8 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
     // 3. Fetch from X API
     try {
         const data = await apiClient.fetchUserInfo(screenName, csrfToken);
-        
+        if (debug23) console.log(`[xposed#23] @${screenName} source=api loc=${data?.location}`);
+
         // Cache the result locally
         userCache.set(screenName, data);
         
@@ -879,9 +886,19 @@ async function handleInstalled(details) {
                 [STORAGE_KEYS.WHATS_NEW_SEEN]: false
             });
             
-            // Open options page with "whats-new" parameter
-            const optionsUrl = browserAPI.runtime.getURL('options/options.html') + '?whats-new=true';
-            browserAPI.tabs.create({ url: optionsUrl });
+            // Open the "What's New" tab unless the user opted out (issue #24). onInstalled
+            // can fire before the SW's top-level initialize() finishes, so make sure settings
+            // are loaded first (initialize() is idempotent). WHATS_NEW_SEEN was still set to
+            // false above, so an opted-out user simply sees the in-page banner the next time
+            // they open Options — a graceful fallback rather than losing the notice.
+            try {
+                await initialize();
+            } catch (_e) { /* fall through with defaults */ }
+
+            if (settings.get('openChangelogOnUpdate') !== false) {
+                const optionsUrl = browserAPI.runtime.getURL('options/options.html') + '?whats-new=true';
+                browserAPI.tabs.create({ url: optionsUrl });
+            }
         } else {
             // Minor patch update, just save version
             await browserAPI.storage.local.set({

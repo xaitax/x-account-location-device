@@ -2,7 +2,17 @@
 
 All notable changes to X-Posed will be documented in this file.
 
-## [3.1.0] - 2026-06-17
+## [Unreleased]
+
+### Bug Fixes
+- **VPN/proxy tweets no longer stay hidden after you re-enable "Show VPN/Proxy Users."** Block, highlight and VPN-hide state is now re-derived authoritatively on every pass, so flipping the setting (or X recycling a timeline row) can't leave a tweet stuck hidden — and re-enabling the toggle now un-hides them live. Also stops a per-scan reprocessing loop on hidden rows.
+- **Name flag vs. hovercard mismatch** ([#23](https://github.com/xaitax/x-account-location-device/issues/23), reported by **@MV10**): when a badge was served a stale community-cache country, hovering now reconciles the badge to the live value so the two agree. Hardened the API parser to reject — and never cache or contribute — a response whose handle doesn't match the requested user, closing a cloud cache-poisoning path. Added diagnostics to pin down the remaining (server-side) cause.
+- **Popup community-cache total** now updates live from the same source as the settings dashboard, so the two no longer show different numbers.
+
+### New
+- **"Open Changelog on Update" toggle** ([#24](https://github.com/xaitax/x-account-location-device/issues/24)): turn off the automatic "What's New" tab that opens after an update (Settings → General Settings). On by default; opted-out users still see the in-page "What's New" banner next time they open Options.
+
+## [3.1.0] - 2026-06-19
 
 ### New Feature
 - **Share evidence to X.** Turn any account into a one-click evidence card (country flag, device, VPN/proxy signal, account age, and handle changes) and quote it, reply with it, or post it to your own timeline. The card is copied to your clipboard (or shared natively on mobile) and X's composer opens prefilled; you review and post. Click the card to enlarge it. Every share is opt-in and human-confirmed; nothing is posted automatically. The badge's capture button is now a share button.
