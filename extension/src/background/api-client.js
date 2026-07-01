@@ -310,7 +310,7 @@ export class XAPIClient {
             }
 
             const data = await response.json();
-            return this.parseResponse(data);
+            return this.parseResponse(data, screenName);
         } catch (error) {
             if (error instanceof APIError) {
                 // Don't retry rate limits, auth errors, or not found
@@ -389,10 +389,25 @@ export class XAPIClient {
     /**
      * Parse API response
      */
-    parseResponse(data) {
+    parseResponse(data, requestedScreenName = null) {
         try {
             const user = data?.data?.user_result_by_screen_name?.result;
             const profile = user?.about_profile;
+
+            // Issue #23: guard against X returning a DIFFERENT account than requested (a
+            // fuzzy/suggested/placeholder match). Caching or, worse, CONTRIBUTING that to the
+            // community cloud would poison it with the wrong country for everyone. Only
+            // enforced when X actually returns a handle (core.screen_name); if that field is
+            // absent we fail open, so this can never break a normal lookup. A mismatch is
+            // treated as NOT_FOUND (no retry, short-TTL negative cache) rather than trusting it.
+            const returnedScreenName = user?.core?.screen_name || null;
+            if (requestedScreenName && returnedScreenName &&
+                returnedScreenName.toLowerCase() !== requestedScreenName.toLowerCase()) {
+                throw new APIError(
+                    `Returned @${returnedScreenName} does not match requested @${requestedScreenName}`,
+                    API_ERROR_CODES.NOT_FOUND
+                );
+            }
 
             // Core values used by the extension (existing behavior)
             const location = profile?.account_based_in || null;
@@ -469,6 +484,9 @@ export class XAPIClient {
                 }
             };
         } catch (error) {
+            // Preserve our own typed errors (e.g. the screen-name mismatch guard above);
+            // only wrap genuinely unexpected parse failures.
+            if (error instanceof APIError) throw error;
             throw new APIError(
                 'Failed to parse response',
                 API_ERROR_CODES.PARSE_ERROR

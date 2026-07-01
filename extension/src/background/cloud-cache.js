@@ -410,6 +410,17 @@ class CloudCacheClient {
             }
         }
 
+        // Diagnostic (issue #23 "flag/pop-up mismatch"): a returned username we never asked
+        // for is a strong signal of a server-side username→data misalignment (the leading
+        // root-cause hypothesis). This is rare by design, so log unconditionally — it is the
+        // smoking gun that would confirm the mismatch originates in the cloud Worker.
+        const requestedSet = new Set(usernames);
+        for (const returnedUser of results.keys()) {
+            if (!requestedSet.has(returnedUser)) {
+                console.warn(`☁️ X-Posed: cloud /lookup returned an UNREQUESTED user "${returnedUser}" — possible server-side mapping bug (issue #23)`);
+            }
+        }
+
         // Update backoff state based on results
         if (hasSuccess && !hasFailure) {
             this.recordSuccess();
