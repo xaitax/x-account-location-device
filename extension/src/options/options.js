@@ -4,7 +4,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, STORAGE_KEYS, TIMING } from '../shared/constants.js';
+import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, LANGUAGE_LIST, LANGUAGE_NAMES, STORAGE_KEYS, TIMING } from '../shared/constants.js';
 import { getFlagEmoji, formatCountryName, debounce } from '../shared/utils.js';
 import { deviceIcon, glyph } from '../content/icons.js';
 
@@ -43,15 +43,23 @@ const elements = {
     tabCountries: document.getElementById('tab-countries'),
     tabRegions: document.getElementById('tab-regions'),
     tabTags: document.getElementById('tab-tags'),
+    tabLanguages: document.getElementById('tab-languages'),
     panelCountries: document.getElementById('panel-countries'),
     panelRegions: document.getElementById('panel-regions'),
     panelTags: document.getElementById('panel-tags'),
+    panelLanguages: document.getElementById('panel-languages'),
     // Blocked Tags
     blockedTagsList: document.getElementById('blocked-tags-list'),
     blockedTagsCount: document.getElementById('blocked-tags-count'),
     tagInput: document.getElementById('tag-input'),
     btnAddTag: document.getElementById('btn-add-tag'),
     btnClearBlockedTags: document.getElementById('btn-clear-blocked-tags'),
+    // Blocked Languages
+    blockedLanguagesList: document.getElementById('blocked-languages-list'),
+    blockedLanguagesCount: document.getElementById('blocked-languages-count'),
+    languageSearch: document.getElementById('language-search'),
+    languageGrid: document.getElementById('language-grid'),
+    btnClearBlockedLanguages: document.getElementById('btn-clear-blocked-languages'),
     // Cloud cache
     optCloudCache: document.getElementById('opt-cloud-cache'),
     cloudStatus: document.getElementById('cloud-status'),
@@ -86,6 +94,7 @@ let currentSettings = {};
 let blockedCountries = [];
 let blockedRegions = [];
 let blockedTags = [];
+let blockedLanguages = [];
 let rateLimitMonitorInterval = null;
 
 /**
@@ -141,6 +150,7 @@ async function initialize() {
     await loadBlockedCountries();
     await loadBlockedRegions();
     await loadBlockedTags();
+    await loadBlockedLanguages();
     await loadCacheStats();
     await loadStatistics();
     await loadCloudCacheStatus();
@@ -504,6 +514,232 @@ async function clearAllBlockedTags() {
         }
     } catch (error) {
         console.error('Failed to clear blocked tags:', error);
+    }
+}
+
+/**
+ * Load blocked languages (issue #25)
+ */
+async function loadBlockedLanguages() {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.GET_BLOCKED_LANGUAGES
+        });
+
+        if (response?.success) {
+            blockedLanguages = response.data || [];
+            renderBlockedLanguages();
+            renderLanguageGrid(elements.languageSearch?.value || '');
+            updateBlockedLanguagesCount();
+        }
+    } catch (error) {
+        console.error('Failed to load blocked languages:', error);
+    }
+}
+
+/**
+ * Update blocked languages count badge
+ */
+function updateBlockedLanguagesCount() {
+    if (elements.blockedLanguagesCount) {
+        elements.blockedLanguagesCount.textContent = blockedLanguages.length;
+        elements.blockedLanguagesCount.style.display = blockedLanguages.length > 0 ? 'inline-flex' : 'none';
+    }
+}
+
+/**
+ * Render blocked languages list
+ */
+function renderBlockedLanguages() {
+    const list = elements.blockedLanguagesList;
+    if (!list) return;
+
+    list.replaceChildren();
+
+    if (blockedLanguages.length === 0) {
+        const emptyState = document.createElement('p');
+        emptyState.className = 'empty-state';
+        emptyState.textContent = 'No languages blocked';
+        list.appendChild(emptyState);
+        return;
+    }
+
+    // Sort by display name for a stable, readable list
+    const sorted = [...blockedLanguages].sort((a, b) =>
+        (LANGUAGE_NAMES[a] || a).localeCompare(LANGUAGE_NAMES[b] || b)
+    );
+
+    for (const code of sorted) {
+        const item = document.createElement('div');
+        item.className = 'blocked-item';
+
+        const itemInfo = document.createElement('div');
+        itemInfo.className = 'blocked-item-info';
+
+        // Code chip (renders on every OS, unlike per-language flags)
+        const codeSpan = document.createElement('span');
+        codeSpan.className = 'blocked-flag language-code';
+        codeSpan.textContent = code.toUpperCase();
+        itemInfo.appendChild(codeSpan);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'blocked-name';
+        nameSpan.textContent = LANGUAGE_NAMES[code] || code;
+        itemInfo.appendChild(nameSpan);
+
+        item.appendChild(itemInfo);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'blocked-remove';
+        removeBtn.dataset.language = code;
+        removeBtn.setAttribute('aria-label', `Remove ${LANGUAGE_NAMES[code] || code}`);
+
+        const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        removeSvg.setAttribute('viewBox', '0 0 24 24');
+        removeSvg.setAttribute('width', '16');
+        removeSvg.setAttribute('height', '16');
+        const removePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        removePath.setAttribute('fill', 'currentColor');
+        removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
+        removeSvg.appendChild(removePath);
+        removeBtn.appendChild(removeSvg);
+
+        removeBtn.addEventListener('click', async () => {
+            await removeBlockedLanguage(code);
+        });
+
+        item.appendChild(removeBtn);
+        list.appendChild(item);
+    }
+}
+
+/**
+ * Render the language grid for selection
+ */
+function renderLanguageGrid(filter = '') {
+    if (!elements.languageGrid) return;
+
+    const filterLower = filter.toLowerCase();
+    const filteredLanguages = LANGUAGE_LIST.filter(language =>
+        language.name.toLowerCase().includes(filterLower) ||
+        language.native.toLowerCase().includes(filterLower) ||
+        language.code.toLowerCase().includes(filterLower)
+    );
+
+    elements.languageGrid.replaceChildren();
+
+    if (filteredLanguages.length === 0) {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'empty-state';
+        emptyState.textContent = 'No languages match your search';
+        elements.languageGrid.appendChild(emptyState);
+        return;
+    }
+
+    for (const language of filteredLanguages) {
+        const isBlocked = blockedLanguages.includes(language.code);
+        const item = document.createElement('div');
+        item.className = `country-item language-item${isBlocked ? ' blocked' : ''}`;
+        item.dataset.language = language.code;
+
+        // Code chip
+        const codeSpan = document.createElement('span');
+        codeSpan.className = 'country-item-flag language-code';
+        codeSpan.textContent = language.code.toUpperCase();
+
+        // Name (English) + endonym
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'country-item-name';
+        nameSpan.textContent = language.name;
+        if (language.native && language.native !== language.name) {
+            const nativeSpan = document.createElement('span');
+            nativeSpan.className = 'language-native';
+            nativeSpan.textContent = ` · ${language.native}`;
+            nameSpan.appendChild(nativeSpan);
+        }
+
+        item.appendChild(codeSpan);
+        item.appendChild(nameSpan);
+
+        if (isBlocked) {
+            const blockedSpan = document.createElement('span');
+            blockedSpan.className = 'country-item-blocked';
+            blockedSpan.textContent = '✓';
+            item.appendChild(blockedSpan);
+        }
+
+        item.addEventListener('click', () => toggleLanguage(language.code));
+        elements.languageGrid.appendChild(item);
+    }
+}
+
+/**
+ * Toggle a language's blocked status
+ */
+async function toggleLanguage(language) {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
+            payload: { action: 'toggle', language }
+        });
+
+        if (response?.success) {
+            blockedLanguages = response.data || [];
+            renderBlockedLanguages();
+            renderLanguageGrid(elements.languageSearch?.value || '');
+            updateBlockedLanguagesCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to toggle language:', error);
+    }
+}
+
+/**
+ * Remove a blocked language
+ */
+async function removeBlockedLanguage(language) {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
+            payload: { action: 'remove', language }
+        });
+
+        if (response?.success) {
+            blockedLanguages = response.data || [];
+            renderBlockedLanguages();
+            renderLanguageGrid(elements.languageSearch?.value || '');
+            updateBlockedLanguagesCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to remove blocked language:', error);
+    }
+}
+
+/**
+ * Clear all blocked languages
+ */
+async function clearAllBlockedLanguages() {
+    if (blockedLanguages.length === 0) return;
+
+    if (!confirm('Are you sure you want to unblock all languages?')) return;
+
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
+            payload: { action: 'clear' }
+        });
+
+        if (response?.success) {
+            blockedLanguages = [];
+            renderBlockedLanguages();
+            renderLanguageGrid(elements.languageSearch?.value || '');
+            updateBlockedLanguagesCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to clear blocked languages:', error);
     }
 }
 
@@ -1451,20 +1687,39 @@ function setupEventListeners() {
         const debouncedRegionSearch = debounce(value => {
             renderRegionGrid(value);
         }, TIMING.SEARCH_DEBOUNCE_MS);
-        
+
         elements.regionSearch.addEventListener('input', e => {
             debouncedRegionSearch(e.target.value);
         });
     }
 
-    // Tab switching for blocked locations (Countries, Regions, Tags)
+    // Language search with debouncing
+    if (elements.languageSearch) {
+        const debouncedLanguageSearch = debounce(value => {
+            renderLanguageGrid(value);
+        }, TIMING.SEARCH_DEBOUNCE_MS);
+
+        elements.languageSearch.addEventListener('input', e => {
+            debouncedLanguageSearch(e.target.value);
+        });
+    }
+
+    // Clear all blocked languages
+    if (elements.btnClearBlockedLanguages) {
+        elements.btnClearBlockedLanguages.addEventListener('click', clearAllBlockedLanguages);
+    }
+
+    // Tab switching for blocked locations (Countries, Regions, Tags, Languages)
     if (elements.tabCountries && elements.tabRegions && elements.tabTags) {
         const switchBlockedTab = tab => {
             // Update tab active states
             elements.tabCountries.classList.toggle('active', tab === 'countries');
             elements.tabRegions.classList.toggle('active', tab === 'regions');
             elements.tabTags.classList.toggle('active', tab === 'tags');
-            
+            if (elements.tabLanguages) {
+                elements.tabLanguages.classList.toggle('active', tab === 'languages');
+            }
+
             // Show/hide panels
             if (elements.panelCountries) {
                 elements.panelCountries.style.display = tab === 'countries' ? 'block' : 'none';
@@ -1475,11 +1730,17 @@ function setupEventListeners() {
             if (elements.panelTags) {
                 elements.panelTags.style.display = tab === 'tags' ? 'block' : 'none';
             }
+            if (elements.panelLanguages) {
+                elements.panelLanguages.style.display = tab === 'languages' ? 'block' : 'none';
+            }
         };
-        
+
         elements.tabCountries.addEventListener('click', () => switchBlockedTab('countries'));
         elements.tabRegions.addEventListener('click', () => switchBlockedTab('regions'));
         elements.tabTags.addEventListener('click', () => switchBlockedTab('tags'));
+        if (elements.tabLanguages) {
+            elements.tabLanguages.addEventListener('click', () => switchBlockedTab('languages'));
+        }
     }
 
     // Tags: Add tag button
@@ -1588,7 +1849,8 @@ function setupEventListeners() {
                 blockedCountries,
                 blockedRegions,
                 blockedTags,
-                
+                blockedLanguages,
+
                 // User data
                 cache: cacheResponse?.data || []
             };
@@ -1678,8 +1940,9 @@ async function handleImportFile(file) {
         const blockedCount = Array.isArray(data.blockedCountries) ? data.blockedCountries.length : 0;
         const blockedRegionsCount = Array.isArray(data.blockedRegions) ? data.blockedRegions.length : 0;
         const blockedTagsCount = Array.isArray(data.blockedTags) ? data.blockedTags.length : 0;
+        const blockedLanguagesCount = Array.isArray(data.blockedLanguages) ? data.blockedLanguages.length : 0;
         const hasSettings = data.settings && typeof data.settings === 'object';
-        
+
         const confirmMessage = [
             `Import data from ${data.version ? `v${data.version}` : 'X-Posed'}?`,
             '',
@@ -1688,6 +1951,7 @@ async function handleImportFile(file) {
             blockedCount > 0 ? `• ${blockedCount} blocked countries` : '',
             blockedRegionsCount > 0 ? `• ${blockedRegionsCount} blocked regions` : '',
             blockedTagsCount > 0 ? `• ${blockedTagsCount} blocked tags` : '',
+            blockedLanguagesCount > 0 ? `• ${blockedLanguagesCount} blocked languages` : '',
             cacheCount > 0 ? `• ${cacheCount} cached users` : '',
             '',
             `Exported on: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'Unknown'}`,
@@ -1707,6 +1971,7 @@ async function handleImportFile(file) {
                 blockedCountries: data.blockedCountries,
                 blockedRegions: data.blockedRegions,
                 blockedTags: data.blockedTags,
+                blockedLanguages: data.blockedLanguages,
                 cache: data.cache
             }
         });
@@ -1717,15 +1982,17 @@ async function handleImportFile(file) {
             if (response.importedBlockedCountries) results.push(`${response.importedBlockedCountries} blocked countries`);
             if (response.importedBlockedRegions) results.push(`${response.importedBlockedRegions} blocked regions`);
             if (response.importedBlockedTags) results.push(`${response.importedBlockedTags} blocked tags`);
+            if (response.importedBlockedLanguages) results.push(`${response.importedBlockedLanguages} blocked languages`);
             if (response.importedCache) results.push(`${response.importedCache} cached users`);
-            
+
             showStatus(`✓ Successfully imported: ${results.join(', ')}`);
-            
+
             // Reload the page data to reflect imported settings
             await loadSettings();
             await loadBlockedCountries();
             await loadBlockedRegions();
             await loadBlockedTags();
+            await loadBlockedLanguages();
             await loadCacheStats();
             await loadStatistics();
         } else {

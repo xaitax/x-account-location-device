@@ -154,8 +154,59 @@ function isInsideQuoteTweet(element, tweet = element.closest(SELECTORS.TWEET)) {
         }
         current = current.parentElement;
     }
-    
+
     return false;
+}
+
+/**
+ * Read the language X assigned to the MAIN tweet's text (issue #25). X tags every
+ * text tweet with its own ML-detected BCP-47 language on the tweetText node
+ * (`<div data-testid="tweetText" lang="ja">`). We use the FIRST tweetText that is
+ * NOT inside a quoted-tweet card, so a quote's language can't stand in for the
+ * author's own post. Returns the lowercase primary subtag ("zh" from "zh-Hant"),
+ * or null when the main tweet has no text (media/link/emoji-only rows have no
+ * tweetText, or carry lang="und").
+ * @param {HTMLElement} tweet - the article element
+ * @returns {string|null}
+ */
+function getMainTweetLanguage(tweet) {
+    const texts = tweet.querySelectorAll('[data-testid="tweetText"]');
+    for (const node of texts) {
+        if (!isInsideQuoteTweet(node, tweet)) {
+            const lang = node.getAttribute('lang');
+            if (!lang) return null;
+            return lang.split('-')[0].toLowerCase();
+        }
+    }
+    return null;
+}
+
+/**
+ * Mark (or unmark) a tweet article for language blocking. Uses a SEPARATE
+ * article-level marker (data-x-lang-block) from the per-author data-x-block, so
+ * the two filters compose in CSS instead of clobbering each other's state. The
+ * marker honors the hide-vs-highlight preference; 'und' (undetermined —
+ * emoji/link-only) is never blocked.
+ * @param {HTMLElement|null} tweet - the article element
+ * @param {Set<string>} blockedLanguages - lowercase primary subtags
+ * @param {Object} settings
+ */
+function applyLanguageBlock(tweet, blockedLanguages, settings) {
+    if (!tweet) return;
+
+    let blocked = false;
+    if (blockedLanguages && blockedLanguages.size > 0) {
+        const lang = getMainTweetLanguage(tweet);
+        if (lang && lang !== 'und' && blockedLanguages.has(lang)) {
+            blocked = true;
+        }
+    }
+
+    if (blocked) {
+        tweet.dataset.xLangBlock = settings.highlightBlockedTweets === true ? 'highlight' : 'hide';
+    } else if (tweet.dataset.xLangBlock) {
+        delete tweet.dataset.xLangBlock;
+    }
 }
 
 // ============================================
@@ -550,6 +601,7 @@ export async function processElement(element, {
     blockedCountries,
     blockedRegions,
     blockedTags,
+    blockedLanguages,
     settings,
     csrfToken,
     sendMessage,
@@ -605,6 +657,20 @@ export async function processElement(element, {
     // Resolve the enclosing tweet article ONCE and reuse it everywhere below
     // (including inside isInsideQuoteTweet) to avoid repeated closest() walks.
     const tweet = element.closest(SELECTORS.TWEET);
+
+    // Language blocking is a per-tweet signal (X's own lang tag), independent of the
+    // author lookup — apply it eagerly here, before any early return below, so
+    // media/API state can't gate it. Marks the article via a separate data-x-lang-block.
+    applyLanguageBlock(tweet, blockedLanguages, settings);
+
+    // In HIDE mode a language-blocked article is fully hidden by CSS, so skip the badge
+    // AND the user-info lookup entirely — otherwise blocking a common language would fire
+    // a lookup per hidden tweet (mirrors the blocked-tag short-circuit). xScreenName is
+    // already set above, so unblocking the language re-derives the row via the article
+    // pass in runUpdateBlockedTweets. HIGHLIGHT mode keeps the badge (row stays visible).
+    if (tweet && tweet.dataset.xLangBlock === 'hide') {
+        return;
+    }
 
     // Detect a blocked tag in the display name up front. In HIDE mode we can short-circuit
     // here (no badge needed) and skip the API call entirely; in HIGHLIGHT mode we still
@@ -828,8 +894,8 @@ let pendingBlockedTweetsArgs = null;
  * @param {Set} blockedTags - Set of blocked tags (lowercase)
  * @param {Object} settings - Settings object with highlightBlockedTweets flag
  */
-export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}) {
-    pendingBlockedTweetsArgs = { blockedCountries, blockedRegions, blockedTags, settings };
+export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null) {
+    pendingBlockedTweetsArgs = { blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages };
     if (pendingBlockedTweetsUpdate !== null) return;
 
     pendingBlockedTweetsUpdate = requestAnimationFrame(() => {
@@ -837,7 +903,7 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
         const args = pendingBlockedTweetsArgs;
         pendingBlockedTweetsArgs = null;
         if (args) {
-            runUpdateBlockedTweets(args.blockedCountries, args.blockedRegions, args.blockedTags, args.settings);
+            runUpdateBlockedTweets(args.blockedCountries, args.blockedRegions, args.blockedTags, args.settings, args.blockedLanguages);
         }
     });
 }
@@ -845,7 +911,7 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
 /**
  * Perform the actual single-pass tweet visibility update. See updateBlockedTweets.
  */
-function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}) {
+function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null) {
     const highlightMode = settings.highlightBlockedTweets === true;
     const hasTags = blockedTags && blockedTags.size > 0;
     const loggedInUser = getLoggedInUsername();
@@ -880,6 +946,15 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
 
         const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
         if (badge) badge.style.display = hide ? 'none' : '';
+    });
+
+    // Language blocking is per-tweet (not per-author), so re-derive it across ALL
+    // articles — this is what makes adding OR removing a language re-apply to
+    // already-rendered tweets. applyLanguageBlock authoritatively sets or clears the
+    // marker, so a removed language un-hides its tweets. Runs only on config/setting
+    // changes (this pass is rAF-coalesced), not per scroll.
+    document.querySelectorAll(SELECTORS.TWEET).forEach(tweet => {
+        applyLanguageBlock(tweet, blockedLanguages, settings);
     });
 }
 

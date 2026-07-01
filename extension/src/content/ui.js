@@ -736,28 +736,46 @@ function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE
         return response;
     };
     
-    // Get blockedTags from the global state (window.__X_POSED_CONTENT__)
+    // Get blockedTags + blockedLanguages from the global state (window.__X_POSED_CONTENT__)
     const state = window.__X_POSED_CONTENT__?.getState?.() || {};
     const blockedTags = new Set(state.blockedTags || []);
-    
+    const blockedLanguages = new Set(state.blockedLanguages || []);
+
     // Tag action handler
     const onTagAction = async (action, tag) => {
         const response = await sendMessage({
             type: MESSAGE_TYPES.SET_BLOCKED_TAGS,
             payload: { action, tag }
         });
-        
+
         if (response?.success) {
             blockedTags.clear();
             for (const t of response.data) {
                 blockedTags.add(t);
             }
         }
-        
+
         return response;
     };
-    
-    showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags, onTagAction);
+
+    // Language action handler (issue #25)
+    const onLanguageAction = async (action, language) => {
+        const response = await sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
+            payload: { action, language }
+        });
+
+        if (response?.success) {
+            blockedLanguages.clear();
+            for (const l of response.data) {
+                blockedLanguages.add(l);
+            }
+        }
+
+        return response;
+    };
+
+    showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags, onTagAction, blockedLanguages, onLanguageAction);
 }
 
 // ============================================

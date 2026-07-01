@@ -158,6 +158,16 @@ const GLYPHS = {
         s.appendChild(el('path', { d: 'M7.5 7.5h.01' }));
         return s;
     },
+    languages(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'm5 8 6 6' }));
+        s.appendChild(el('path', { d: 'm4 14 6-6 2-3' }));
+        s.appendChild(el('path', { d: 'M2 5h12' }));
+        s.appendChild(el('path', { d: 'M7 2h1' }));
+        s.appendChild(el('path', { d: 'm22 22-5-10-5 10' }));
+        s.appendChild(el('path', { d: 'M14 18h6' }));
+        return s;
+    },
     cloud(size) {
         const s = base(size, true);
         s.appendChild(el('path', { d: 'M7 18.5a4.2 4.2 0 0 1-.3-8.4 5.6 5.6 0 0 1 10.8-1.6A3.8 3.8 0 0 1 17.3 18.5z' }));
@@ -267,7 +277,7 @@ export function deviceIcon(deviceString, size = 15) {
 /**
  * Return an SVG element for a named glyph (info, vpn, location, verified,
  * created, id, affiliation, clock, swap, camera, shield, close, warn, globe,
- * map, tag, cloud, lock, hourglass, wrench, sparkles, save, check, heart,
+ * map, tag, languages, cloud, lock, hourglass, wrench, sparkles, save, check, heart,
  * reply, plus, copy, share, xLogo, zoom). Falls back to the info glyph.
  * @param {string} name
  * @param {number} size

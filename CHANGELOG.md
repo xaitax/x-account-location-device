@@ -2,7 +2,7 @@
 
 All notable changes to X-Posed will be documented in this file.
 
-## [Unreleased]
+## [3.2.0] - 2026-07-01
 
 ### Bug Fixes
 - **VPN/proxy tweets no longer stay hidden after you re-enable "Show VPN/Proxy Users."** Block, highlight and VPN-hide state is now re-derived authoritatively on every pass, so flipping the setting (or X recycling a timeline row) can't leave a tweet stuck hidden — and re-enabling the toggle now un-hides them live. Also stops a per-scan reprocessing loop on hidden rows.
@@ -10,6 +10,7 @@ All notable changes to X-Posed will be documented in this file.
 - **Popup community-cache total** now updates live from the same source as the settings dashboard, so the two no longer show different numbers.
 
 ### New
+- **Language filter** ([#25](https://github.com/xaitax/x-account-location-device/issues/25), requested by **@nightkall**): block or highlight posts by the language they're written in, using X's own per-post language detection (so it works for every language, not just non-Latin scripts). Manage it from the blocking modal's new **Languages** tab, from **Settings → Blocking → Languages**, and it's included in import/export. Honors your hide-vs-highlight preference; quoted-tweet and media/emoji-only posts are never mis-blocked.
 - **"Open Changelog on Update" toggle** ([#24](https://github.com/xaitax/x-account-location-device/issues/24)): turn off the automatic "What's New" tab that opens after an update (Settings → General Settings). On by default; opted-out users still see the in-page "What's New" banner next time they open Options.
 
 ## [3.1.0] - 2026-06-19

@@ -10,7 +10,7 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING } from '../shared/constants.js';
-import { userCache, blockedCountries, blockedRegions, blockedTags, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { userCache, blockedCountries, blockedRegions, blockedTags, blockedLanguages, settings, headersStorage, initializeStorage } from '../shared/storage.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
 import cloudCache from './cloud-cache.js';
@@ -104,10 +104,16 @@ async function handleMessage(message, _sender) {
             
             case MESSAGE_TYPES.GET_BLOCKED_TAGS:
                 return handleGetBlockedTags();
-            
+
             case MESSAGE_TYPES.SET_BLOCKED_TAGS:
                 return await handleSetBlockedTags(payload);
-            
+
+            case MESSAGE_TYPES.GET_BLOCKED_LANGUAGES:
+                return handleGetBlockedLanguages();
+
+            case MESSAGE_TYPES.SET_BLOCKED_LANGUAGES:
+                return await handleSetBlockedLanguages(payload);
+
             case MESSAGE_TYPES.GET_STATISTICS:
                 return handleGetStatistics();
             
@@ -569,6 +575,28 @@ async function handleSetBlockedTags({ action, tag, tags }) {
 }
 
 /**
+ * Get blocked languages handler
+ */
+function handleGetBlockedLanguages() {
+    return {
+        success: true,
+        data: blockedLanguages.getAll(),
+        size: blockedLanguages.size
+    };
+}
+
+/**
+ * Set blocked languages handler
+ */
+async function handleSetBlockedLanguages({ action, language, languages }) {
+    return handleSetBlockedSet(blockedLanguages, MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, {
+        action,
+        value: language,
+        values: languages
+    });
+}
+
+/**
  * Get statistics handler
  */
 function handleGetStatistics() {
@@ -767,12 +795,13 @@ async function handleSyncLocalToCloud() {
 /**
  * Import data handler - imports settings, blocked countries, blocked regions, and cache from exported JSON
  */
-async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, cache: importCache }) {
+async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedLanguages: importBlockedLanguages, cache: importCache }) {
     const results = {
         settings: false,
         blockedCountries: { count: 0 },
         blockedRegions: { count: 0 },
         blockedTags: { count: 0 },
+        blockedLanguages: { count: 0 },
         cache: { count: 0 }
     };
     
@@ -800,7 +829,13 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             await blockedTags.setAll(importBlockedTags);
             results.blockedTags.count = importBlockedTags.length;
         }
-        
+
+        // Import blocked languages if provided (one mutation + one write)
+        if (Array.isArray(importBlockedLanguages)) {
+            await blockedLanguages.setAll(importBlockedLanguages);
+            results.blockedLanguages.count = importBlockedLanguages.length;
+        }
+
         // Import cache entries if provided
         if (Array.isArray(importCache)) {
             for (const entry of importCache) {
@@ -816,15 +851,17 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             broadcastToTabs({ type: MESSAGE_TYPES.SETTINGS_UPDATED, payload: settings.get() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED, payload: blockedCountries.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, payload: blockedRegions.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_TAGS_UPDATED, payload: blockedTags.getAll() })
+            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_TAGS_UPDATED, payload: blockedTags.getAll() }),
+            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, payload: blockedLanguages.getAll() })
         ]);
-        
+
         return {
             success: true,
             importedSettings: results.settings,
             importedBlockedCountries: results.blockedCountries.count,
             importedBlockedRegions: results.blockedRegions.count,
             importedBlockedTags: results.blockedTags.count,
+            importedBlockedLanguages: results.blockedLanguages.count,
             importedCache: results.cache.count
         };
     } catch (error) {
@@ -835,6 +872,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             importedBlockedCountries: results.blockedCountries.count,
             importedBlockedRegions: results.blockedRegions.count,
             importedBlockedTags: results.blockedTags.count,
+            importedBlockedLanguages: results.blockedLanguages.count,
             importedCache: results.cache.count
         };
     }

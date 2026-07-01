@@ -301,6 +301,12 @@ const normalizeTag = value => {
     if (!value || typeof value !== 'string') return '';
     return value.trim();
 };
+// Languages are stored as the lowercase primary BCP-47 subtag ("zh" from "zh-Hant"),
+// matching how observer.js reads X's per-tweet lang attribute.
+const normalizeLanguage = value => {
+    if (!value || typeof value !== 'string') return '';
+    return value.trim().toLowerCase().split('-')[0];
+};
 
 /**
  * Settings storage
@@ -449,6 +455,11 @@ export const blockedTags = new BlockedSetStorage({
     label: 'blocked tags',
     normalize: normalizeTag
 });
+export const blockedLanguages = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_LANGUAGES,
+    label: 'blocked languages',
+    normalize: normalizeLanguage
+});
 export const settings = new SettingsStorage();
 export const headersStorage = new HeadersStorage();
 
@@ -464,6 +475,7 @@ export async function initializeStorage() {
         blockedCountries.load(),
         blockedRegions.load(),
         blockedTags.load(),
+        blockedLanguages.load(),
         settings.load(),
         headersStorage.load()
     ]);

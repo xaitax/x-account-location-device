@@ -571,6 +571,16 @@ article[data-testid="tweet"]:has([data-x-block="hide"]) {
     display: none !important;
 }
 
+/* Language blocking (issue #25): a separate article-level marker so it composes with
+   the per-author data-x-block above — if either says hide, the row is hidden. */
+article[data-testid="tweet"][data-x-lang-block="highlight"] {
+    border-left: 3px solid var(--xp-alert) !important;
+    background: linear-gradient(90deg, var(--xp-alert-soft) 0%, transparent 15%) !important;
+}
+article[data-testid="tweet"][data-x-lang-block="hide"] {
+    display: none !important;
+}
+
 /* Country Blocker Modal Overlay */
 .x-blocker-modal-overlay {
     position: fixed;
@@ -597,8 +607,8 @@ article[data-testid="tweet"]:has([data-x-block="hide"]) {
     border-radius: var(--xp-r-lg);
     color: var(--xp-text);
     font-family: var(--xp-font-ui);
-    max-width: 600px;
-    width: 90%;
+    max-width: 680px;
+    width: 92%;
     max-height: 90vh;
     overflow: hidden;
     display: flex;
@@ -730,6 +740,27 @@ article[data-testid="tweet"]:has([data-x-block="hide"]) {
     font-weight: 600;
 }
 
+/* Language tab (issue #25): the leading slot shows the BCP-47 code as a monospace
+   pill instead of a flag emoji, so it renders identically on every OS. */
+.x-language-code {
+    font-size: 12px;
+    font-weight: 700;
+    font-family: var(--xp-font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+    min-width: 34px;
+    text-align: center;
+    padding: 3px 6px;
+    border-radius: var(--xp-r-sm, 6px);
+    background: var(--xp-surface-3, var(--xp-surface));
+    border: 1px solid var(--xp-border);
+    color: var(--xp-text-dim);
+    letter-spacing: 0.02em;
+}
+
+.x-language-native {
+    color: var(--xp-text-dim);
+    font-size: 13px;
+}
+
 /* Modal Footer */
 .x-blocker-footer {
     padding: 16px 20px;
@@ -786,18 +817,22 @@ article[data-testid="tweet"]:has([data-x-block="hide"]) {
 .x-blocker-tabs {
     display: flex;
     border-bottom: 1px solid var(--xp-hairline);
-    padding: 0 20px;
-    gap: 8px;
+    padding: 0 10px;
+    gap: 4px;
 }
 
 .x-blocker-tab {
     flex: 1;
-    padding: 14px 16px;
+    /* Let tabs shrink to share the row evenly; without min-width:0 a flex item
+       won't shrink below its content, so the 4th tab (Languages) would overflow
+       and get clipped by the modal's overflow:hidden. */
+    min-width: 0;
+    padding: 14px 10px;
     background: none;
     border: none;
     border-bottom: 3px solid transparent;
     color: var(--xp-text-dim);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     transition: background 0.15s var(--xp-ease), color 0.15s var(--xp-ease);
@@ -805,7 +840,9 @@ article[data-testid="tweet"]:has([data-x-block="hide"]) {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 6px;
+    white-space: nowrap;
+    overflow: hidden;
 }
 
 .x-blocker-tab:hover {

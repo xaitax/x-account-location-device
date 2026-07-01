@@ -4,7 +4,7 @@
  * Uses tabbed interface for switching between countries and regions
  */
 
-import { COUNTRY_LIST, REGION_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
+import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
 import { formatCountryName, createElement, debounce, COMMON_PROFILE_TAGS } from '../shared/utils.js';
 import { glyph, flagImage } from './icons.js';
 
@@ -12,6 +12,7 @@ import { glyph, flagImage } from './icons.js';
 let localBlockedCountries = null;
 let localBlockedRegions = null;
 let localBlockedTags = null;
+let localBlockedLanguages = null;
 
 let currentModal = null;
 
@@ -20,6 +21,8 @@ let cachedFilteredCountries = null;
 let cachedCountryFilter = '';
 let cachedFilteredRegions = null;
 let cachedRegionFilter = '';
+let cachedFilteredLanguages = null;
+let cachedLanguageFilter = '';
 
 // Current tab state
 let activeTab = 'countries';
@@ -36,8 +39,10 @@ let cachedTagFilter = '';
  * @param {Function} onRegionAction - Callback for region actions
  * @param {Set} blockedTags - Set of currently blocked tags (optional)
  * @param {Function} onTagAction - Callback for tag actions (optional)
+ * @param {Set} blockedLanguages - Set of currently blocked language codes (optional)
+ * @param {Function} onLanguageAction - Callback for language actions (optional)
  */
-export function showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags = null, onTagAction = null) {
+export function showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags = null, onTagAction = null, blockedLanguages = null, onLanguageAction = null) {
     // Remove existing modal if present
     if (currentModal) {
         currentModal.remove();
@@ -48,6 +53,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     localBlockedCountries = blockedCountries;
     localBlockedRegions = blockedRegions;
     localBlockedTags = blockedTags || new Set();
+    localBlockedLanguages = blockedLanguages || new Set();
 
     // Reset active tab
     activeTab = 'countries';
@@ -68,49 +74,51 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
 
     // Create tab bar
     const { tabBar, switchTab, updateTabCounts } = createTabBar();
-    
+
     // Initial tab counts
-    updateTabCounts(blockedCountries.size, blockedRegions.size, localBlockedTags.size);
+    updateTabCounts(blockedCountries.size, blockedRegions.size, localBlockedTags.size, localBlockedLanguages.size);
 
     // Create bodies for all tabs
     const { body: countryBody, renderCountries, searchInput: countrySearch } = createCountryBody(blockedCountries, onCountryAction);
     const { body: regionBody, renderRegions, searchInput: regionSearch } = createRegionBody(blockedRegions, onRegionAction);
     const { body: tagBody, renderTags, searchInput: tagSearch } = createTagBody(localBlockedTags, onTagAction);
+    const { body: languageBody, renderLanguages, searchInput: languageSearch } = createLanguageBody(localBlockedLanguages, onLanguageAction);
 
     // Tab content container
     const tabContent = createElement('div', { className: 'x-blocker-tab-content' });
     tabContent.appendChild(countryBody);
     tabContent.appendChild(regionBody);
     tabContent.appendChild(tagBody);
+    tabContent.appendChild(languageBody);
 
     // Initially show countries tab
     countryBody.style.display = 'block';
     regionBody.style.display = 'none';
     tagBody.style.display = 'none';
+    languageBody.style.display = 'none';
 
     // Tab switching logic
     const handleTabSwitch = tab => {
         activeTab = tab;
         switchTab(tab);
-        
+
+        countryBody.style.display = tab === 'countries' ? 'block' : 'none';
+        regionBody.style.display = tab === 'regions' ? 'block' : 'none';
+        tagBody.style.display = tab === 'tags' ? 'block' : 'none';
+        languageBody.style.display = tab === 'languages' ? 'block' : 'none';
+
         if (tab === 'countries') {
-            countryBody.style.display = 'block';
-            regionBody.style.display = 'none';
-            tagBody.style.display = 'none';
             updateStats(blockedCountries.size, 'countries');
             setTimeout(() => countrySearch.focus(), 50);
         } else if (tab === 'regions') {
-            countryBody.style.display = 'none';
-            regionBody.style.display = 'block';
-            tagBody.style.display = 'none';
             updateStats(blockedRegions.size, 'regions');
             setTimeout(() => regionSearch.focus(), 50);
         } else if (tab === 'tags') {
-            countryBody.style.display = 'none';
-            regionBody.style.display = 'none';
-            tagBody.style.display = 'block';
             updateStats(localBlockedTags.size, 'tags');
             setTimeout(() => tagSearch.focus(), 50);
+        } else if (tab === 'languages') {
+            updateStats(localBlockedLanguages.size, 'languages');
+            setTimeout(() => languageSearch.focus(), 50);
         }
     };
 
@@ -118,18 +126,22 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     tabBar.querySelector('[data-tab="countries"]').addEventListener('click', () => handleTabSwitch('countries'));
     tabBar.querySelector('[data-tab="regions"]').addEventListener('click', () => handleTabSwitch('regions'));
     tabBar.querySelector('[data-tab="tags"]').addEventListener('click', () => handleTabSwitch('tags'));
+    tabBar.querySelector('[data-tab="languages"]').addEventListener('click', () => handleTabSwitch('languages'));
 
     // Create footer
     const footer = createFooter(
-        blockedCountries, 
-        blockedRegions, 
+        blockedCountries,
+        blockedRegions,
         localBlockedTags,
-        onCountryAction, 
+        localBlockedLanguages,
+        onCountryAction,
         onRegionAction,
         onTagAction,
-        renderCountries, 
+        onLanguageAction,
+        renderCountries,
         renderRegions,
         renderTags,
+        renderLanguages,
         () => {
             overlay.remove();
             currentModal = null;
@@ -177,6 +189,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     renderCountries();
     renderRegions();
     renderTags();
+    renderLanguages();
 }
 
 /**
@@ -256,31 +269,48 @@ function createTabBar() {
     });
     tagsTab.appendChild(tabIcon('tag'));
     tagsTab.appendChild(document.createTextNode('Tags '));
-    const tagsCount = createElement('span', { 
-        className: 'x-blocker-tab-count', 
+    const tagsCount = createElement('span', {
+        className: 'x-blocker-tab-count',
         id: 'modal-tags-count',
         textContent: '0'
     });
     tagsTab.appendChild(tagsCount);
 
+    const languagesTab = createElement('button', {
+        className: 'x-blocker-tab',
+        'data-tab': 'languages'
+    });
+    languagesTab.appendChild(tabIcon('languages'));
+    languagesTab.appendChild(document.createTextNode('Languages '));
+    const languagesCount = createElement('span', {
+        className: 'x-blocker-tab-count',
+        id: 'modal-languages-count',
+        textContent: '0'
+    });
+    languagesTab.appendChild(languagesCount);
+
     tabBar.appendChild(countriesTab);
     tabBar.appendChild(regionsTab);
     tabBar.appendChild(tagsTab);
+    tabBar.appendChild(languagesTab);
 
     // Update count function
-    const updateTabCounts = (countries, regions, tags) => {
+    const updateTabCounts = (countries, regions, tags, languages) => {
         countriesCount.textContent = countries;
         countriesCount.style.display = countries > 0 ? 'inline-flex' : 'none';
         regionsCount.textContent = regions;
         regionsCount.style.display = regions > 0 ? 'inline-flex' : 'none';
         tagsCount.textContent = tags;
         tagsCount.style.display = tags > 0 ? 'inline-flex' : 'none';
+        languagesCount.textContent = languages;
+        languagesCount.style.display = languages > 0 ? 'inline-flex' : 'none';
     };
 
     const switchTab = tab => {
         countriesTab.classList.toggle('active', tab === 'countries');
         regionsTab.classList.toggle('active', tab === 'regions');
         tagsTab.classList.toggle('active', tab === 'tags');
+        languagesTab.classList.toggle('active', tab === 'languages');
     };
 
     return { tabBar, switchTab, updateTabCounts };
@@ -420,6 +450,75 @@ function createRegionBody(blockedRegions, onAction) {
     });
 
     return { body, renderRegions, searchInput: search };
+}
+
+/**
+ * Create language body with search and language list (issue #25)
+ */
+function createLanguageBody(blockedLanguages, onAction) {
+    const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'languages' });
+
+    const info = createElement('div', {
+        className: 'x-blocker-info',
+        textContent: 'Block posts by their language. X detects each post’s language automatically — tweets written in these languages will be hidden from your feed.'
+    });
+
+    const search = createElement('input', {
+        type: 'text',
+        className: 'x-blocker-search',
+        placeholder: 'Search languages...'
+    });
+
+    const languagesContainer = createElement('div', {
+        className: 'x-blocker-countries x-blocker-languages'
+    });
+
+    body.appendChild(info);
+    body.appendChild(search);
+    body.appendChild(languagesContainer);
+
+    let currentFilter = '';
+
+    // Render languages function with memoized filtering
+    const renderLanguages = (filter = currentFilter) => {
+        currentFilter = filter;
+        languagesContainer.replaceChildren();
+
+        const filterLower = filter.toLowerCase();
+        let filteredLanguages;
+
+        if (cachedLanguageFilter === filterLower && cachedFilteredLanguages) {
+            filteredLanguages = cachedFilteredLanguages;
+        } else {
+            filteredLanguages = LANGUAGE_LIST.filter(language =>
+                language.name.toLowerCase().includes(filterLower) ||
+                language.native.toLowerCase().includes(filterLower) ||
+                language.code.toLowerCase().includes(filterLower)
+            );
+            cachedLanguageFilter = filterLower;
+            cachedFilteredLanguages = filteredLanguages;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        for (const language of filteredLanguages) {
+            const item = createLanguageItem(language, blockedLanguages, onAction);
+            fragment.appendChild(item);
+        }
+
+        languagesContainer.appendChild(fragment);
+    };
+
+    // Search functionality with debouncing
+    const debouncedRender = debounce(value => {
+        renderLanguages(value);
+    }, TIMING.SEARCH_DEBOUNCE_MS);
+
+    search.addEventListener('input', e => {
+        debouncedRender(e.target.value);
+    });
+
+    return { body, renderLanguages, searchInput: search };
 }
 
 /**
@@ -753,20 +852,82 @@ function createRegionItem(region, blockedRegions, onAction) {
     // Click handler - sync from response data
     item.addEventListener('click', async () => {
         const response = await onAction('toggle', regionKey);
-        
+
         if (response?.success && response.data) {
             // Sync local set from server response
             localBlockedRegions.clear();
             for (const r of response.data) {
                 localBlockedRegions.add(r);
             }
-            
+
             // Update UI based on new state
             const nowBlocked = localBlockedRegions.has(regionKey);
             item.classList.toggle('blocked', nowBlocked);
             status.textContent = nowBlocked ? 'BLOCKED' : '';
-            
+
             updateStats(localBlockedRegions.size, 'regions');
+        }
+    });
+
+    return item;
+}
+
+/**
+ * Create a single language item using safe DOM methods (issue #25)
+ * @param {Object} language - Language object with {code, name, native}
+ */
+function createLanguageItem(language, blockedLanguages, onAction) {
+    const code = language.code;
+    const isBlocked = blockedLanguages.has(code);
+
+    const item = createElement('div', {
+        className: `x-country-item x-language-item${isBlocked ? ' blocked' : ''}`
+    });
+
+    // Leading chip shows the exact BCP-47 code we match against (renders on every
+    // OS, unlike country-flag emoji, and sidesteps one-flag-per-language ambiguity).
+    const codeChip = createElement('span', {
+        className: 'x-country-flag x-language-code',
+        textContent: code.toUpperCase()
+    });
+
+    // Name (English) with the endonym as a muted suffix
+    const name = createElement('span', {
+        className: 'x-country-name x-language-name',
+        textContent: language.name
+    });
+    if (language.native && language.native !== language.name) {
+        const native = createElement('span', {
+            className: 'x-language-native',
+            textContent: ` · ${language.native}`
+        });
+        name.appendChild(native);
+    }
+
+    const status = createElement('span', {
+        className: 'x-country-status',
+        textContent: isBlocked ? 'BLOCKED' : ''
+    });
+
+    item.appendChild(codeChip);
+    item.appendChild(name);
+    item.appendChild(status);
+
+    // Click handler - sync from response data
+    item.addEventListener('click', async () => {
+        const response = await onAction('toggle', code);
+
+        if (response?.success && response.data) {
+            localBlockedLanguages.clear();
+            for (const l of response.data) {
+                localBlockedLanguages.add(l);
+            }
+
+            const nowBlocked = localBlockedLanguages.has(code);
+            item.classList.toggle('blocked', nowBlocked);
+            status.textContent = nowBlocked ? 'BLOCKED' : '';
+
+            updateStats(localBlockedLanguages.size, 'languages');
         }
     });
 
@@ -776,7 +937,7 @@ function createRegionItem(region, blockedRegions, onAction) {
 /**
  * Create modal footer
  */
-function createFooter(blockedCountries, blockedRegions, blockedTags, onCountryAction, onRegionAction, onTagAction, renderCountries, renderRegions, renderTags, onClose) {
+function createFooter(blockedCountries, blockedRegions, blockedTags, blockedLanguages, onCountryAction, onRegionAction, onTagAction, onLanguageAction, renderCountries, renderRegions, renderTags, renderLanguages, onClose) {
     const footer = createElement('div', { className: 'x-blocker-footer' });
 
     const stats = createElement('div', {
@@ -818,6 +979,16 @@ function createFooter(blockedCountries, blockedRegions, blockedTags, onCountryAc
                     renderTags();
                     updateStats(0, 'tags');
                 }
+            } else if (activeTab === 'languages' && onLanguageAction) {
+                const response = await onLanguageAction('clear');
+                if (response?.success) {
+                    blockedLanguages.clear();
+                    // Invalidate cache to force re-render (blockedLanguages mutated)
+                    cachedFilteredLanguages = null;
+                    cachedLanguageFilter = '';
+                    renderLanguages();
+                    updateStats(0, 'languages');
+                }
             }
         }
     });
@@ -846,6 +1017,7 @@ function updateStats(count, type = 'countries') {
         let label;
         if (type === 'countries') label = 'countries';
         else if (type === 'regions') label = 'regions';
+        else if (type === 'languages') label = 'languages';
         else label = 'tags';
         stats.textContent = `${count} ${label} blocked`;
     }
