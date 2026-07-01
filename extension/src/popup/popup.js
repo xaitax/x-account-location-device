@@ -4,7 +4,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, TIMING } from '../shared/constants.js';
+import { MESSAGE_TYPES, VERSION, TIMING, STORAGE_KEYS } from '../shared/constants.js';
 
 // DOM Elements
 const elements = {
@@ -44,6 +44,25 @@ async function initialize() {
 
     // Load statistics
     await loadStats();
+
+    // Keep the community total fresh: the background writes updated cloud stats to storage
+    // (stale-while-revalidate). The popup previously read that snapshot once and never
+    // updated, so it lagged one refresh behind the Options page and looked low. Mirror the
+    // Options listener so both surfaces converge on the same number.
+    try {
+        const onCloudStatsChanged = (changes, areaName) => {
+            if (areaName !== 'local') return;
+            const total = changes?.[STORAGE_KEYS.CLOUD_SERVER_STATS]?.newValue?.data?.totalEntries;
+            if (typeof total === 'number' && total > 0 && elements.statCommunity) {
+                elements.statCommunity.textContent = total.toLocaleString();
+                setHero('Community Cache', 'profiles cached by the community', true);
+            }
+        };
+        browserAPI.storage.onChanged.addListener(onCloudStatsChanged);
+        window.addEventListener('beforeunload', () => {
+            try { browserAPI.storage.onChanged.removeListener(onCloudStatsChanged); } catch { /* ignore */ }
+        });
+    } catch { /* storage.onChanged unavailable — non-fatal */ }
 
     // Load rate limit status
     await loadRateLimitStatus();
