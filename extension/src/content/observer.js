@@ -27,11 +27,43 @@ function effectiveCountry(info, flagFromDevice) {
 }
 
 /**
+ * Apply a row's block/highlight/VPN state to the username element and its tweet
+ * article AUTHORITATIVELY: every reason re-sets the marker it owns and clears the
+ * ones that no longer apply. This is what lets the timeline recover when a setting
+ * flips (e.g. re-enabling "Show VPN/Proxy Users") or when X recycles a row that was
+ * hidden under a previous setting — the old code only ever ADDED markers, so a hidden
+ * row stayed hidden until a hard reload.
+ *
+ * VPN-hide is a hard filter (always hides when on); country/region/tag blocks honor
+ * the hide-vs-highlight preference. The persistent data-x-block marker lets CSS :has()
+ * keep the article styled even after X re-renders it and wipes our class.
+ *
+ * Shared by the per-element resolution path (applyInfoToElement) and the bulk
+ * re-derive pass (runUpdateBlockedTweets) so the two can never disagree about a row.
+ * @param {HTMLElement} element
+ * @param {HTMLElement|null} tweet
+ * @param {{isListBlocked: boolean, isVpnHidden: boolean, highlightMode: boolean}} state
+ * @returns {{hide: boolean, highlight: boolean}}
+ */
+function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode }) {
+    const hide = isVpnHidden || (isListBlocked && !highlightMode);
+    const highlight = !hide && isListBlocked && highlightMode;
+
+    if (tweet) {
+        tweet.classList.toggle(CSS_CLASSES.TWEET_BLOCKED, hide);
+        tweet.classList.toggle('x-tweet-vpn-blocked', isVpnHidden);
+        tweet.classList.toggle('x-tweet-highlighted', highlight);
+    }
+    element.dataset.xBlock = hide ? 'hide' : (highlight ? 'highlight' : '');
+
+    return { hide, highlight };
+}
+
+/**
  * Apply resolved user info to an element: write the data-* attributes, run the
- * blocked-country/region handling and the VPN-users hide check, and create the
- * badge. This is the single source of truth shared by all three processElement
- * resolution paths (local-cache hit, in-flight resolved, fresh API response) so
- * they behave identically — notably so the VPN-hide check runs everywhere.
+ * blocked-country/region/tag + VPN handling, and create the badge. This is the single
+ * source of truth shared by all three processElement resolution paths (local-cache
+ * hit, in-flight resolved, fresh API response) so they behave identically.
  * @param {HTMLElement} element
  * @param {string} screenName
  * @param {{location?: string, device?: string, locationAccurate?: boolean}} info
@@ -41,11 +73,12 @@ function effectiveCountry(info, flagFromDevice) {
  * @param {Object} opts.settings
  * @param {boolean} opts.isUserCell
  * @param {HTMLElement|null} opts.tweet - the already-resolved tweet article
+ * @param {boolean} [opts.tagBlocked] - display-name tag verdict computed in processElement
  * @param {Function} [opts.debug]
  * @param {string|null} [opts.csrfToken]
  */
 function applyInfoToElement(element, screenName, info, opts) {
-    const { blockedCountries, blockedRegions, settings, isUserCell, tweet, debug, csrfToken } = opts;
+    const { blockedCountries, blockedRegions, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
@@ -53,47 +86,25 @@ function applyInfoToElement(element, screenName, info, opts) {
     const loggedInUser = getLoggedInUsername();
     const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
 
-    // Handle blocked country or region - only for main tweet author, not quoted tweets
-    if (effCountry) {
-        const locationLower = effCountry.toLowerCase();
-        const isBlockedCountry = blockedCountries.has(locationLower);
-        const isBlockedRegion = blockedRegions && blockedRegions.has(locationLower);
+    // Resolve the full block decision from every reason at once, then apply it in one
+    // authoritative pass (set what applies, clear what doesn't). Country/region/tag only
+    // block the MAIN author, not a quoted user; VPN-hide is a hard filter.
+    const locationLower = effCountry ? effCountry.toLowerCase() : '';
+    const isQuote = isInsideQuoteTweet(element, tweet);
+    const isListBlocked =
+        ((locationLower !== '' &&
+            (blockedCountries.has(locationLower) || (blockedRegions && blockedRegions.has(locationLower)))) ||
+            tagBlocked) &&
+        !isQuote && !isSelf;
+    const isVpnHidden = info.locationAccurate === false && settings.showVpnUsers === false && !isSelf;
 
-        if (isBlockedCountry || isBlockedRegion) {
-            // Only block/highlight if this is the main tweet author, not a quoted user
-            const isQuote = isInsideQuoteTweet(element, tweet);
+    const { hide } = applyBlockState(element, tweet, {
+        isListBlocked,
+        isVpnHidden,
+        highlightMode: settings.highlightBlockedTweets === true
+    });
 
-            if (!isQuote && !isSelf) {
-                // Mark the persistent username element so CSS :has() can style the
-                // ancestor <article> even after X re-renders it and wipes our class.
-                element.dataset.xBlock = settings.highlightBlockedTweets ? 'highlight' : 'hide';
-                if (tweet) {
-                    if (settings.highlightBlockedTweets) {
-                        tweet.classList.add('x-tweet-highlighted');
-                        tweet.classList.remove(CSS_CLASSES.TWEET_BLOCKED);
-                    } else {
-                        tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
-                        tweet.classList.remove('x-tweet-highlighted');
-                    }
-                }
-                // Don't return - still need to show badge for highlighted mode
-                if (!settings.highlightBlockedTweets) {
-                    return;
-                }
-            }
-            // If it's a quote, continue to show badge but don't block/highlight parent tweet
-        }
-    }
-
-    // Hide if VPN detected and showVpnUsers is disabled
-    if (info.locationAccurate === false && settings.showVpnUsers === false && !isSelf) {
-        element.dataset.xBlock = 'hide';
-        if (tweet) {
-            tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
-            tweet.classList.add('x-tweet-vpn-blocked');
-        }
-        return;
-    }
+    if (hide) return; // hidden row → don't build a badge
 
     if (info.location || info.device) {
         try {
@@ -566,7 +577,13 @@ export async function processElement(element, {
     if (element.dataset.xProcessed) {
         const previousScreenName = element.dataset.xScreenName;
         if (previousScreenName === screenName) {
-            if (element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`)) {
+            // Already resolved for this user, and the outcome is terminal: a badge means a
+            // visible row; data-x-block="hide" means we deliberately hid it (VPN or a list
+            // block). Either way, don't reprocess on every scan — that was a per-scan busy
+            // loop on badge-less hidden rows. Recovery still happens because a settings
+            // change clears xProcessed (see content-script SETTINGS_UPDATED) and a
+            // blocked-list change re-derives directly via runUpdateBlockedTweets.
+            if (element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`) || element.dataset.xBlock === 'hide') {
                 return;
             }
         } else {
@@ -589,18 +606,11 @@ export async function processElement(element, {
     // (including inside isInsideQuoteTweet) to avoid repeated closest() walks.
     const tweet = element.closest(SELECTORS.TWEET);
 
-    // Shared opts for applyInfoToElement across all three resolution paths
-    const applyOpts = {
-        blockedCountries,
-        blockedRegions,
-        settings,
-        isUserCell,
-        tweet,
-        debug,
-        csrfToken
-    };
-
-    // Check for blocked tags in display name early (before API call)
+    // Detect a blocked tag in the display name up front. In HIDE mode we can short-circuit
+    // here (no badge needed) and skip the API call entirely; in HIGHLIGHT mode we still
+    // need the badge, so we only remember the verdict and let applyInfoToElement apply it
+    // together with the country/region/VPN checks (one authoritative pass).
+    let tagBlocked = false;
     if (blockedTags && blockedTags.size > 0) {
         const displayName = extractDisplayName(element);
         if (displayName && hasBlockedTag(displayName, blockedTags)) {
@@ -609,24 +619,28 @@ export async function processElement(element, {
             const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
 
             if (!isQuote && !isSelf) {
-                element.dataset.xBlock = settings.highlightBlockedTweets ? 'highlight' : 'hide';
-                if (tweet) {
-                    if (settings.highlightBlockedTweets) {
-                        tweet.classList.add('x-tweet-highlighted');
-                        tweet.classList.remove(CSS_CLASSES.TWEET_BLOCKED);
-                    } else {
-                        tweet.classList.add(CSS_CLASSES.TWEET_BLOCKED);
-                        tweet.classList.remove('x-tweet-highlighted');
-                    }
-                    if (debug) debug(`Blocked @${screenName} due to tag in display name: "${displayName}"`);
+                tagBlocked = true;
+                if (debug) debug(`Blocked @${screenName} due to tag in display name: "${displayName}"`);
 
-                    if (!settings.highlightBlockedTweets) {
-                        return;
-                    }
+                if (tweet && settings.highlightBlockedTweets !== true) {
+                    applyBlockState(element, tweet, { isListBlocked: true, isVpnHidden: false, highlightMode: false });
+                    return;
                 }
             }
         }
     }
+
+    // Shared opts for applyInfoToElement across all three resolution paths
+    const applyOpts = {
+        blockedCountries,
+        blockedRegions,
+        settings,
+        isUserCell,
+        tweet,
+        debug,
+        csrfToken,
+        tagBlocked
+    };
 
     // Check local cache
     if (userInfoCache.has(screenName)) {
@@ -834,13 +848,17 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
 function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}) {
     const highlightMode = settings.highlightBlockedTweets === true;
     const hasTags = blockedTags && blockedTags.size > 0;
+    const loggedInUser = getLoggedInUsername();
 
     document.querySelectorAll('[data-x-screen-name]').forEach(element => {
         const tweet = element.closest(SELECTORS.TWEET);
         if (!tweet) return;
 
-        const location = element.dataset.xCountry;
-        const locationLower = location ? location.toLowerCase() : '';
+        const screenName = element.dataset.xScreenName;
+        const isSelf = !!loggedInUser && !!screenName && screenName.toLowerCase() === loggedInUser.toLowerCase();
+        const isQuote = isInsideQuoteTweet(element, tweet);
+
+        const locationLower = element.dataset.xCountry ? element.dataset.xCountry.toLowerCase() : '';
         const isBlockedCountry = locationLower !== '' && blockedCountries.has(locationLower);
         const isBlockedRegion = locationLower !== '' && blockedRegions && blockedRegions.has(locationLower);
 
@@ -850,33 +868,18 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
         // trust a cached flag, a recycled row can't inherit a previous occupant's block.
         const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
 
-        const isBlocked = isBlockedCountry || isBlockedRegion || isTagBlocked;
+        const isListBlocked = (isBlockedCountry || isBlockedRegion || isTagBlocked) && !isQuote && !isSelf;
 
-        // Persistent marker for CSS :has() so the article stays styled even after X
-        // re-renders it and strips our class.
-        element.dataset.xBlock = isBlocked ? (highlightMode ? 'highlight' : 'hide') : '';
+        // VPN-hide is a setting, not a blocked-list entry, so it isn't what changed here —
+        // but we must still honor it, or a blocked-list edit would wrongly un-hide a VPN
+        // row in highlight mode. locationAccurate lives on the cached info, keyed by name.
+        const info = screenName ? userInfoCache.get(screenName) : null;
+        const isVpnHidden = !!info && info.locationAccurate === false && settings.showVpnUsers === false && !isSelf;
 
-        if (highlightMode) {
-            // Highlight mode: show with red border
-            tweet.classList.toggle('x-tweet-highlighted', isBlocked);
-            tweet.classList.remove(CSS_CLASSES.TWEET_BLOCKED);
-            
-            // Badge visible in highlight mode
-            const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
-            if (badge) {
-                badge.style.display = '';
-            }
-        } else {
-            // Hide mode: hide completely
-            tweet.classList.toggle(CSS_CLASSES.TWEET_BLOCKED, isBlocked);
-            tweet.classList.remove('x-tweet-highlighted');
-            
-            // Badge hidden when tweet is blocked
-            const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
-            if (badge) {
-                badge.style.display = isBlocked ? 'none' : '';
-            }
-        }
+        const { hide } = applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode });
+
+        const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+        if (badge) badge.style.display = hide ? 'none' : '';
     });
 }
 

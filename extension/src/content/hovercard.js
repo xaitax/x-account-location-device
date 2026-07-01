@@ -511,6 +511,20 @@ class HovercardController {
 
         this.hoverCache.set(key, { data: response.data, fetchedAt: Date.now() });
 
+        // Issue #23: the badge may have rendered from a stale cloud-cache snapshot (cloud
+        // entries carry no `meta`, so this hover forced a live, authoritative fetch). If the
+        // live location/device disagree with what the badge was given, tell the content
+        // layer to refresh the cached entry and re-render the badge, so the flag next to the
+        // name matches this card. Gated on an actual difference to avoid needless churn.
+        const fresh = response.data;
+        if (fresh && (fresh.location !== initialInfo?.location || fresh.device !== initialInfo?.device)) {
+            try {
+                document.dispatchEvent(new CustomEvent('xposed:authoritative-info', {
+                    detail: { screenName, info: fresh }
+                }));
+            } catch { /* CustomEvent unsupported — non-fatal */ }
+        }
+
         if (this.currentAnchor === anchorEl && this.card?.classList.contains('x-posed-hovercard-visible')) {
             this.card = buildCardContent({ screenName, info: response.data, loading: false });
             this.card.classList.add('x-posed-hovercard-visible');

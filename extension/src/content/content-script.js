@@ -25,7 +25,8 @@ import {
     processElement,
     createProcessElementSafe,
     updateBlockedTweets,
-    cleanupObservers
+    cleanupObservers,
+    userInfoCache
 } from './observer.js';
 
 import { hovercard } from './hovercard.js';
@@ -188,9 +189,49 @@ function setupBackgroundListener() {
     };
 
     browserAPI.runtime.onMessage.addListener(messageHandler);
-    
+
     cleanupFunctions.push(() => {
         browserAPI.runtime.onMessage.removeListener(messageHandler);
+    });
+}
+
+/**
+ * Issue #23: a badge can render from a stale cloud-cache snapshot while the hovercard's
+ * (authoritative) live fetch returns fresher location/device — so the flag by the name
+ * disagrees with the popup until the row happens to re-process. The hovercard dispatches
+ * this event when it sees a difference; we refresh the warm local cache and re-render the
+ * affected badges so the two stay in sync.
+ */
+function setupAuthoritativeInfoListener() {
+    const onAuthoritativeInfo = event => {
+        const { screenName, info } = event.detail || {};
+        if (!screenName || !info) return;
+
+        // Adopt the authoritative data so future (re)processing uses it, then rebuild the
+        // badges that are showing this user. Clearing the processed markers + re-running
+        // processElement rebuilds the badge from the now-fresh cache (no new API call).
+        userInfoCache.set(screenName, info);
+
+        // Defer the DOM rebuild one microtask: this event is dispatched synchronously from
+        // the hovercard mid-update, so removing the anchored badge now would yank the
+        // hovercard's reposition target out from under it. Letting the hovercard finish
+        // first keeps the open card from jumping.
+        queueMicrotask(() => {
+            const key = screenName.toLowerCase();
+            document.querySelectorAll('[data-x-screen-name]').forEach(el => {
+                if ((el.dataset.xScreenName || '').toLowerCase() !== key) return;
+                const badge = el.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+                if (badge) badge.remove();
+                delete el.dataset.xProcessed;
+                delete el.dataset.xScreenName;
+                if (memoizedProcessElementSafe) memoizedProcessElementSafe(el);
+            });
+        });
+    };
+
+    document.addEventListener('xposed:authoritative-info', onAuthoritativeInfo);
+    cleanupFunctions.push(() => {
+        document.removeEventListener('xposed:authoritative-info', onAuthoritativeInfo);
     });
 }
 
@@ -212,17 +253,27 @@ async function handleBackgroundMessage(type, payload) {
             if (!isEnabled) {
                 document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
             } else {
-                // Apply badge-display toggles (e.g. "Flag from Device", "Show Flags")
-                // live to already-processed tweets, not only to newly-loaded ones.
-                // Clearing the processed markers + re-scanning rebuilds badges from the
-                // warm local cache, so this triggers no new API calls.
-                const badgeKeys = ['showFlags', 'flagFromDevice', 'showDevices', 'showVpnIndicator', 'showCaptureButton'];
-                if (badgeKeys.some(k => prevSettings[k] !== settings[k])) {
+                // Apply display/blocking toggles live to already-processed tweets, not
+                // only to newly-loaded ones. Clearing the processed markers + re-scanning
+                // re-derives badges AND block/highlight/VPN state from the warm local cache
+                // (so no new API calls). showVpnUsers and highlightBlockedTweets are in
+                // here because flipping them must recover rows hidden under the old value —
+                // otherwise a re-enabled "Show VPN/Proxy Users" never un-hides what it hid.
+                const reapplyKeys = ['showFlags', 'flagFromDevice', 'showDevices', 'showVpnIndicator',
+                    'showCaptureButton', 'showVpnUsers', 'highlightBlockedTweets'];
+                if (reapplyKeys.some(k => prevSettings[k] !== settings[k])) {
                     document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
                     document.querySelectorAll('[data-x-processed]').forEach(el => {
                         delete el.dataset.xProcessed;
                         delete el.dataset.xScreenName;
                     });
+                    // Drop our block/highlight markers before the rescan. A display:none row
+                    // has no layout box, so the IntersectionObserver never reports it visible
+                    // and it would never re-process — un-hiding first lets the rescan re-derive
+                    // each row's state from scratch (and re-hide it if it's still blocked).
+                    document.querySelectorAll('.x-tweet-blocked, .x-tweet-vpn-blocked, .x-tweet-highlighted')
+                        .forEach(el => el.classList.remove('x-tweet-blocked', 'x-tweet-vpn-blocked', 'x-tweet-highlighted'));
+                    document.querySelectorAll('[data-x-block]').forEach(el => { delete el.dataset.xBlock; });
                     if (memoizedScanPageFn) memoizedScanPageFn();
                 }
             }
@@ -295,6 +346,7 @@ async function initialize() {
         // Set up listeners BEFORE injecting page script
         setupPageScriptListener();
         setupBackgroundListener();
+        setupAuthoritativeInfoListener();
 
         // Extract CSRF token
         csrfToken = getCsrfToken();
