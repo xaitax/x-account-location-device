@@ -162,16 +162,20 @@ class UserCacheStorage {
  *   - label:      human-readable label for log lines
  *   - normalize:  function applied to incoming values before storing/looking up
  *                 (countries/regions: trim + lowercase; tags: trim, case-kept)
+ *   - defaults:   optional array seeded on first run only (when the key has never
+ *                 been written). After that the user's edits — including clearing
+ *                 the list — always win, because the key then exists as an array.
  *
  * normalize returns a falsy value to reject the input (e.g. empty after trim).
  */
 class BlockedSetStorage {
-    constructor({ storageKey, label, normalize }) {
+    constructor({ storageKey, label, normalize, defaults = [] }) {
         this.values = new Set();
         this.loaded = false;
         this.storageKey = storageKey;
         this.label = label;
         this.normalize = normalize;
+        this.defaults = Array.isArray(defaults) ? defaults : [];
     }
 
     async load() {
@@ -182,6 +186,16 @@ class BlockedSetStorage {
             if (Array.isArray(stored)) {
                 this.values = new Set(stored);
                 console.log(`🚫 Loaded ${this.values.size} ${this.label}`);
+            } else if (this.defaults.length) {
+                // First run only: the key has never been written. Seed the defaults
+                // and persist once so the value is real and consistent everywhere —
+                // after this the user's edits (including clearing) stick.
+                for (const value of this.defaults) {
+                    const normalized = this.normalize(value);
+                    if (normalized) this.values.add(normalized);
+                }
+                await this.save();
+                console.log(`🌱 Seeded ${this.values.size} default ${this.label}`);
             }
 
             this.loaded = true;
@@ -306,6 +320,14 @@ const normalizeTag = value => {
 const normalizeLanguage = value => {
     if (!value || typeof value !== 'string') return '';
     return value.trim().toLowerCase().split('-')[0];
+};
+// Allowlisted accounts are stored as the lowercase screen name (X handles are
+// case-insensitive). Accepts an optional leading "@" and enforces X's handle rule
+// (1-15 chars, alphanumeric + underscore); anything else is rejected.
+const normalizeUsername = value => {
+    if (!value || typeof value !== 'string') return '';
+    const handle = value.trim().replace(/^@+/, '').toLowerCase();
+    return /^[a-z0-9_]{1,15}$/.test(handle) ? handle : '';
 };
 
 /**
@@ -460,6 +482,14 @@ export const blockedLanguages = new BlockedSetStorage({
     label: 'blocked languages',
     normalize: normalizeLanguage
 });
+export const allowedUsers = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.ALLOWED_USERS,
+    label: 'always-show accounts',
+    normalize: normalizeUsername,
+    // Ship the extension author allowlisted by default (issue #26). First run only —
+    // remove it and it stays removed.
+    defaults: ['xaitax']
+});
 export const settings = new SettingsStorage();
 export const headersStorage = new HeadersStorage();
 
@@ -476,6 +506,7 @@ export async function initializeStorage() {
         blockedRegions.load(),
         blockedTags.load(),
         blockedLanguages.load(),
+        allowedUsers.load(),
         settings.load(),
         headersStorage.load()
     ]);

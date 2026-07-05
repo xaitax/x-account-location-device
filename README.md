@@ -47,8 +47,9 @@ X already knows where an account posts from. It's tucked inside the "About this 
 
 **Take control.** Curate your timeline by where accounts post from:
 
-- **Block by country, region, or tag**: single countries, multi-country regions (including groups like Southeast Asia), or display-name patterns.
+- **Block by country, region, tag, or language**: single countries, multi-country regions (including groups like Southeast Asia), display-name patterns, or the language a post is written in (using X's own per-post detection, so it works for every language).
 - **Hide or Highlight**: remove matching posts entirely, or keep them visible with an amber accent so you stay aware without scrolling past blind.
+- **Always-Show Accounts**: a personal allowlist for accounts that should never be filtered. Every filter, whether by country, region, tag, language, or VPN, skips them on the timeline and on their profile. Ideal for people you follow from a blocked country.
 - **VPN/proxy toggle**: show or hide posts from accounts flagged as possibly masked.
 - **Sidebar link**: optionally inject a "Block Locations" entry straight into X's own navigation.
 - **Flag from Device**: prefer the device's country for the flag instead of the account location (it falls back to location for web/unknown), and let blocking follow device country too.

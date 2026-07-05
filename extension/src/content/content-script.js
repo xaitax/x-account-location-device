@@ -41,6 +41,7 @@ let blockedCountries = new Set();
 let blockedRegions = new Set();
 let blockedTags = new Set();
 let blockedLanguages = new Set();
+let allowedUsers = new Set();
 let settings = {};
 let csrfToken = null;
 let debugMode = false;
@@ -295,22 +296,27 @@ async function handleBackgroundMessage(type, payload) {
 
         case MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED:
             blockedCountries = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED:
             blockedRegions = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_TAGS_UPDATED:
             blockedTags = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED:
             blockedLanguages = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
+            return { success: true };
+
+        case MESSAGE_TYPES.ALLOWED_USERS_UPDATED:
+            allowedUsers = new Set(payload);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
             return { success: true };
 
         default:
@@ -364,13 +370,14 @@ async function initialize() {
         // Inject page script for header interception
         injectPageScript();
 
-        // Load initial settings, blocked countries, blocked regions, blocked tags, and blocked languages
-        const [settingsResponse, blockedResponse, blockedRegionsResponse, blockedTagsResponse, blockedLanguagesResponse] = await Promise.all([
+        // Load initial settings, blocked countries/regions/tags/languages, and allowlisted accounts
+        const [settingsResponse, blockedResponse, blockedRegionsResponse, blockedTagsResponse, blockedLanguagesResponse, allowedUsersResponse] = await Promise.all([
             sendMessage({ type: MESSAGE_TYPES.GET_SETTINGS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_REGIONS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_TAGS }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_LANGUAGES })
+            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_LANGUAGES }),
+            sendMessage({ type: MESSAGE_TYPES.GET_ALLOWED_USERS })
         ]);
 
         if (settingsResponse?.success) {
@@ -398,6 +405,10 @@ async function initialize() {
 
         if (blockedLanguagesResponse?.success) {
             blockedLanguages = new Set(blockedLanguagesResponse.data);
+        }
+
+        if (allowedUsersResponse?.success) {
+            allowedUsers = new Set(allowedUsersResponse.data);
         }
 
         createMemoizedFunctions();
@@ -459,6 +470,7 @@ function createMemoizedFunctions() {
         get blockedRegions() { return blockedRegions; },
         get blockedTags() { return blockedTags; },
         get blockedLanguages() { return blockedLanguages; },
+        get allowedUsers() { return allowedUsers; },
         get settings() { return settings; },
         get csrfToken() { return csrfToken; },
         sendMessage,
@@ -548,6 +560,7 @@ window.__X_POSED_CONTENT__ = {
         blockedRegions: Array.from(blockedRegions),
         blockedTags: Array.from(blockedTags),
         blockedLanguages: Array.from(blockedLanguages),
+        allowedUsers: Array.from(allowedUsers),
         settings
     })
 };

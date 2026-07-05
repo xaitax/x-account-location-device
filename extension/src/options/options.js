@@ -60,6 +60,12 @@ const elements = {
     languageSearch: document.getElementById('language-search'),
     languageGrid: document.getElementById('language-grid'),
     btnClearBlockedLanguages: document.getElementById('btn-clear-blocked-languages'),
+    // Always-Show Accounts (allowlist)
+    allowedUsersList: document.getElementById('allowed-users-list'),
+    allowedUsersCount: document.getElementById('allowed-users-count'),
+    allowedUserInput: document.getElementById('allowed-user-input'),
+    btnAddAllowedUser: document.getElementById('btn-add-allowed-user'),
+    btnClearAllowedUsers: document.getElementById('btn-clear-allowed-users'),
     // Cloud cache
     optCloudCache: document.getElementById('opt-cloud-cache'),
     cloudStatus: document.getElementById('cloud-status'),
@@ -95,6 +101,7 @@ let blockedCountries = [];
 let blockedRegions = [];
 let blockedTags = [];
 let blockedLanguages = [];
+let allowedUsers = [];
 let rateLimitMonitorInterval = null;
 
 /**
@@ -151,6 +158,7 @@ async function initialize() {
     await loadBlockedRegions();
     await loadBlockedTags();
     await loadBlockedLanguages();
+    await loadAllowedUsers();
     await loadCacheStats();
     await loadStatistics();
     await loadCloudCacheStatus();
@@ -740,6 +748,187 @@ async function clearAllBlockedLanguages() {
         }
     } catch (error) {
         console.error('Failed to clear blocked languages:', error);
+    }
+}
+
+/**
+ * Normalize a handle typed into the allowlist input: drop a leading "@",
+ * lowercase, and enforce X's 1-15 char alphanumeric/underscore rule. Returns ''
+ * for anything invalid (mirrors the storage-layer normalizer).
+ */
+function normalizeHandleInput(raw) {
+    const handle = (raw || '').trim().replace(/^@+/, '').toLowerCase();
+    return /^[a-z0-9_]{1,15}$/.test(handle) ? handle : '';
+}
+
+/**
+ * Load allowlisted ("always show") accounts (issue #26)
+ */
+async function loadAllowedUsers() {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.GET_ALLOWED_USERS
+        });
+
+        if (response?.success) {
+            allowedUsers = response.data || [];
+            renderAllowedUsers();
+            updateAllowedUsersCount();
+        }
+    } catch (error) {
+        console.error('Failed to load always-show accounts:', error);
+    }
+}
+
+/**
+ * Update the always-show count badge
+ */
+function updateAllowedUsersCount() {
+    if (elements.allowedUsersCount) {
+        elements.allowedUsersCount.textContent = allowedUsers.length;
+        elements.allowedUsersCount.style.display = allowedUsers.length > 0 ? 'inline-flex' : 'none';
+    }
+}
+
+/**
+ * Render the allowlist as account chips (avatar-free, links to each profile)
+ */
+function renderAllowedUsers() {
+    const list = elements.allowedUsersList;
+    if (!list) return;
+
+    list.replaceChildren();
+
+    if (allowedUsers.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'empty-state';
+        empty.textContent = 'No always-show accounts yet';
+        list.appendChild(empty);
+        return;
+    }
+
+    for (const handle of [...allowedUsers].sort()) {
+        const chip = document.createElement('div');
+        chip.className = 'allowlist-chip';
+
+        // User glyph (drawn, currentColor)
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '14');
+        svg.setAttribute('height', '14');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '1.8');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.setAttribute('class', 'allowlist-chip-icon');
+        const body = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        body.setAttribute('d', 'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2');
+        const head = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        head.setAttribute('cx', '12');
+        head.setAttribute('cy', '7');
+        head.setAttribute('r', '4');
+        svg.appendChild(body);
+        svg.appendChild(head);
+        chip.appendChild(svg);
+
+        // @handle → links to the profile
+        const link = document.createElement('a');
+        link.className = 'allowlist-chip-handle';
+        link.href = `https://x.com/${handle}`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = `@${handle}`;
+        chip.appendChild(link);
+
+        // Remove
+        const remove = document.createElement('button');
+        remove.className = 'allowlist-chip-remove';
+        remove.type = 'button';
+        remove.textContent = '×';
+        remove.title = `Remove @${handle}`;
+        remove.setAttribute('aria-label', `Remove @${handle}`);
+        remove.addEventListener('click', () => removeAllowedUser(handle));
+        chip.appendChild(remove);
+
+        list.appendChild(chip);
+    }
+}
+
+/**
+ * Add an account to the allowlist
+ */
+async function addAllowedUser(raw) {
+    const handle = normalizeHandleInput(raw);
+    if (!handle) {
+        // Brief invalid-input cue, then bail
+        if (elements.allowedUserInput) {
+            elements.allowedUserInput.classList.add('invalid');
+            setTimeout(() => elements.allowedUserInput.classList.remove('invalid'), 700);
+        }
+        return;
+    }
+
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_ALLOWED_USERS,
+            payload: { action: 'add', username: handle }
+        });
+
+        if (response?.success) {
+            allowedUsers = response.data || [];
+            renderAllowedUsers();
+            updateAllowedUsersCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to add always-show account:', error);
+    }
+}
+
+/**
+ * Remove an account from the allowlist
+ */
+async function removeAllowedUser(handle) {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_ALLOWED_USERS,
+            payload: { action: 'remove', username: handle }
+        });
+
+        if (response?.success) {
+            allowedUsers = response.data || [];
+            renderAllowedUsers();
+            updateAllowedUsersCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to remove always-show account:', error);
+    }
+}
+
+/**
+ * Clear the whole allowlist
+ */
+async function clearAllAllowedUsers() {
+    if (allowedUsers.length === 0) return;
+
+    if (!confirm('Are you sure you want to clear all always-show accounts?')) return;
+
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_ALLOWED_USERS,
+            payload: { action: 'clear' }
+        });
+
+        if (response?.success) {
+            allowedUsers = [];
+            renderAllowedUsers();
+            updateAllowedUsersCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to clear always-show accounts:', error);
     }
 }
 
@@ -1709,6 +1898,26 @@ function setupEventListeners() {
         elements.btnClearBlockedLanguages.addEventListener('click', clearAllBlockedLanguages);
     }
 
+    // Always-Show Accounts: add (button + Enter) and clear
+    if (elements.btnAddAllowedUser && elements.allowedUserInput) {
+        const submitAllowed = () => {
+            const val = elements.allowedUserInput.value;
+            const valid = !!normalizeHandleInput(val);
+            addAllowedUser(val);
+            if (valid) elements.allowedUserInput.value = '';
+        };
+        elements.btnAddAllowedUser.addEventListener('click', submitAllowed);
+        elements.allowedUserInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitAllowed();
+            }
+        });
+    }
+    if (elements.btnClearAllowedUsers) {
+        elements.btnClearAllowedUsers.addEventListener('click', clearAllAllowedUsers);
+    }
+
     // Tab switching for blocked locations (Countries, Regions, Tags, Languages)
     if (elements.tabCountries && elements.tabRegions && elements.tabTags) {
         const switchBlockedTab = tab => {
@@ -1850,6 +2059,7 @@ function setupEventListeners() {
                 blockedRegions,
                 blockedTags,
                 blockedLanguages,
+                allowedUsers,
 
                 // User data
                 cache: cacheResponse?.data || []
@@ -1941,6 +2151,7 @@ async function handleImportFile(file) {
         const blockedRegionsCount = Array.isArray(data.blockedRegions) ? data.blockedRegions.length : 0;
         const blockedTagsCount = Array.isArray(data.blockedTags) ? data.blockedTags.length : 0;
         const blockedLanguagesCount = Array.isArray(data.blockedLanguages) ? data.blockedLanguages.length : 0;
+        const allowedUsersCount = Array.isArray(data.allowedUsers) ? data.allowedUsers.length : 0;
         const hasSettings = data.settings && typeof data.settings === 'object';
 
         const confirmMessage = [
@@ -1952,6 +2163,7 @@ async function handleImportFile(file) {
             blockedRegionsCount > 0 ? `• ${blockedRegionsCount} blocked regions` : '',
             blockedTagsCount > 0 ? `• ${blockedTagsCount} blocked tags` : '',
             blockedLanguagesCount > 0 ? `• ${blockedLanguagesCount} blocked languages` : '',
+            allowedUsersCount > 0 ? `• ${allowedUsersCount} always-show accounts` : '',
             cacheCount > 0 ? `• ${cacheCount} cached users` : '',
             '',
             `Exported on: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'Unknown'}`,
@@ -1972,6 +2184,7 @@ async function handleImportFile(file) {
                 blockedRegions: data.blockedRegions,
                 blockedTags: data.blockedTags,
                 blockedLanguages: data.blockedLanguages,
+                allowedUsers: data.allowedUsers,
                 cache: data.cache
             }
         });
@@ -1983,6 +2196,7 @@ async function handleImportFile(file) {
             if (response.importedBlockedRegions) results.push(`${response.importedBlockedRegions} blocked regions`);
             if (response.importedBlockedTags) results.push(`${response.importedBlockedTags} blocked tags`);
             if (response.importedBlockedLanguages) results.push(`${response.importedBlockedLanguages} blocked languages`);
+            if (response.importedAllowedUsers) results.push(`${response.importedAllowedUsers} always-show accounts`);
             if (response.importedCache) results.push(`${response.importedCache} cached users`);
 
             showStatus(`✓ Successfully imported: ${results.join(', ')}`);
@@ -1993,6 +2207,7 @@ async function handleImportFile(file) {
             await loadBlockedRegions();
             await loadBlockedTags();
             await loadBlockedLanguages();
+            await loadAllowedUsers();
             await loadCacheStats();
             await loadStatistics();
         } else {

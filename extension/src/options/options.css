@@ -669,6 +669,106 @@ body {
     font-weight: 400;
 }
 
+/* Always-Show Accounts (allowlist / issue #26) — accent-flavored to read as the
+   positive counterpart to the red "blocked" lists. */
+.allowlist-count {
+    background: var(--xp-accent-soft) !important;
+    color: var(--xp-accent) !important;
+}
+
+.allowlist-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+.allowlist-input-wrap {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+.allowlist-input-wrap .allowlist-at {
+    position: absolute;
+    left: 14px;
+    color: var(--xp-text-dim);
+    font-size: 15px;
+    font-weight: 600;
+    pointer-events: none;
+    line-height: 1;
+}
+.allowlist-input-row .allowlist-input {
+    flex: 1;
+    width: 100%;
+    margin-bottom: 0;
+    padding-left: 28px;
+}
+.allowlist-input.invalid {
+    border-color: var(--xp-danger) !important;
+    box-shadow: 0 0 0 3px var(--xp-danger-soft);
+}
+
+.allowlist-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.allowlist-chips .empty-state {
+    margin: 2px 0;
+}
+
+.allowlist-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 8px 6px 11px;
+    border-radius: var(--xp-r-pill);
+    background: var(--xp-accent-soft);
+    border: 1px solid var(--xp-accent-line);
+    transition: border-color 0.15s var(--xp-ease), background 0.15s var(--xp-ease);
+}
+.allowlist-chip:hover {
+    border-color: var(--xp-accent);
+}
+.allowlist-chip-icon {
+    color: var(--xp-accent);
+    flex-shrink: 0;
+}
+.allowlist-chip-handle {
+    color: var(--xp-text);
+    font-size: 13.5px;
+    font-weight: 600;
+    text-decoration: none;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.allowlist-chip-handle:hover {
+    text-decoration: underline;
+    text-decoration-color: var(--xp-accent-line);
+}
+.allowlist-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--xp-text-dim);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s var(--xp-ease), color 0.15s var(--xp-ease);
+}
+.allowlist-chip-remove:hover {
+    background: var(--xp-danger-soft);
+    color: var(--xp-danger);
+}
+
 .btn-small {
     padding: 8px 16px;
     font-size: 13px;

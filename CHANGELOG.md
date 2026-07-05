@@ -2,6 +2,11 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [3.3.0] - 2026-07-06
+
+### New
+- **Always-Show Accounts (allowlist)** ([#26](https://github.com/xaitax/x-account-location-device/issues/26), requested by **@JansthcirlU**): add accounts that should *never* be hidden or highlighted by any filter, whether by country, region, tag, language, or VPN, on the timeline and on their own profile. Ideal for people you follow from a blocked country or friends who post through a VPN. Manage them in the new **Settings → Always-Show** section (just type a handle, the @ is added for you); included in import/export.
+
 ## [3.2.0] - 2026-07-01
 
 ### Bug Fixes

@@ -78,13 +78,16 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
  * @param {string|null} [opts.csrfToken]
  */
 function applyInfoToElement(element, screenName, info, opts) {
-    const { blockedCountries, blockedRegions, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
+    const { blockedCountries, blockedRegions, allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
 
     const loggedInUser = getLoggedInUsername();
     const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
+    // Allowlisted ("always show") accounts are exempt from every filter, exactly like
+    // your own account — so treat them as isExempt everywhere a block is decided (issue #26).
+    const isExempt = isSelf || (allowedUsers && allowedUsers.has(screenName.toLowerCase()));
 
     // Resolve the full block decision from every reason at once, then apply it in one
     // authoritative pass (set what applies, clear what doesn't). Country/region/tag only
@@ -95,8 +98,8 @@ function applyInfoToElement(element, screenName, info, opts) {
         ((locationLower !== '' &&
             (blockedCountries.has(locationLower) || (blockedRegions && blockedRegions.has(locationLower)))) ||
             tagBlocked) &&
-        !isQuote && !isSelf;
-    const isVpnHidden = info.locationAccurate === false && settings.showVpnUsers === false && !isSelf;
+        !isQuote && !isExempt;
+    const isVpnHidden = info.locationAccurate === false && settings.showVpnUsers === false && !isExempt;
 
     const { hide } = applyBlockState(element, tweet, {
         isListBlocked,
@@ -182,20 +185,52 @@ function getMainTweetLanguage(tweet) {
 }
 
 /**
+ * Screen name (lowercase) of a tweet's MAIN author — the first processed username
+ * element that isn't inside a quoted-tweet card. Used to apply the per-author
+ * allowlist to per-tweet (language) blocking. Returns '' when unknown/unprocessed.
+ * @param {HTMLElement} tweet - the article element
+ * @returns {string}
+ */
+function getMainAuthorScreenName(tweet) {
+    const els = tweet.querySelectorAll('[data-x-screen-name]');
+    for (const el of els) {
+        if (!isInsideQuoteTweet(el, tweet)) {
+            return (el.dataset.xScreenName || '').toLowerCase();
+        }
+    }
+    return '';
+}
+
+/**
+ * Is a tweet's main author on the "always show" allowlist (issue #26)? Allowlisted
+ * accounts are exempt from every filter, so this short-circuits language blocking
+ * the same way isSelf/isAllowed exempts the per-author country/region/tag/VPN blocks.
+ * @param {HTMLElement} tweet
+ * @param {Set<string>} allowedUsers - lowercase allowlisted handles
+ * @returns {boolean}
+ */
+function isAuthorAllowlisted(tweet, allowedUsers) {
+    if (!allowedUsers || allowedUsers.size === 0) return false;
+    const author = getMainAuthorScreenName(tweet);
+    return author !== '' && allowedUsers.has(author);
+}
+
+/**
  * Mark (or unmark) a tweet article for language blocking. Uses a SEPARATE
  * article-level marker (data-x-lang-block) from the per-author data-x-block, so
  * the two filters compose in CSS instead of clobbering each other's state. The
  * marker honors the hide-vs-highlight preference; 'und' (undetermined —
- * emoji/link-only) is never blocked.
+ * emoji/link-only) is never blocked, and an allowlisted author is never blocked.
  * @param {HTMLElement|null} tweet - the article element
  * @param {Set<string>} blockedLanguages - lowercase primary subtags
  * @param {Object} settings
+ * @param {Set<string>} [allowedUsers] - lowercase "always show" handles
  */
-function applyLanguageBlock(tweet, blockedLanguages, settings) {
+function applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers) {
     if (!tweet) return;
 
     let blocked = false;
-    if (blockedLanguages && blockedLanguages.size > 0) {
+    if (blockedLanguages && blockedLanguages.size > 0 && !isAuthorAllowlisted(tweet, allowedUsers)) {
         const lang = getMainTweetLanguage(tweet);
         if (lang && lang !== 'und' && blockedLanguages.has(lang)) {
             blocked = true;
@@ -602,6 +637,7 @@ export async function processElement(element, {
     blockedRegions,
     blockedTags,
     blockedLanguages,
+    allowedUsers,
     settings,
     csrfToken,
     sendMessage,
@@ -661,7 +697,8 @@ export async function processElement(element, {
     // Language blocking is a per-tweet signal (X's own lang tag), independent of the
     // author lookup — apply it eagerly here, before any early return below, so
     // media/API state can't gate it. Marks the article via a separate data-x-lang-block.
-    applyLanguageBlock(tweet, blockedLanguages, settings);
+    // (Skips allowlisted authors — data-x-screen-name is already set above.)
+    applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
 
     // In HIDE mode a language-blocked article is fully hidden by CSS, so skip the badge
     // AND the user-info lookup entirely — otherwise blocking a common language would fire
@@ -683,8 +720,10 @@ export async function processElement(element, {
             const isQuote = isInsideQuoteTweet(element, tweet);
             const loggedInUser = getLoggedInUsername();
             const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
+            // Allowlisted accounts are never blocked, even by a display-name tag (issue #26).
+            const isExempt = isSelf || (allowedUsers && allowedUsers.has(screenName.toLowerCase()));
 
-            if (!isQuote && !isSelf) {
+            if (!isQuote && !isExempt) {
                 tagBlocked = true;
                 if (debug) debug(`Blocked @${screenName} due to tag in display name: "${displayName}"`);
 
@@ -700,6 +739,7 @@ export async function processElement(element, {
     const applyOpts = {
         blockedCountries,
         blockedRegions,
+        allowedUsers,
         settings,
         isUserCell,
         tweet,
@@ -894,8 +934,8 @@ let pendingBlockedTweetsArgs = null;
  * @param {Set} blockedTags - Set of blocked tags (lowercase)
  * @param {Object} settings - Settings object with highlightBlockedTweets flag
  */
-export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null) {
-    pendingBlockedTweetsArgs = { blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages };
+export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null) {
+    pendingBlockedTweetsArgs = { blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers };
     if (pendingBlockedTweetsUpdate !== null) return;
 
     pendingBlockedTweetsUpdate = requestAnimationFrame(() => {
@@ -903,7 +943,7 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
         const args = pendingBlockedTweetsArgs;
         pendingBlockedTweetsArgs = null;
         if (args) {
-            runUpdateBlockedTweets(args.blockedCountries, args.blockedRegions, args.blockedTags, args.settings, args.blockedLanguages);
+            runUpdateBlockedTweets(args.blockedCountries, args.blockedRegions, args.blockedTags, args.settings, args.blockedLanguages, args.allowedUsers);
         }
     });
 }
@@ -911,7 +951,7 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
 /**
  * Perform the actual single-pass tweet visibility update. See updateBlockedTweets.
  */
-function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null) {
+function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null) {
     const highlightMode = settings.highlightBlockedTweets === true;
     const hasTags = blockedTags && blockedTags.size > 0;
     const loggedInUser = getLoggedInUsername();
@@ -922,6 +962,8 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
 
         const screenName = element.dataset.xScreenName;
         const isSelf = !!loggedInUser && !!screenName && screenName.toLowerCase() === loggedInUser.toLowerCase();
+        // Allowlisted accounts are exempt from every filter, like your own account (issue #26).
+        const isExempt = isSelf || (!!screenName && !!allowedUsers && allowedUsers.has(screenName.toLowerCase()));
         const isQuote = isInsideQuoteTweet(element, tweet);
 
         const locationLower = element.dataset.xCountry ? element.dataset.xCountry.toLowerCase() : '';
@@ -934,13 +976,13 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
         // trust a cached flag, a recycled row can't inherit a previous occupant's block.
         const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
 
-        const isListBlocked = (isBlockedCountry || isBlockedRegion || isTagBlocked) && !isQuote && !isSelf;
+        const isListBlocked = (isBlockedCountry || isBlockedRegion || isTagBlocked) && !isQuote && !isExempt;
 
         // VPN-hide is a setting, not a blocked-list entry, so it isn't what changed here —
         // but we must still honor it, or a blocked-list edit would wrongly un-hide a VPN
         // row in highlight mode. locationAccurate lives on the cached info, keyed by name.
         const info = screenName ? userInfoCache.get(screenName) : null;
-        const isVpnHidden = !!info && info.locationAccurate === false && settings.showVpnUsers === false && !isSelf;
+        const isVpnHidden = !!info && info.locationAccurate === false && settings.showVpnUsers === false && !isExempt;
 
         const { hide } = applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode });
 
@@ -954,7 +996,7 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
     // marker, so a removed language un-hides its tweets. Runs only on config/setting
     // changes (this pass is rAF-coalesced), not per scroll.
     document.querySelectorAll(SELECTORS.TWEET).forEach(tweet => {
-        applyLanguageBlock(tweet, blockedLanguages, settings);
+        applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
     });
 }
 

@@ -16,36 +16,15 @@
                 </svg>
             </button>
             <div class="whats-new-content">
-                <h2>What's New in X-Posed v3.2</h2>
-                <p class="whats-new-subtitle">Filter your timeline by language — plus reliability fixes and a new update-tab toggle</p>
+                <h2>What's New in X-Posed v3.3</h2>
+                <p class="whats-new-subtitle">Never hide the people you actually want to see</p>
 
                 <div class="whats-new-features">
                     <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg></span>
+                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg></span>
                         <div class="feature-info">
-                            <strong>Language filter</strong>
-                            <span>Block or highlight posts by the language they're written in — using X's own detection, so it works for every language. Manage it in the blocking modal's new Languages tab, in Settings, and in import/export.</span>
-                        </div>
-                    </div>
-                    <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
-                        <div class="feature-info">
-                            <strong>"Open Changelog on Update" toggle</strong>
-                            <span>Don't want this tab popping up after every update? Turn it off in Settings → General. You'll still see the in-page "What's New" banner here.</span>
-                        </div>
-                    </div>
-                    <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></span>
-                        <div class="feature-info">
-                            <strong>VPN &amp; flag fixes</strong>
-                            <span>Tweets no longer stay hidden after you re-enable "Show VPN/Proxy Users," and a badge's flag now reconciles to the hovercard when the two disagree.</span>
-                        </div>
-                    </div>
-                    <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 19a4.5 4.5 0 0 1-.4-9 6 6 0 0 1 11.6-1.5A4.5 4.5 0 0 1 17.5 19z"/></svg></span>
-                        <div class="feature-info">
-                            <strong>Accurate cache count</strong>
-                            <span>The popup's community-cache total now updates live from the same source as the settings dashboard, so the two always match.</span>
+                            <strong>Always-Show Accounts</strong>
+                            <span>A personal allowlist for the accounts you never want filtered. Add anyone and every filter you've set (country, region, tag, language, and VPN) will always skip them, on the timeline and on their profile. Perfect for people you follow from a blocked country or friends who post through a VPN. Find it in the new <strong>Always-Show</strong> section of Settings.</span>
                         </div>
                     </div>
                 </div>
@@ -92,6 +71,10 @@
                     <path fill="currentColor" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78z"/>
                 </svg>
                 <span>Blocking</span>
+            </button>
+            <button class="xp-nav-item" data-target="panel-allowlist" type="button">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg>
+                <span>Always-Show</span>
             </button>
             <button class="xp-nav-item" data-target="panel-stats" type="button">
                 <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -400,7 +383,7 @@
                 <!-- Languages Panel -->
                 <div class="blocked-panel" id="panel-languages" style="display: none;">
                     <p class="section-hint">
-                        Block posts by their language. X detects each post's language automatically — tweets written in these languages are hidden from your feed.
+                        Block posts by their language. X detects each post's language automatically, so tweets written in these languages are hidden from your feed.
                     </p>
 
                     <!-- Currently blocked languages -->
@@ -421,6 +404,39 @@
                             Clear All Languages
                         </button>
                     </div>
+                </div>
+            </section>
+            </div>
+
+            <!-- Always-Show Accounts (allowlist / issue #26) -->
+            <div class="xp-panel" id="panel-allowlist">
+            <section class="options-section allowlist-section">
+                <h2 class="section-title">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg>
+                    Always-Show Accounts
+                    <span class="blocked-count allowlist-count" id="allowed-users-count">0</span>
+                </h2>
+
+                <p class="section-description">
+                    Accounts on this list are <strong>never</strong> hidden or highlighted by any filter. That covers country, region, tag, language, and VPN filters, on the timeline and on their profile. Great for the people you follow from a blocked country.
+                </p>
+
+                <div class="allowlist-input-row">
+                    <div class="allowlist-input-wrap">
+                        <span class="allowlist-at" aria-hidden="true">@</span>
+                        <input type="text" class="country-search allowlist-input" id="allowed-user-input" placeholder="xaitax" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16">
+                    </div>
+                    <button class="btn btn-primary btn-small" id="btn-add-allowed-user">+ Add</button>
+                </div>
+
+                <div class="allowlist-chips" id="allowed-users-list">
+                    <p class="empty-state">No always-show accounts yet</p>
+                </div>
+
+                <div class="blocked-actions">
+                    <button class="btn btn-secondary btn-small" id="btn-clear-allowed-users">
+                        Clear All
+                    </button>
                 </div>
             </section>
             </div>
@@ -568,7 +584,7 @@
                 </h2>
 
                 <div class="about-info">
-                    <p><strong>X-Posed</strong> v<span id="version">3.2.0</span></p>
+                    <p><strong>X-Posed</strong> v<span id="version">3.3.0</span></p>
                     <p class="text-muted">See where X users are located and what devices they use.</p>
                     
                     <div class="about-links">
