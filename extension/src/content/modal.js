@@ -13,6 +13,7 @@ let localBlockedCountries = null;
 let localBlockedRegions = null;
 let localBlockedTags = null;
 let localBlockedLanguages = null;
+let localBlockedAffiliations = null;
 
 let currentModal = null;
 
@@ -42,7 +43,7 @@ let cachedTagFilter = '';
  * @param {Set} blockedLanguages - Set of currently blocked language codes (optional)
  * @param {Function} onLanguageAction - Callback for language actions (optional)
  */
-export function showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags = null, onTagAction = null, blockedLanguages = null, onLanguageAction = null) {
+export function showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags = null, onTagAction = null, blockedLanguages = null, onLanguageAction = null, blockedAffiliations = null, onAffiliationAction = null) {
     // Remove existing modal if present
     if (currentModal) {
         currentModal.remove();
@@ -54,6 +55,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     localBlockedRegions = blockedRegions;
     localBlockedTags = blockedTags || new Set();
     localBlockedLanguages = blockedLanguages || new Set();
+    localBlockedAffiliations = blockedAffiliations || new Set();
 
     // Reset active tab
     activeTab = 'countries';
@@ -76,19 +78,21 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     const { tabBar, switchTab, updateTabCounts } = createTabBar();
 
     // Initial tab counts
-    updateTabCounts(blockedCountries.size, blockedRegions.size, localBlockedTags.size, localBlockedLanguages.size);
+    updateTabCounts(blockedCountries.size, blockedRegions.size, localBlockedTags.size, localBlockedLanguages.size, localBlockedAffiliations.size);
 
     // Create bodies for all tabs
     const { body: countryBody, renderCountries, searchInput: countrySearch } = createCountryBody(blockedCountries, onCountryAction);
     const { body: regionBody, renderRegions, searchInput: regionSearch } = createRegionBody(blockedRegions, onRegionAction);
     const { body: tagBody, renderTags, searchInput: tagSearch } = createTagBody(localBlockedTags, onTagAction);
     const { body: languageBody, renderLanguages, searchInput: languageSearch } = createLanguageBody(localBlockedLanguages, onLanguageAction);
+    const { body: affiliationBody, renderAffiliations, searchInput: affiliationInput } = createAffiliationBody(localBlockedAffiliations, onAffiliationAction);
 
     // Tab content container
     const tabContent = createElement('div', { className: 'x-blocker-tab-content' });
     tabContent.appendChild(countryBody);
     tabContent.appendChild(regionBody);
     tabContent.appendChild(tagBody);
+    tabContent.appendChild(affiliationBody);
     tabContent.appendChild(languageBody);
 
     // Initially show countries tab
@@ -96,6 +100,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     regionBody.style.display = 'none';
     tagBody.style.display = 'none';
     languageBody.style.display = 'none';
+    affiliationBody.style.display = 'none';
 
     // Tab switching logic
     const handleTabSwitch = tab => {
@@ -106,6 +111,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
         regionBody.style.display = tab === 'regions' ? 'block' : 'none';
         tagBody.style.display = tab === 'tags' ? 'block' : 'none';
         languageBody.style.display = tab === 'languages' ? 'block' : 'none';
+        affiliationBody.style.display = tab === 'affiliations' ? 'block' : 'none';
 
         if (tab === 'countries') {
             updateStats(blockedCountries.size, 'countries');
@@ -119,6 +125,9 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
         } else if (tab === 'languages') {
             updateStats(localBlockedLanguages.size, 'languages');
             setTimeout(() => languageSearch.focus(), 50);
+        } else if (tab === 'affiliations') {
+            updateStats(localBlockedAffiliations.size, 'affiliations');
+            setTimeout(() => affiliationInput.focus(), 50);
         }
     };
 
@@ -127,6 +136,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     tabBar.querySelector('[data-tab="regions"]').addEventListener('click', () => handleTabSwitch('regions'));
     tabBar.querySelector('[data-tab="tags"]').addEventListener('click', () => handleTabSwitch('tags'));
     tabBar.querySelector('[data-tab="languages"]').addEventListener('click', () => handleTabSwitch('languages'));
+    tabBar.querySelector('[data-tab="affiliations"]').addEventListener('click', () => handleTabSwitch('affiliations'));
 
     // Create footer
     const footer = createFooter(
@@ -190,6 +200,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     renderRegions();
     renderTags();
     renderLanguages();
+    renderAffiliations();
 }
 
 /**
@@ -276,6 +287,19 @@ function createTabBar() {
     });
     tagsTab.appendChild(tagsCount);
 
+    const affiliationsTab = createElement('button', {
+        className: 'x-blocker-tab',
+        'data-tab': 'affiliations'
+    });
+    affiliationsTab.appendChild(tabIcon('affiliation'));
+    affiliationsTab.appendChild(document.createTextNode('Affiliations '));
+    const affiliationsCount = createElement('span', {
+        className: 'x-blocker-tab-count',
+        id: 'modal-affiliations-count',
+        textContent: '0'
+    });
+    affiliationsTab.appendChild(affiliationsCount);
+
     const languagesTab = createElement('button', {
         className: 'x-blocker-tab',
         'data-tab': 'languages'
@@ -292,10 +316,11 @@ function createTabBar() {
     tabBar.appendChild(countriesTab);
     tabBar.appendChild(regionsTab);
     tabBar.appendChild(tagsTab);
+    tabBar.appendChild(affiliationsTab);
     tabBar.appendChild(languagesTab);
 
     // Update count function
-    const updateTabCounts = (countries, regions, tags, languages) => {
+    const updateTabCounts = (countries, regions, tags, languages, affiliations = 0) => {
         countriesCount.textContent = countries;
         countriesCount.style.display = countries > 0 ? 'inline-flex' : 'none';
         regionsCount.textContent = regions;
@@ -304,6 +329,8 @@ function createTabBar() {
         tagsCount.style.display = tags > 0 ? 'inline-flex' : 'none';
         languagesCount.textContent = languages;
         languagesCount.style.display = languages > 0 ? 'inline-flex' : 'none';
+        affiliationsCount.textContent = affiliations;
+        affiliationsCount.style.display = affiliations > 0 ? 'inline-flex' : 'none';
     };
 
     const switchTab = tab => {
@@ -524,6 +551,122 @@ function createLanguageBody(blockedLanguages, onAction) {
 /**
  * Create tag body with search, common tags, and custom tag input
  */
+/**
+ * Affiliations panel: block every account carrying an organisation's badge.
+ * Free text rather than a picker, because the set of organisations on X is open-ended.
+ * @param {Set<string>} blockedAffiliations
+ * @param {Function} onAction - (action, value) => response
+ * @returns {{body: HTMLElement, renderAffiliations: Function, searchInput: HTMLElement}}
+ */
+function createAffiliationBody(blockedAffiliations, onAction) {
+    const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'affiliations' });
+
+    const info = createElement('div', {
+        className: 'x-blocker-info',
+        textContent: 'Block every account affiliated with an organisation. Type the organisation’s name as plain text, not the badge icon. Part of the name is enough and it is not case sensitive. Hover an account’s info button to see the name to use.'
+    });
+
+    const inputSection = createElement('div', { className: 'x-blocker-tag-input-section' });
+
+    const affiliationInput = createElement('input', {
+        type: 'text',
+        className: 'x-blocker-search x-blocker-tag-input',
+        placeholder: 'Type an organisation name',
+        maxlength: '100'
+    });
+
+    const addBtn = createElement('button', {
+        className: 'x-blocker-btn x-blocker-btn-add',
+        textContent: '+ Add'
+    });
+
+    inputSection.appendChild(affiliationInput);
+    inputSection.appendChild(addBtn);
+
+    const blockedSection = createElement('div', { className: 'x-blocker-blocked-tags-section' });
+    const blockedLabel = createElement('div', {
+        className: 'x-blocker-section-label',
+        textContent: 'Blocked Affiliations'
+    });
+    const listContainer = createElement('div', { className: 'x-blocker-tags-list' });
+    blockedSection.appendChild(blockedLabel);
+    blockedSection.appendChild(listContainer);
+
+    body.appendChild(info);
+    body.appendChild(inputSection);
+    body.appendChild(blockedSection);
+
+    const syncLocal = data => {
+        localBlockedAffiliations.clear();
+        for (const value of data) {
+            localBlockedAffiliations.add(value);
+        }
+    };
+
+    const renderAffiliations = () => {
+        listContainer.replaceChildren();
+
+        if (!localBlockedAffiliations || localBlockedAffiliations.size === 0) {
+            listContainer.appendChild(createElement('div', {
+                className: 'x-blocker-empty',
+                textContent: 'No affiliations blocked yet. Add one above.'
+            }));
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        for (const affiliation of Array.from(localBlockedAffiliations).sort()) {
+            const item = createElement('div', { className: 'x-blocker-tag-item' });
+            item.appendChild(createElement('span', {
+                className: 'x-blocker-tag-text',
+                textContent: affiliation
+            }));
+
+            const removeBtn = createElement('button', {
+                className: 'x-blocker-tag-remove',
+                textContent: '×',
+                title: `Unblock ${affiliation}`
+            });
+            removeBtn.addEventListener('click', async () => {
+                if (!onAction) return;
+                const response = await onAction('remove', affiliation);
+                if (response?.success && response.data) {
+                    syncLocal(response.data);
+                    renderAffiliations();
+                    updateStats(localBlockedAffiliations.size, 'affiliations');
+                }
+            });
+
+            item.appendChild(removeBtn);
+            fragment.appendChild(item);
+        }
+        listContainer.appendChild(fragment);
+    };
+
+    const addAffiliation = async () => {
+        const value = affiliationInput.value.trim();
+        if (!value || !onAction) return;
+
+        const response = await onAction('add', value);
+        if (response?.success && response.data) {
+            syncLocal(response.data);
+            affiliationInput.value = '';
+            renderAffiliations();
+            updateStats(localBlockedAffiliations.size, 'affiliations');
+        }
+    };
+
+    addBtn.addEventListener('click', addAffiliation);
+    affiliationInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addAffiliation();
+        }
+    });
+
+    return { body, renderAffiliations, searchInput: affiliationInput };
+}
+
 function createTagBody(blockedTags, onAction) {
     const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'tags' });
 
@@ -1018,24 +1161,9 @@ function updateStats(count, type = 'countries') {
         if (type === 'countries') label = 'countries';
         else if (type === 'regions') label = 'regions';
         else if (type === 'languages') label = 'languages';
+        else if (type === 'affiliations') label = 'affiliations';
         else label = 'tags';
         stats.textContent = `${count} ${label} blocked`;
     }
 }
 
-/**
- * Hide modal
- */
-export function hideModal() {
-    if (currentModal) {
-        currentModal.remove();
-        currentModal = null;
-    }
-}
-
-/**
- * Check if modal is currently visible
- */
-export function isModalVisible() {
-    return currentModal !== null;
-}

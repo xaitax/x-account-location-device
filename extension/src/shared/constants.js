@@ -19,6 +19,7 @@ export const STORAGE_KEYS = {
     BLOCKED_REGIONS: 'x_blocked_regions',
     BLOCKED_TAGS: 'x_blocked_tags',
     BLOCKED_LANGUAGES: 'x_blocked_languages',
+    BLOCKED_AFFILIATIONS: 'x_blocked_affiliations',
     ALLOWED_USERS: 'x_allowed_users',
     SETTINGS: 'x_location_settings',
     HEADERS: 'x_api_headers',
@@ -91,7 +92,7 @@ export const TIMING = {
 // PERFORMANCE: Optimized save intervals
 export const CACHE_CONFIG = {
     EXPIRY_MS: 60 * 24 * 60 * 60 * 1000, // 60 days (location data rarely changes)
-    MAX_ENTRIES: 50000, // LRU cache limit (each entry is ~100-200 bytes)
+    MAX_ENTRIES: 50000, // LRU cache limit (~135 bytes persisted per entry, see toPersistedValue)
     SAVE_INTERVAL_MS: 60000 // Increased from 30s to reduce I/O overhead
 };
 
@@ -145,6 +146,8 @@ export const MESSAGE_TYPES = {
     SET_BLOCKED_TAGS: 'SET_BLOCKED_TAGS',
     GET_BLOCKED_LANGUAGES: 'GET_BLOCKED_LANGUAGES',
     SET_BLOCKED_LANGUAGES: 'SET_BLOCKED_LANGUAGES',
+    GET_BLOCKED_AFFILIATIONS: 'GET_BLOCKED_AFFILIATIONS',
+    SET_BLOCKED_AFFILIATIONS: 'SET_BLOCKED_AFFILIATIONS',
     GET_ALLOWED_USERS: 'GET_ALLOWED_USERS',
     SET_ALLOWED_USERS: 'SET_ALLOWED_USERS',
     GET_STATISTICS: 'GET_STATISTICS',
@@ -163,18 +166,19 @@ export const MESSAGE_TYPES = {
     SYNC_LOCAL_TO_CLOUD: 'SYNC_LOCAL_TO_CLOUD',
     
     // Background to content script
-    USER_INFO_RESULT: 'USER_INFO_RESULT',
     SETTINGS_UPDATED: 'SETTINGS_UPDATED',
     BLOCKED_COUNTRIES_UPDATED: 'BLOCKED_COUNTRIES_UPDATED',
     BLOCKED_REGIONS_UPDATED: 'BLOCKED_REGIONS_UPDATED',
     BLOCKED_TAGS_UPDATED: 'BLOCKED_TAGS_UPDATED',
     BLOCKED_LANGUAGES_UPDATED: 'BLOCKED_LANGUAGES_UPDATED',
+    BLOCKED_AFFILIATIONS_UPDATED: 'BLOCKED_AFFILIATIONS_UPDATED',
     ALLOWED_USERS_UPDATED: 'ALLOWED_USERS_UPDATED',
-    THEME_UPDATED: 'THEME_UPDATED',
+    THEME_UPDATED: 'THEME_UPDATED'
 
-    // Page script to content script (via custom events)
-    HEADERS_CAPTURED: 'X_HEADERS_CAPTURED',
-    API_REQUEST: 'X_API_REQUEST'
+    // NOTE: page script ↔ content script does NOT go through MESSAGE_TYPES. It uses
+    // CustomEvents named 'x-posed-headers-captured', 'x-posed-fetch-user-info' and
+    // 'x-posed-fetch-user-info-result', declared locally in page-script.js — the page
+    // script runs in the MAIN world and cannot import from here.
 };
 
 // Default settings
@@ -241,16 +245,89 @@ export const COUNTRY_FLAGS = {
     'ukraine': '🇺🇦', 'united arab emirates': '🇦🇪', 'uae': '🇦🇪', 'united kingdom': '🇬🇧', 'uk': '🇬🇧',
     'great britain': '🇬🇧', 'britain': '🇬🇧', 'united states': '🇺🇸', 'usa': '🇺🇸', 'us': '🇺🇸',
     'uruguay': '🇺🇾', 'uzbekistan': '🇺🇿', 'vanuatu': '🇻🇺', 'vatican city': '🇻🇦', 'venezuela': '🇻🇪',
-    'vietnam': '🇻🇳', 'viet nam': '🇻🇳', 'wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'yemen': '🇾🇪', 'zambia': '🇿🇲', 'zimbabwe': '🇿🇼'
+    'vietnam': '🇻🇳', 'viet nam': '🇻🇳', 'wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'yemen': '🇾🇪', 'zambia': '🇿🇲', 'zimbabwe': '🇿🇼',
+
+    // Territories, dependencies and overseas regions. X reports these as the account
+    // location in their own right, so without them the badge showed no flag and the
+    // country could not be blocked at all (reported for Réunion, Jersey, Gibraltar).
+    'aland islands': '🇦🇽', 'american samoa': '🇦🇸', 'anguilla': '🇦🇮', 'aruba': '🇦🇼', 'bermuda': '🇧🇲',
+    'british virgin islands': '🇻🇬', 'cayman islands': '🇰🇾', 'christmas island': '🇨🇽', 'cook islands': '🇨🇰', 'curaçao': '🇨🇼',
+    'curacao': '🇨🇼', 'falkland islands': '🇫🇰', 'faroe islands': '🇫🇴', 'french guiana': '🇬🇫', 'french polynesia': '🇵🇫',
+    'gibraltar': '🇬🇮', 'greenland': '🇬🇱', 'guadeloupe': '🇬🇵', 'guam': '🇬🇺', 'guernsey': '🇬🇬',
+    'isle of man': '🇮🇲', 'jersey': '🇯🇪', 'martinique': '🇲🇶', 'mayotte': '🇾🇹', 'montserrat': '🇲🇸',
+    'new caledonia': '🇳🇨', 'norfolk island': '🇳🇫', 'northern mariana islands': '🇲🇵', 'niue': '🇳🇺', 'réunion': '🇷🇪',
+    'reunion': '🇷🇪', 'saint barthelemy': '🇧🇱', 'saint helena': '🇸🇭', 'saint martin': '🇲🇫', 'saint pierre and miquelon': '🇵🇲',
+    'sint maarten': '🇸🇽', 'svalbard': '🇸🇯', 'tokelau': '🇹🇰', 'turks and caicos islands': '🇹🇨', 'us virgin islands': '🇻🇮',
+    'wallis and futuna': '🇼🇫', 'western sahara': '🇪🇭'
 };
+
+/**
+ * Alternative names X may report for a country, mapped to the single name the UI
+ * offers. Blocking compares exact strings, so without this a user who blocked
+ * "North Macedonia" was never matched against an account X reported as "Macedonia"
+ * (and the same for the UK/US/UAE aliases). Keys and values are lowercase.
+ */
+export const COUNTRY_ALIASES = {
+    'bosnia': 'bosnia and herzegovina',
+    'britain': 'united kingdom',
+    'burma': 'myanmar',
+    'czechia': 'czech republic',
+    'east timor': 'timor-leste',
+    'great britain': 'united kingdom',
+    'korea': 'south korea',
+    'macau': 'macao',
+    'macedonia': 'north macedonia',
+    'reunion': 'réunion',
+    'russian federation': 'russia',
+    'türkiye': 'turkey',
+    'uae': 'united arab emirates',
+    'uk': 'united kingdom',
+    'us': 'united states',
+    'usa': 'united states',
+    'viet nam': 'vietnam'
+};
+
+/**
+ * Fold a location X reported onto the canonical lowercase country name used by the
+ * blocked-country set and the UI. Unknown names pass through lowercased, so regions
+ * and countries we don't know are unaffected.
+ * @param {string|null|undefined} name
+ * @returns {string} canonical lowercase name, or '' when there is nothing to resolve
+ */
+/**
+ * Was this record actually inspected for an affiliation?
+ *
+ * SINGLE SOURCE OF TRUTH for the affiliation contract — the background, the content
+ * script and the cloud client all decide the same question and must not drift.
+ *
+ * The marker is the EXISTENCE of `affiliateUsername`, not its value. Both full parsers
+ * always emit it (null when the account has none); records written by older code paths,
+ * and the shared community-cache subset, omit it entirely. Absence therefore means
+ * "nobody has looked", which is different from "looked, found none" — collapsing the two
+ * is what makes an affiliation filter quietly under-block.
+ *
+ * Deliberately NOT keyed on restId: the in-page fallback used to emit restId without ever
+ * reading the affiliation, so those records would masquerade as confirmed-unaffiliated.
+ * @param {{affiliate?: object|null, affiliateUsername?: string|null}|null|undefined} meta
+ * @returns {boolean}
+ */
+export function affiliationWasChecked(meta) {
+    if (!meta) return false;
+    return meta.affiliateUsername !== undefined || !!meta.affiliate;
+}
+
+export function canonicalCountry(name) {
+    if (!name || typeof name !== 'string') return '';
+    const key = name.trim().toLowerCase();
+    if (key === '') return '';
+    return Object.hasOwn(COUNTRY_ALIASES, key) ? COUNTRY_ALIASES[key] : key;
+}
 
 // Get sorted country list for UI
 export const COUNTRY_LIST = Object.keys(COUNTRY_FLAGS)
-    .filter(name => {
-        // Remove duplicates (keep canonical names)
-        const duplicates = ['bosnia', 'czechia', 'macedonia', 'burma', 'macau', 'uk', 'usa', 'us', 'uae', 'britain', 'great britain'];
-        return !duplicates.includes(name);
-    })
+    // Show each country once, under the canonical name. Derived from COUNTRY_ALIASES so
+    // the picker and the block comparison can never disagree about which name wins.
+    .filter(name => !Object.hasOwn(COUNTRY_ALIASES, name))
     .sort();
 
 // Region display names (for UI) with geographic globe emojis
@@ -260,7 +337,9 @@ export const COUNTRY_LIST = Object.keys(COUNTRY_FLAGS)
 export const REGION_DATA = [
     { name: 'Africa', key: 'africa', flag: '🌍' },
     { name: 'Australasia', key: 'australasia', flag: '🌏' },
+    { name: 'East Asia', key: 'east asia', flag: '🌏' },
     { name: 'East Asia & Pacific', key: 'east asia & pacific', flag: '🌏' },
+    { name: 'Eastern Europe (Non-EU)', key: 'eastern europe (non-eu)', flag: '🌍' },
     { name: 'Europe', key: 'europe', flag: '🌍' },
     { name: 'North Africa', key: 'north africa', flag: '🌍' },
     { name: 'North America', key: 'north america', flag: '🌎' },

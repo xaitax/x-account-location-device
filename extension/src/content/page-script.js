@@ -76,6 +76,29 @@
         const user = data?.data?.user_result_by_screen_name?.result;
         const profile = user?.about_profile;
 
+        // MUST stay in sync with parseAboutAccount in background/api-client.js. This is the
+        // in-page fallback used when the background can't authenticate, so anything missing
+        // here silently becomes missing everywhere. In particular the affiliation must be
+        // parsed: restId is the marker meaning "affiliation was checked", so emitting
+        // restId without an affiliate would cache the account as confirmed-unaffiliated.
+        const label = user?.affiliates_highlighted_label?.label ||
+            user?.identity_profile_labels_highlighted_label?.label || null;
+        const affiliate = label?.description ? {
+            name: label.description,
+            badgeUrl: label?.badge?.url || null,
+            url: label?.url?.url || null,
+            type: label?.userLabelType || label?.userLabelDisplayType || null
+        } : null;
+
+        let usernameChanges = null;
+        const rawChanges = profile?.username_changes?.count;
+        if (rawChanges !== null && rawChanges !== undefined) {
+            const parsed = Number.parseInt(String(rawChanges), 10);
+            if (!Number.isNaN(parsed)) {
+                usernameChanges = parsed;
+            }
+        }
+
         return {
             location: profile?.account_based_in || null,
             device: profile?.source || null,
@@ -84,7 +107,10 @@
                 name: user?.core?.name || null,
                 avatarUrl: user?.avatar?.image_url || null,
                 createdAt: user?.core?.created_at || null,
-                restId: user?.rest_id || null
+                restId: user?.rest_id || null,
+                affiliateUsername: profile?.affiliate_username || null,
+                affiliate,
+                usernameChanges
             }
         };
     }

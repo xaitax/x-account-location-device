@@ -699,7 +699,7 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
 /**
  * Show the country/region blocker modal
  */
-function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
+async function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
     // Country action handler
     const onCountryAction = async (action, country) => {
         const response = await sendMessage({
@@ -741,6 +741,20 @@ function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE
     const blockedTags = new Set(state.blockedTags || []);
     const blockedLanguages = new Set(state.blockedLanguages || []);
 
+    // Read affiliations straight from the background rather than the content script's
+    // snapshot. The snapshot is only as fresh as the last broadcast this tab received, so
+    // a tab that missed one would open the modal showing an empty list while Settings
+    // shows entries. Falls back to the snapshot if the message fails.
+    let blockedAffiliations = new Set(state.blockedAffiliations || []);
+    try {
+        const affiliationsResponse = await sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS });
+        if (affiliationsResponse?.success && Array.isArray(affiliationsResponse.data)) {
+            blockedAffiliations = new Set(affiliationsResponse.data);
+        }
+    } catch {
+        // Keep the snapshot value — the modal still opens, just possibly stale.
+    }
+
     // Tag action handler
     const onTagAction = async (action, tag) => {
         const response = await sendMessage({
@@ -775,7 +789,24 @@ function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE
         return response;
     };
 
-    showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags, onTagAction, blockedLanguages, onLanguageAction);
+    // Affiliation action handler
+    const onAffiliationAction = async (action, affiliation) => {
+        const response = await sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
+            payload: { action, affiliation }
+        });
+
+        if (response?.success) {
+            blockedAffiliations.clear();
+            for (const a of response.data) {
+                blockedAffiliations.add(a);
+            }
+        }
+
+        return response;
+    };
+
+    showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags, onTagAction, blockedLanguages, onLanguageAction, blockedAffiliations, onAffiliationAction);
 }
 
 // ============================================

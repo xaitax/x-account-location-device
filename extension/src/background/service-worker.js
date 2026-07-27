@@ -9,8 +9,8 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING } from '../shared/constants.js';
-import { userCache, blockedCountries, blockedRegions, blockedTags, blockedLanguages, allowedUsers, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, affiliationWasChecked } from '../shared/constants.js';
+import { userCache, blockedCountries, blockedRegions, blockedTags, blockedLanguages, blockedAffiliations, allowedUsers, settings, headersStorage, initializeStorage } from '../shared/storage.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
 import cloudCache from './cloud-cache.js';
@@ -114,6 +114,12 @@ async function handleMessage(message, _sender) {
             case MESSAGE_TYPES.SET_BLOCKED_LANGUAGES:
                 return await handleSetBlockedLanguages(payload);
 
+            case MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS:
+                return handleGetBlockedAffiliations();
+
+            case MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS:
+                return await handleSetBlockedAffiliations(payload);
+
             case MESSAGE_TYPES.GET_ALLOWED_USERS:
                 return handleGetAllowedUsers();
 
@@ -201,6 +207,38 @@ function cacheNotFound(screenName) {
 }
 
 /**
+ * Should a cached entry be refetched from X because we can't tell whether the account
+ * has an affiliation?
+ *
+ * The community cache only started carrying affiliations in Worker v2.8.0, so a missing
+ * `af` is ambiguous: it can mean "this account has no affiliation" or "nobody has looked
+ * yet". Treating the second case as the first makes the affiliation filter quietly
+ * under-block, which is worse than not offering it.
+ *
+ * CONTRACT: the `affiliateUsername` KEY is the marker for "affiliation was parsed". Both
+ * full parsers always emit it (null when the account has none), while records written by
+ * older code paths omit it entirely. Its mere presence — not its value — is what proves
+ * the account was actually inspected.
+ *
+ * Deliberately NOT keyed on restId: the in-page fallback used to emit restId without ever
+ * looking at affiliation, so those records would masquerade as confirmed-unaffiliated and
+ * never be re-checked.
+ *
+ * IMPORTANT: a true answer only ever authorises a CLOUD re-check, never an X API call.
+ * Affiliation reaches the cloud when someone opens an account's info hovercard, which
+ * already performs a full fetch — so coverage grows without anyone spending extra API
+ * calls, and turning this filter on can never re-resolve a whole timeline.
+ * @param {{meta?: {affiliate?: object|null, affiliateUsername?: string|null}}|null|undefined} data
+ * @returns {boolean}
+ */
+function wantsRicherRecord(data) {
+    // Not filtering on affiliation → the missing field is irrelevant, never spend a lookup.
+    if (blockedAffiliations.size === 0) return false;
+
+    return !affiliationWasChecked(data?.meta);
+}
+
+/**
  * In-flight dedup for concurrent FETCH_USER_INFO messages: the observer fires one per
  * visible username, so the same author across several on-screen tweets would otherwise
  * each run the whole local→cloud→API pipeline (and each wait on the cloud batch).
@@ -241,15 +279,21 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
     }
 
     // 1. Check local cache first
+    let localEntry = null;
     if (userCache.has(screenName)) {
-        const cached = userCache.get(screenName);
-        if (debug23) console.log(`[xposed#23] @${screenName} source=local loc=${cached?.location}`);
-        return {
-            success: true,
-            data: cached,
-            cached: true,
-            source: 'local'
-        };
+        localEntry = userCache.get(screenName);
+        if (!wantsRicherRecord(localEntry)) {
+            if (debug23) console.log(`[xposed#23] @${screenName} source=local loc=${localEntry?.location}`);
+            return {
+                success: true,
+                data: localEntry,
+                cached: true,
+                source: 'local'
+            };
+        }
+        // We're filtering by affiliation and this record predates affiliation support.
+        // Fall through to the CLOUD only — someone may have hovered this account since,
+        // which contributes the full record. We never escalate to the X API for this.
     }
 
     // 2. Check cloud cache if enabled
@@ -258,16 +302,22 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
             const cloudResults = await cloudCache.lookup([screenName]);
             if (cloudResults.has(screenName.toLowerCase())) {
                 const cloudData = cloudResults.get(screenName.toLowerCase());
+
+                // Keep whichever record actually knows about affiliation. Without this a
+                // lean cloud entry could overwrite a richer local one we already had.
+                const cloudIsRicher = !wantsRicherRecord(cloudData);
+                const best = (cloudIsRicher || !localEntry) ? cloudData : localEntry;
+
                 if (debug23) console.log(`[xposed#23] @${screenName} source=cloud loc=${cloudData?.location} ageMs=${Date.now() - (cloudData?.timestamp || 0)}`);
 
                 // Store in local cache for future use
-                userCache.set(screenName, cloudData);
-                
+                userCache.set(screenName, best);
+
                 return {
                     success: true,
-                    data: cloudData,
+                    data: best,
                     cached: true,
-                    source: 'cloud'
+                    source: best === cloudData ? 'cloud' : 'local'
                 };
             }
         } catch (error) {
@@ -276,7 +326,21 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
         }
     }
 
-    // 3. Fetch from X API
+    // 2b. We already had a usable record and only came this far hoping the cloud had a
+    // richer one. It didn't, so serve what we have. Spending an X API call purely to
+    // learn an affiliation is what would re-resolve an entire timeline and burn the
+    // rate limit — the hovercard is the path that enriches these records instead.
+    if (localEntry) {
+        if (debug23) console.log(`[xposed#23] @${screenName} source=local (no richer cloud record)`);
+        return {
+            success: true,
+            data: localEntry,
+            cached: true,
+            source: 'local'
+        };
+    }
+
+    // 3. Fetch from X API (genuine cache miss only)
     try {
         const data = await apiClient.fetchUserInfo(screenName, csrfToken);
         if (debug23) console.log(`[xposed#23] @${screenName} source=api loc=${data?.location}`);
@@ -332,15 +396,15 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
  * hovercard if auth fails.
  */
 async function handleFetchHovercardInfo({ screenName, csrfToken }) {
-    // Serve a cached entry first — but ONLY if it carries the rich hovercard `meta`
-    // (i.e. it came from a live X API fetch). Cloud-sourced entries hold just
-    // location/device/locationAccurate and no meta, so we let those fall through to a
-    // live fetch to enrich the card. This still avoids a fresh 401 for API-sourced
-    // (meta-bearing) known users — the issue #14 goal — without permanently degrading
-    // hovercards for cloud-sourced users.
+    // Serve a cached entry first — but ONLY if it carries the FULL hovercard `meta`
+    // (i.e. it came from a live X API fetch). Cloud-sourced entries carry just the
+    // shared subset and are flagged `meta.partial`, so they fall through to a live
+    // fetch that fills in the display name, avatar and verification state. This still
+    // avoids a fresh 401 for API-sourced known users — the issue #14 goal — without
+    // rendering a half-empty card for cloud-sourced ones.
     if (userCache.has(screenName)) {
         const cached = userCache.get(screenName);
-        if (cached && cached.meta) {
+        if (cached && cached.meta && !cached.meta.partial) {
             return { success: true, data: cached, source: 'local' };
         }
     }
@@ -351,7 +415,10 @@ async function handleFetchHovercardInfo({ screenName, csrfToken }) {
         // Persist enriched response locally to speed up future hovers
         userCache.set(screenName, data);
 
-        // Contribute (location/device only) to cloud cache if enabled
+        // Contribute to the cloud. This is the hovercard path, so `data` is the full
+        // record — location/device plus affiliation, account age, id and handle-change
+        // count. Opening a hovercard is therefore how affiliation coverage grows for
+        // everyone, without any lookup ever costing an extra X API call.
         if (cloudCache.isEnabled() && cloudCache.isConfigured()) {
             cloudCache.contribute(screenName, data);
         }
@@ -594,6 +661,28 @@ function handleGetBlockedLanguages() {
 /**
  * Set blocked languages handler
  */
+async function handleSetBlockedAffiliations({ action, affiliation, affiliations }) {
+    return handleSetBlockedSet(blockedAffiliations, MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED, {
+        action,
+        value: affiliation,
+        values: affiliations
+    });
+}
+
+/**
+ * Get blocked affiliations handler
+ */
+function handleGetBlockedAffiliations() {
+    return {
+        success: true,
+        data: blockedAffiliations.getAll(),
+        size: blockedAffiliations.size
+    };
+}
+
+/**
+ * Set blocked languages handler
+ */
 async function handleSetBlockedLanguages({ action, language, languages }) {
     return handleSetBlockedSet(blockedLanguages, MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, {
         action,
@@ -823,7 +912,7 @@ async function handleSyncLocalToCloud() {
 /**
  * Import data handler - imports settings, blocked countries, blocked regions, and cache from exported JSON
  */
-async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedLanguages: importBlockedLanguages, allowedUsers: importAllowedUsers, cache: importCache }) {
+async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedLanguages: importBlockedLanguages, blockedAffiliations: importBlockedAffiliations, allowedUsers: importAllowedUsers, cache: importCache }) {
     const results = {
         settings: false,
         blockedCountries: { count: 0 },
@@ -865,6 +954,12 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             results.blockedLanguages.count = importBlockedLanguages.length;
         }
 
+        // Import blocked affiliations if provided (one mutation + one write)
+        if (Array.isArray(importBlockedAffiliations)) {
+            await blockedAffiliations.setAll(importBlockedAffiliations);
+            results.blockedAffiliations.count = importBlockedAffiliations.length;
+        }
+
         // Import allowlisted ("always show") accounts if provided (one mutation + one write)
         if (Array.isArray(importAllowedUsers)) {
             await allowedUsers.setAll(importAllowedUsers);
@@ -888,6 +983,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, payload: blockedRegions.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_TAGS_UPDATED, payload: blockedTags.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, payload: blockedLanguages.getAll() }),
+            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED, payload: blockedAffiliations.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.ALLOWED_USERS_UPDATED, payload: allowedUsers.getAll() })
         ]);
 
@@ -898,6 +994,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             importedBlockedRegions: results.blockedRegions.count,
             importedBlockedTags: results.blockedTags.count,
             importedBlockedLanguages: results.blockedLanguages.count,
+            importedBlockedAffiliations: results.blockedAffiliations.count,
             importedAllowedUsers: results.allowedUsers.count,
             importedCache: results.cache.count
         };
@@ -910,6 +1007,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             importedBlockedRegions: results.blockedRegions.count,
             importedBlockedTags: results.blockedTags.count,
             importedBlockedLanguages: results.blockedLanguages.count,
+            importedBlockedAffiliations: results.blockedAffiliations.count,
             importedAllowedUsers: results.allowedUsers.count,
             importedCache: results.cache.count
         };

@@ -3,7 +3,7 @@
  * Handles DOM observation, user processing, and caching
  */
 
-import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING } from '../shared/constants.js';
+import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, canonicalCountry } from '../shared/constants.js';
 import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
@@ -42,12 +42,36 @@ function effectiveCountry(info, flagFromDevice) {
  * re-derive pass (runUpdateBlockedTweets) so the two can never disagree about a row.
  * @param {HTMLElement} element
  * @param {HTMLElement|null} tweet
- * @param {{isListBlocked: boolean, isVpnHidden: boolean, highlightMode: boolean}} state
+ * @param {{isListBlocked: boolean, isVpnHidden: boolean, highlightMode: boolean, isQuote?: boolean, neverHide?: boolean}} state
  * @returns {{hide: boolean, highlight: boolean}}
  */
-function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode }) {
-    const hide = isVpnHidden || (isListBlocked && !highlightMode);
-    const highlight = !hide && isListBlocked && highlightMode;
+function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode, isQuote = false, neverHide = false }) {
+    // A quoted author lives INSIDE someone else's tweet, so it must never decide the
+    // fate of the row (issue #32) — the article-level `:has([data-x-block="hide"])`
+    // rule can't tell a quoted marker from the main author's. Mark the quoted username
+    // element in its own namespace instead and let CSS collapse only the quote card.
+    if (isQuote) {
+        const quoteHighlight = isListBlocked && highlightMode;
+        // Never re-collapse a card the reader explicitly revealed (see setupQuoteReveal).
+        // Element recycling deletes the marker, so a reused row can't inherit 'shown'.
+        if (element.dataset.xQuoteBlock !== 'shown') {
+            element.dataset.xQuoteBlock = isListBlocked
+                ? (highlightMode ? 'highlight' : 'hide')
+                : '';
+        }
+        // Always report hide:false: the row stays, and the badge is still built so it's
+        // already in place inside the card when the reader reveals it.
+        return { hide: false, highlight: quoteHighlight };
+    }
+
+    // People lists (Followers, Verified followers, Following) only ever FLAG a row.
+    // Removing someone from your own follower list hides the very information you opened
+    // the page to read, and leaves the count looking wrong. So there every reason to block
+    // — including VPN-hide, which is otherwise a hard filter — degrades to a highlight.
+    const hide = !neverHide && (isVpnHidden || (isListBlocked && !highlightMode));
+    const highlight = !hide && (neverHide
+        ? (isListBlocked || isVpnHidden)
+        : (isListBlocked && highlightMode));
 
     if (tweet) {
         tweet.classList.toggle(CSS_CLASSES.TWEET_BLOCKED, hide);
@@ -78,7 +102,7 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
  * @param {string|null} [opts.csrfToken]
  */
 function applyInfoToElement(element, screenName, info, opts) {
-    const { blockedCountries, blockedRegions, allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
+    const { blockedCountries, blockedRegions, blockedAffiliations, allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
@@ -90,21 +114,30 @@ function applyInfoToElement(element, screenName, info, opts) {
     const isExempt = isSelf || (allowedUsers && allowedUsers.has(screenName.toLowerCase()));
 
     // Resolve the full block decision from every reason at once, then apply it in one
-    // authoritative pass (set what applies, clear what doesn't). Country/region/tag only
-    // block the MAIN author, not a quoted user; VPN-hide is a hard filter.
-    const locationLower = effCountry ? effCountry.toLowerCase() : '';
+    // authoritative pass (set what applies, clear what doesn't).
+    // Fold aliases ("Macedonia" → "north macedonia") so a location X words differently
+    // than the picker still matches the blocked set.
+    const locationLower = canonicalCountry(effCountry);
     const isQuote = isInsideQuoteTweet(element, tweet);
-    const isListBlocked =
+    // Who-they-are filters (country/region/tag) apply to quoted authors too — they just
+    // collapse the quote card instead of the row (issue #32).
+    const affiliationBlocked = hasBlockedAffiliation(info.meta, blockedAffiliations);
+    const matchesBlockList =
         ((locationLower !== '' &&
             (blockedCountries.has(locationLower) || (blockedRegions && blockedRegions.has(locationLower)))) ||
-            tagBlocked) &&
-        !isQuote && !isExempt;
-    const isVpnHidden = info.locationAccurate === false && settings.showVpnUsers === false && !isExempt;
+            tagBlocked || affiliationBlocked) &&
+        !isExempt;
+    // VPN-hide is a hard filter, but only for the MAIN author: a quoted account being
+    // flagged as proxied must never hide the quoting user's own post.
+    const isVpnHidden =
+        !isQuote && info.locationAccurate === false && settings.showVpnUsers === false && !isExempt;
 
     const { hide } = applyBlockState(element, tweet, {
-        isListBlocked,
+        isListBlocked: matchesBlockList,
         isVpnHidden,
-        highlightMode: settings.highlightBlockedTweets === true
+        highlightMode: settings.highlightBlockedTweets === true,
+        isQuote,
+        neverHide: isUserCell
     });
 
     if (hide) return; // hidden row → don't build a badge
@@ -366,6 +399,35 @@ function extractTextWithEmojis(element) {
  * @param {Set} blockedTags - Set of blocked tags
  * @returns {boolean} - True if any blocked tag is found
  */
+/**
+ * Does an account's affiliation label match the blocked set? X exposes the parent
+ * organisation on affiliated accounts as a badge next to the display name, which
+ * we already read from the API and now also share via the community cache.
+ *
+ * Matching is case-insensitive substring in both directions, mirroring blocked tags: it
+ * lets someone type part of an organisation name and catch it without knowing the exact label.
+ * @param {{affiliate?: {name?: string}|null, affiliateUsername?: string|null}|null|undefined} meta
+ * @param {Set<string>} blockedAffiliations - lowercase blocked affiliation names
+ * @returns {boolean}
+ */
+function hasBlockedAffiliation(meta, blockedAffiliations) {
+    if (!meta || !blockedAffiliations || blockedAffiliations.size === 0) return false;
+
+    const candidates = [];
+    if (meta.affiliate && meta.affiliate.name) candidates.push(String(meta.affiliate.name).toLowerCase());
+    if (meta.affiliateUsername) candidates.push(String(meta.affiliateUsername).toLowerCase());
+    if (candidates.length === 0) return false;
+
+    for (const blocked of blockedAffiliations) {
+        const needle = blocked.toLowerCase().trim();
+        if (!needle) continue;
+        for (const candidate of candidates) {
+            if (candidate.includes(needle) || needle.includes(candidate)) return true;
+        }
+    }
+    return false;
+}
+
 function hasBlockedTag(displayName, blockedTags) {
     if (!displayName || !blockedTags || blockedTags.size === 0) return false;
     
@@ -637,6 +699,7 @@ export async function processElement(element, {
     blockedRegions,
     blockedTags,
     blockedLanguages,
+    blockedAffiliations,
     allowedUsers,
     settings,
     csrfToken,
@@ -682,6 +745,7 @@ export async function processElement(element, {
             delete element.dataset.xScreenName;
             delete element.dataset.xCountry;
             delete element.dataset.xBlock;
+            delete element.dataset.xQuoteBlock;
         }
     }
     
@@ -723,11 +787,14 @@ export async function processElement(element, {
             // Allowlisted accounts are never blocked, even by a display-name tag (issue #26).
             const isExempt = isSelf || (allowedUsers && allowedUsers.has(screenName.toLowerCase()));
 
-            if (!isQuote && !isExempt) {
+            if (!isExempt) {
                 tagBlocked = true;
                 if (debug) debug(`Blocked @${screenName} due to tag in display name: "${displayName}"`);
 
-                if (tweet && settings.highlightBlockedTweets !== true) {
+                // Only the MAIN author's tag can hide the whole row, so only that case
+                // can short-circuit here. A quoted author's tag collapses just the quote
+                // card, which applyInfoToElement resolves alongside country/region (#32).
+                if (!isQuote && tweet && settings.highlightBlockedTweets !== true) {
                     applyBlockState(element, tweet, { isListBlocked: true, isVpnHidden: false, highlightMode: false });
                     return;
                 }
@@ -739,6 +806,7 @@ export async function processElement(element, {
     const applyOpts = {
         blockedCountries,
         blockedRegions,
+        blockedAffiliations,
         allowedUsers,
         settings,
         isUserCell,
@@ -934,8 +1002,8 @@ let pendingBlockedTweetsArgs = null;
  * @param {Set} blockedTags - Set of blocked tags (lowercase)
  * @param {Object} settings - Settings object with highlightBlockedTweets flag
  */
-export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null) {
-    pendingBlockedTweetsArgs = { blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers };
+export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null, blockedAffiliations = null) {
+    pendingBlockedTweetsArgs = { blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations };
     if (pendingBlockedTweetsUpdate !== null) return;
 
     pendingBlockedTweetsUpdate = requestAnimationFrame(() => {
@@ -943,7 +1011,7 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
         const args = pendingBlockedTweetsArgs;
         pendingBlockedTweetsArgs = null;
         if (args) {
-            runUpdateBlockedTweets(args.blockedCountries, args.blockedRegions, args.blockedTags, args.settings, args.blockedLanguages, args.allowedUsers);
+            runUpdateBlockedTweets(args.blockedCountries, args.blockedRegions, args.blockedTags, args.settings, args.blockedLanguages, args.allowedUsers, args.blockedAffiliations);
         }
     });
 }
@@ -951,14 +1019,18 @@ export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTag
 /**
  * Perform the actual single-pass tweet visibility update. See updateBlockedTweets.
  */
-function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null) {
+function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null, blockedAffiliations = null) {
     const highlightMode = settings.highlightBlockedTweets === true;
     const hasTags = blockedTags && blockedTags.size > 0;
     const loggedInUser = getLoggedInUsername();
 
     document.querySelectorAll('[data-x-screen-name]').forEach(element => {
         const tweet = element.closest(SELECTORS.TWEET);
-        if (!tweet) return;
+        // People-list rows have no enclosing tweet, but they still need re-deriving when a
+        // filter changes — otherwise adding a country would flag nothing on Followers /
+        // Following until a reload.
+        const isUserCell = !tweet && !!element.matches && element.matches(SELECTORS.USER_CELL);
+        if (!tweet && !isUserCell) return;
 
         const screenName = element.dataset.xScreenName;
         const isSelf = !!loggedInUser && !!screenName && screenName.toLowerCase() === loggedInUser.toLowerCase();
@@ -966,7 +1038,7 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
         const isExempt = isSelf || (!!screenName && !!allowedUsers && allowedUsers.has(screenName.toLowerCase()));
         const isQuote = isInsideQuoteTweet(element, tweet);
 
-        const locationLower = element.dataset.xCountry ? element.dataset.xCountry.toLowerCase() : '';
+        const locationLower = canonicalCountry(element.dataset.xCountry);
         const isBlockedCountry = locationLower !== '' && blockedCountries.has(locationLower);
         const isBlockedRegion = locationLower !== '' && blockedRegions && blockedRegions.has(locationLower);
 
@@ -976,15 +1048,30 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
         // trust a cached flag, a recycled row can't inherit a previous occupant's block.
         const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
 
-        const isListBlocked = (isBlockedCountry || isBlockedRegion || isTagBlocked) && !isQuote && !isExempt;
+        // Affiliation lives on the cached info, keyed by name, like locationAccurate below.
+        const cachedInfo = screenName ? userInfoCache.get(screenName) : null;
+        const isAffiliationBlocked = hasBlockedAffiliation(cachedInfo?.meta, blockedAffiliations);
+
+        // Who-they-are filters apply to quoted authors too; applyBlockState routes a
+        // quoted verdict to the card-only marker instead of the row (issue #32).
+        const matchesBlockList =
+            (isBlockedCountry || isBlockedRegion || isTagBlocked || isAffiliationBlocked) && !isExempt;
 
         // VPN-hide is a setting, not a blocked-list entry, so it isn't what changed here —
         // but we must still honor it, or a blocked-list edit would wrongly un-hide a VPN
         // row in highlight mode. locationAccurate lives on the cached info, keyed by name.
+        // Never for a quoted author: that would hide the quoting user's own post.
         const info = screenName ? userInfoCache.get(screenName) : null;
-        const isVpnHidden = !!info && info.locationAccurate === false && settings.showVpnUsers === false && !isExempt;
+        const isVpnHidden = !isQuote && !!info && info.locationAccurate === false &&
+            settings.showVpnUsers === false && !isExempt;
 
-        const { hide } = applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode });
+        const { hide } = applyBlockState(element, tweet, {
+            isListBlocked: matchesBlockList,
+            isVpnHidden,
+            highlightMode,
+            isQuote,
+            neverHide: isUserCell
+        });
 
         const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
         if (badge) badge.style.display = hide ? 'none' : '';
@@ -998,6 +1085,48 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
     document.querySelectorAll(SELECTORS.TWEET).forEach(tweet => {
         applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
     });
+}
+
+// ============================================
+// QUOTE REVEAL (issue #32)
+// ============================================
+
+/** Quote cards are clickable containers — see isInsideQuoteTweet. */
+const QUOTE_CARD_SELECTOR = 'div[role="link"][tabindex="0"]';
+
+let quoteRevealBound = false;
+
+/**
+ * Let the reader open a collapsed quote card ("click to show"). Delegated on document
+ * in the CAPTURE phase so we run before X's own card handler and can stop it from
+ * navigating to the quoted post. Nothing is injected into the DOM, so X re-rendering
+ * a row can't break this — the reveal is just a marker flip that CSS reacts to.
+ * Idempotent: safe to call more than once.
+ */
+export function setupQuoteReveal() {
+    if (quoteRevealBound) return;
+    quoteRevealBound = true;
+
+    const reveal = event => {
+        const target = event.target;
+        if (!target || typeof target.closest !== 'function') return;
+
+        const card = target.closest(QUOTE_CARD_SELECTOR);
+        if (!card) return;
+
+        const marker = card.querySelector('[data-x-quote-block="hide"]');
+        if (!marker) return;
+
+        // Swallow the interaction before X navigates to the quoted post.
+        event.preventDefault();
+        event.stopPropagation();
+        marker.dataset.xQuoteBlock = 'shown';
+    };
+
+    document.addEventListener('click', reveal, true);
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') reveal(event);
+    }, true);
 }
 
 // ============================================

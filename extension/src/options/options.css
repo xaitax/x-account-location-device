@@ -572,21 +572,34 @@ body {
 }
 
 .blocked-tab {
-    flex: 1;
-    padding: 12px 16px;
+    /* Five tabs (Countries/Regions/Tags/Affiliations/Languages) have to share one row,
+       so allow shrinking below content width and keep the padding tight. */
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 12px 8px;
     background: none;
     border: none;
     border-bottom: 3px solid transparent;
     color: var(--xp-text-dim);
     font-family: var(--xp-font-ui);
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+/* The label is the part that may ellipsize; the icon and count stay put. */
+.blocked-tab > svg {
+    flex: 0 0 auto;
+}
+.blocked-tab .blocked-count {
+    flex: 0 0 auto;
 }
 
 .blocked-tab:hover {
@@ -1423,8 +1436,39 @@ body {
     text-align: center;
 }
 
+.whats-new-cta {
+    /* Sits above the feature list, so the spacing is below it. */
+    margin-bottom: 20px;
+    line-height: 1.55;
+}
+
+.whats-new-cta p {
+    margin: 0;
+}
+
 .whats-new-cta strong {
     color: var(--xp-accent);
+}
+
+.whats-new-coffee {
+    /* Its own line, centred under the message rather than trailing the text. */
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 14px;
+    padding: 8px 16px;
+    border-radius: var(--xp-r-pill);
+    background: var(--xp-accent);
+    color: var(--xp-on-accent);
+    font-size: 13.5px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: transform 0.15s var(--xp-ease), filter 0.15s var(--xp-ease);
+}
+
+.whats-new-coffee:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
 }
 
 /* Responsive: collapse the left nav above the content on narrow widths */

@@ -563,7 +563,3 @@ class HovercardController {
 }
 
 export const hovercard = new HovercardController();
-
-// For CSS targeting (keeps the feature isolated)
-export const HOVERCARD_CARD_ID = CARD_ID;
-export const HOVERCARD_BADGE_CLASS = CSS_CLASSES?.INFO_BADGE || 'x-info-badge';

@@ -34,11 +34,17 @@ The extension includes an **optional** Community Cloud Cache feature that is **d
 
 Only anonymous, non-personal data is transmitted:
 
+Every field below is already public on the account's own X profile.
+
 | Field | Description | Example |
 |-------|-------------|---------|
 | Username | Public X handle | `@xaitax` |
 | Location | Country from X's API | `United States` |
 | Device | Platform type | `Android`, `iOS`, `Web` |
+| Affiliation | Parent organisation shown on the account's badge, when it has one | the organisation's public name |
+| Account created | Account creation date | Unix timestamp |
+| Account ID | X's numeric account ID | `44196397` |
+| Handle changes | How many times the username has changed | `0` |
 | Timestamp | When data was cached | Unix timestamp |
 
 #### **What is NOT shared**
@@ -59,7 +65,7 @@ Only anonymous, non-personal data is transmitted:
 
 #### **Data retention**
 
-* Cloud cache entries expire after **14 days**
+* Cloud cache entries expire after **60 days**
 * Data can be deleted by the cloud server operator at any time
 * Users can disable cloud cache at any time in the Options page
 

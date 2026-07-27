@@ -8,9 +8,28 @@
  * - Mark cloud hits as "recently contributed" to avoid re-uploads
  */
 
-import { STORAGE_KEYS, CLOUD_CACHE_CONFIG } from '../shared/constants.js';
+import { STORAGE_KEYS, CLOUD_CACHE_CONFIG, affiliationWasChecked } from '../shared/constants.js';
 import browserAPI from '../shared/browser-api.js';
 import { debounce } from '../shared/utils.js';
+
+// Twitter launched in 2006; anything earlier is bad data, not an old account.
+const MIN_CREATED_AT_SECONDS = 1136073600;
+
+/**
+ * X's created_at ("Tue Jun 02 20:12:29 +0000 2009") to unix SECONDS, which is the unit
+ * the Worker stores. Returns 0 for anything unparseable or outside a sane range, so a
+ * bad value is simply never contributed.
+ * @param {string|number|null|undefined} value
+ * @returns {number} unix seconds, or 0
+ */
+function toUnixSeconds(value) {
+    if (value === null || value === undefined) return 0;
+    const ms = typeof value === 'number' ? value : Date.parse(value);
+    if (!Number.isFinite(ms)) return 0;
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < MIN_CREATED_AT_SECONDS || seconds > Math.floor(Date.now() / 1000)) return 0;
+    return seconds;
+}
 
 class CloudCacheClient {
     constructor() {
@@ -380,17 +399,54 @@ class CloudCacheClient {
 
                         const normalizedUsername = username.toLowerCase();
                         this.stats.hits++;
-                        results.set(normalizedUsername, {
+
+                        const cloudEntry = {
                             location: sanitizedLocation,
                             device: sanitizedDevice,
                             locationAccurate: info.a !== false,
                             fromCloud: true,
                             timestamp: info.t * 1000 // Convert seconds to ms
-                        });
+                        };
 
-                        // COST OPTIMIZATION: Mark as recently contributed
-                        // so we don't re-upload data that's already in cloud
-                        this.recentContributions.set(normalizedUsername, now);
+                        // Optional shared profile signals (Worker v2.8.0). Mapped into the
+                        // same `meta` shape the X API path produces, so every consumer
+                        // downstream reads one format regardless of where the data came from.
+                        const affiliation = this.sanitizeInput(info.af);
+                        const restId = typeof info.id === 'string' && /^[0-9]{1,20}$/.test(info.id)
+                            ? info.id
+                            : null;
+                        const createdAtMs = Number.isInteger(info.c) && info.c > 0 ? info.c * 1000 : null;
+                        const usernameChanges = Number.isInteger(info.uc) && info.uc >= 0 ? info.uc : null;
+
+                        if (affiliation || restId || createdAtMs || usernameChanges !== null) {
+                            cloudEntry.meta = {
+                                // The community cache carries only the shared subset, not
+                                // the display name, avatar or verification state. Flagged
+                                // so the hovercard still does a live fetch instead of
+                                // rendering a card with half its fields blank.
+                                partial: true,
+                                affiliate: affiliation ? { name: affiliation } : null,
+                                affiliateUsername: null,
+                                restId,
+                                createdAt: createdAtMs ? new Date(createdAtMs).toISOString() : null,
+                                usernameChanges
+                            };
+                        }
+
+                        results.set(normalizedUsername, cloudEntry);
+
+                        // COST OPTIMIZATION: Mark as recently contributed so we don't
+                        // re-upload data the cloud already has.
+                        //
+                        // Deliberately NOT for lean entries. Records written before the
+                        // cloud carried affiliation have no `meta`, and suppressing their
+                        // contribution would mean a later hovercard fetch — the one path
+                        // that resolves affiliation without an extra API call — is dropped
+                        // on the floor, leaving those entries lean forever. Re-uploading
+                        // them is precisely what upgrades the shared cache.
+                        if (affiliationWasChecked(cloudEntry.meta)) {
+                            this.recentContributions.set(normalizedUsername, now);
+                        }
                     }
                 }
 
@@ -461,12 +517,28 @@ class CloudCacheClient {
             }
         }
 
-        // Add to contribution queue
-        this.contributionQueue.set(normalizedUsername, {
+        // Add to contribution queue. The optional fields (Worker v2.8.0) come from the
+        // API response's `meta` and are only sent when we actually have them, so a
+        // cloud-sourced entry can never overwrite a richer one with blanks.
+        const entry = {
             l: data.location,
             d: data.device,
             a: data.locationAccurate
-        });
+        };
+        const meta = data.meta;
+        if (meta) {
+            const affiliation = meta.affiliate?.name || meta.affiliateUsername;
+            if (affiliation) entry.af = String(affiliation);
+
+            const createdSeconds = toUnixSeconds(meta.createdAt);
+            if (createdSeconds) entry.c = createdSeconds;
+
+            if (meta.restId) entry.id = String(meta.restId);
+            if (Number.isInteger(meta.usernameChanges) && meta.usernameChanges >= 0) {
+                entry.uc = meta.usernameChanges;
+            }
+        }
+        this.contributionQueue.set(normalizedUsername, entry);
 
         // Debounce contributions
         if (this.contributeTimeout) {

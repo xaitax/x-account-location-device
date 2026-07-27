@@ -4,7 +4,7 @@
  */
 
 import browserAPI from './browser-api.js';
-import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS } from './constants.js';
+import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS, canonicalCountry, affiliationWasChecked } from './constants.js';
 import { LRUCache } from './lru-cache.js';
 
 /**
@@ -34,7 +34,7 @@ class UserCacheStorage {
                 // keeping the persisted `{ value, expiry }` shape in memory.
                 for (const [key, data] of Object.entries(stored)) {
                     if (data && data.expiry > now && data.value) {
-                        this.cache.set(key, { value: data.value, expiry: data.expiry });
+                        this.cache.set(key, { value: UserCacheStorage.fromPersistedValue(data.value), expiry: data.expiry });
                         loadedCount++;
                     } else if (data && data.expiry <= now) {
                         expiredCount++;
@@ -49,6 +49,84 @@ class UserCacheStorage {
             console.error('Failed to load user cache:', error);
             this.loaded = true; // Mark as loaded even on error to prevent blocking
         }
+    }
+
+    /**
+     * Project a cache value down to what is worth writing to disk.
+     *
+     * The full X API record was being persisted verbatim at roughly 830 bytes an entry.
+     * With MAX_ENTRIES at 50k that is ~40 MB against chrome.storage.local's 10 MB quota
+     * (no `unlimitedStorage` permission), so past about 12.6k accounts every write threw
+     * and the cache silently stopped persisting while re-serialising tens of MB a minute.
+     *
+     * Only four things survive a reload: the timeline reads location, device and accuracy,
+     * and the affiliation filter reads `meta.affiliate` / `meta.affiliateUsername`. The
+     * display name, avatar, verification state and the rest stay in memory for this
+     * session and are dropped on write — `partial` tells the hovercard to do a live fetch
+     * rather than render a card with half its fields blank.
+     * @param {any} value
+     * @returns {any}
+     */
+    static toPersistedValue(value) {
+        if (!value || typeof value !== 'object') return value;
+
+        const slim = {
+            location: value.location ?? null,
+            device: value.device ?? null,
+            locationAccurate: value.locationAccurate !== false
+        };
+
+        // Affiliation is flattened to a single short key rather than a nested meta object,
+        // which is worth ~55 bytes on every one of up to 50k entries:
+        //   absent  → nobody has checked this account (filter treats it as unknown)
+        //   ''      → checked, has no affiliation
+        //   'Name'  → affiliated
+        if (affiliationWasChecked(value.meta)) {
+            slim.af = value.meta.affiliate?.name || '';
+        }
+
+        return slim;
+    }
+
+    /**
+     * Inverse of toPersistedValue: rebuild the in-memory shape from a stored entry.
+     * Entries written before this format simply pass through — they still carry their
+     * original `meta`, so nothing needs migrating.
+     * @param {any} value
+     * @returns {any}
+     */
+    static fromPersistedValue(value) {
+        if (!value || typeof value !== 'object' || value.af === undefined) return value;
+
+        const { af, ...rest } = value;
+        return {
+            ...rest,
+            meta: {
+                // Only the shared subset was persisted, so the hovercard must refetch
+                // rather than render a card missing the name, avatar and verification.
+                partial: true,
+                // Present-but-null is what marks this account as "affiliation checked".
+                affiliateUsername: null,
+                affiliate: af ? { name: af } : null
+            }
+        };
+    }
+
+    /**
+     * Drop the least-recently-used slice of the cache. Used to recover from a quota
+     * failure: the Map preserves recency order, so the head is the coldest.
+     * @param {number} fraction - portion of entries to shed, 0-1
+     * @returns {number} how many were evicted
+     */
+    evictOldest(fraction = 0.25) {
+        const target = Math.ceil(this.cache.size * fraction);
+        let evicted = 0;
+        for (const key of [...this.cache.keys()]) {
+            if (evicted >= target) break;
+            this.cache.delete(key);
+            evicted++;
+        }
+        return evicted;
     }
 
     async save(force = false) {
@@ -67,7 +145,10 @@ class UserCacheStorage {
             // The in-memory value is already `{ value, expiry }`, matching the
             // persisted format — no per-entry expiry lookup needed.
             for (const [key, entry] of this.cache.entries()) {
-                exportData[key] = { value: entry.value, expiry: entry.expiry };
+                exportData[key] = {
+                    value: UserCacheStorage.toPersistedValue(entry.value),
+                    expiry: entry.expiry
+                };
             }
 
             // Clear the dirty flag for THIS snapshot before the async write (the
@@ -81,9 +162,22 @@ class UserCacheStorage {
                 [STORAGE_KEYS.CACHE]: exportData
             });
         } catch (error) {
-            // Write failed — re-mark dirty AND re-arm a save so the snapshot is retried
-            // autonomously, not only on the next cache mutation.
             this.dirty = true;
+
+            // A quota failure never fixes itself: retrying the same oversized snapshot
+            // every 60s just burns CPU while the cache silently stops persisting. Shed the
+            // coldest quarter and write again immediately; only fall back to the timer if
+            // that still fails or the error was something else (e.g. a transient write).
+            if (/quota/i.test(error?.message || '')) {
+                const evicted = this.evictOldest(0.25);
+                console.warn(`⚠️ User cache exceeded storage quota — evicted ${evicted} least-recently-used entries and retrying`);
+                if (evicted > 0) {
+                    return this.save(true);
+                }
+            }
+
+            // Re-arm a save so the snapshot is retried autonomously, not only on the
+            // next cache mutation.
             this.scheduleSave();
             console.error('Failed to save user cache:', error);
         }
@@ -311,6 +405,9 @@ const normalizeLower = value => {
     if (!value || typeof value !== 'string') return '';
     return value.trim().toLowerCase();
 };
+// Countries additionally fold aliases onto the canonical name, so a config imported
+// with "Macedonia" or "USA" still matches what X reports.
+const normalizeCountry = value => canonicalCountry(value);
 const normalizeTag = value => {
     if (!value || typeof value !== 'string') return '';
     return value.trim();
@@ -465,7 +562,7 @@ export const userCache = new UserCacheStorage();
 export const blockedCountries = new BlockedSetStorage({
     storageKey: STORAGE_KEYS.BLOCKED_COUNTRIES,
     label: 'blocked countries',
-    normalize: normalizeLower
+    normalize: normalizeCountry
 });
 export const blockedRegions = new BlockedSetStorage({
     storageKey: STORAGE_KEYS.BLOCKED_REGIONS,
@@ -481,6 +578,11 @@ export const blockedLanguages = new BlockedSetStorage({
     storageKey: STORAGE_KEYS.BLOCKED_LANGUAGES,
     label: 'blocked languages',
     normalize: normalizeLanguage
+});
+export const blockedAffiliations = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_AFFILIATIONS,
+    label: 'blocked affiliations',
+    normalize: normalizeLower
 });
 export const allowedUsers = new BlockedSetStorage({
     storageKey: STORAGE_KEYS.ALLOWED_USERS,
@@ -506,6 +608,7 @@ export async function initializeStorage() {
         blockedRegions.load(),
         blockedTags.load(),
         blockedLanguages.load(),
+        blockedAffiliations.load(),
         allowedUsers.load(),
         settings.load(),
         headersStorage.load()

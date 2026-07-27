@@ -48,7 +48,10 @@ X already knows where an account posts from. It's tucked inside the "About this 
 **Take control.** Curate your timeline by where accounts post from:
 
 - **Block by country, region, tag, or language**: single countries, multi-country regions (including groups like Southeast Asia), display-name patterns, or the language a post is written in (using X's own per-post detection, so it works for every language).
+- **Block by affiliation**: X shows the parent organisation on affiliated accounts, so blocking one name hides all of its staff accounts at once. Partial names work and it isn't case sensitive.
 - **Hide or Highlight**: remove matching posts entirely, or keep them visible with an amber accent so you stay aware without scrolling past blind.
+- **People lists too**: matching accounts get an amber accent in Followers, Verified followers and Following. Those lists are only ever flagged, never filtered down, so they stay complete.
+- **Quoted posts too**: when a blocked account is quoted by someone else, the quote card collapses to a "click to show" placeholder instead of slipping through, and the post doing the quoting stays put.
 - **Always-Show Accounts**: a personal allowlist for accounts that should never be filtered. Every filter, whether by country, region, tag, language, or VPN, skips them on the timeline and on their profile. Ideal for people you follow from a blocked country.
 - **VPN/proxy toggle**: show or hide posts from accounts flagged as possibly masked.
 - **Sidebar link**: optionally inject a "Block Locations" entry straight into X's own navigation.

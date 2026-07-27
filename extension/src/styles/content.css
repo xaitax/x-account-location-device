@@ -27,7 +27,7 @@
 
     /* DARK (default) */
     --xp-accent: #22D3EE; --xp-accent-soft: rgba(34, 211, 238, .14); --xp-accent-line: rgba(34, 211, 238, .34);
-    --xp-alert: #FFB23E; --xp-alert-soft: rgba(255, 178, 62, .16);
+    --xp-alert: #FFB23E; --xp-alert-soft: rgba(255, 178, 62, .16); --xp-alert-hover: rgba(255, 178, 62, .26);
     --xp-danger: #FF4D5E; --xp-danger-soft: rgba(255, 77, 94, .14);
     --xp-surface: rgba(20, 23, 28, .66); --xp-surface-2: rgba(255, 255, 255, .05);
     --xp-border: rgba(255, 255, 255, .10); --xp-hairline: rgba(34, 211, 238, .18);
@@ -42,7 +42,7 @@
 /* LIGHT — cool-tinted soft shadows + glossy bevel so glass reads over white */
 :root[data-x-theme="light"] {
     --xp-accent: #0E7490; --xp-accent-soft: rgba(14, 116, 144, .12); --xp-accent-line: rgba(14, 116, 144, .38);
-    --xp-alert: #B5710E; --xp-alert-soft: rgba(181, 113, 14, .14);
+    --xp-alert: #B5710E; --xp-alert-soft: rgba(181, 113, 14, .14); --xp-alert-hover: rgba(181, 113, 14, .22);
     --xp-danger: #DC2640; --xp-danger-soft: rgba(220, 38, 64, .10);
     --xp-surface: linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(240, 247, 250, .82)); --xp-surface-2: rgba(14, 42, 58, .05);
     --xp-border: rgba(14, 42, 58, .13); --xp-hairline: rgba(14, 116, 144, .34);
@@ -571,6 +571,68 @@ article[data-testid="tweet"]:has([data-x-block="hide"]) {
     display: none !important;
 }
 
+/* People lists: Followers, Verified followers, Following, search results, who-to-follow.
+   These rows are only ever flagged, never hidden (see neverHide in observer.js), so a
+   blocked account stays visible and countable with an amber accent. The marker lands on
+   the UserCell itself rather than a descendant, so no :has() is involved. */
+[data-testid="UserCell"][data-x-block="highlight"] {
+    border-left: 3px solid var(--xp-alert) !important;
+    background: linear-gradient(90deg, var(--xp-alert-soft) 0%, transparent 22%) !important;
+}
+
+/* Blocked QUOTED posts (issue #32): a quote card sits inside someone else's tweet, so
+   a blocked quoted author must never hide the row. The verdict lands on its own marker
+   (data-x-quote-block) and is scoped here to the enclosing quote card only. Everything
+   is CSS-driven off that marker — nothing is injected — so X re-rendering can't undo it. */
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"]) {
+    /* The card itself becomes the placeholder row. Its real children are hidden below,
+       so re-purposing its layout only ever positions our two pseudo-elements. */
+    display: flex !important;
+    align-items: center;
+    gap: 9px;
+    min-height: 48px;
+    padding: 0 16px;
+    cursor: pointer;
+    /* Same amber language as every other "flagged" surface in the extension. */
+    border-color: var(--xp-alert) !important;
+    background: var(--xp-alert-soft) !important;
+    /* ::before/::after inherit from here, so the bundled UI face is set once. Without
+       this the pseudo-element content falls back to the browser's default serif. */
+    font-family: var(--xp-font-ui);
+    transition: background 0.16s var(--xp-ease), border-color 0.16s var(--xp-ease);
+}
+/* Collapse the card's real content (avatar, name, text, media) */
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"]) > * {
+    display: none !important;
+}
+/* Two-tone label: what happened, then what to do about it */
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"])::before {
+    content: "Quoted post hidden";
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--xp-alert);
+}
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"])::after {
+    content: "click to show";
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--xp-text-dim);
+    transition: color 0.16s var(--xp-ease);
+}
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"]):hover {
+    background: var(--xp-alert-hover) !important;
+}
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"]):hover::after {
+    color: var(--xp-text);
+}
+/* Highlight mode: flag the quote card but keep it readable (mirrors the row treatment) */
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="highlight"]) {
+    border-left: 3px solid var(--xp-alert) !important;
+    background: linear-gradient(90deg, var(--xp-alert-soft) 0%, transparent 15%) !important;
+}
+
 /* Language blocking (issue #25): a separate article-level marker so it composes with
    the per-author data-x-block above — if either says hide, the row is hidden. */
 article[data-testid="tweet"][data-x-lang-block="highlight"] {
@@ -607,8 +669,8 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
     border-radius: var(--xp-r-lg);
     color: var(--xp-text);
     font-family: var(--xp-font-ui);
-    max-width: 680px;
-    width: 92%;
+    max-width: 760px;
+    width: 94%;
     max-height: 90vh;
     overflow: hidden;
     display: flex;
@@ -827,12 +889,13 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
        won't shrink below its content, so the 4th tab (Languages) would overflow
        and get clipped by the modal's overflow:hidden. */
     min-width: 0;
-    padding: 14px 10px;
+    /* Five tabs now: Countries / Regions / Tags / Affiliations / Languages */
+    padding: 14px 6px;
     background: none;
     border: none;
     border-bottom: 3px solid transparent;
     color: var(--xp-text-dim);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     transition: background 0.15s var(--xp-ease), color 0.15s var(--xp-ease);

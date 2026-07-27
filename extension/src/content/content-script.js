@@ -5,7 +5,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, CSS_CLASSES, VERSION } from '../shared/constants.js';
+import { MESSAGE_TYPES, CSS_CLASSES, VERSION, affiliationWasChecked } from '../shared/constants.js';
 
 // Import modules
 import {
@@ -25,6 +25,7 @@ import {
     processElement,
     createProcessElementSafe,
     updateBlockedTweets,
+    setupQuoteReveal,
     cleanupObservers,
     userInfoCache
 } from './observer.js';
@@ -42,6 +43,7 @@ let blockedRegions = new Set();
 let blockedTags = new Set();
 let blockedLanguages = new Set();
 let allowedUsers = new Set();
+let blockedAffiliations = new Set();
 let settings = {};
 let csrfToken = null;
 let debugMode = false;
@@ -171,6 +173,42 @@ function setupPageScriptListener() {
 }
 
 /**
+ * Drop cached user info that was never checked for an affiliation, then re-process the
+ * page so those rows are resolved again.
+ *
+ * Entries whose meta carries an `affiliateUsername` key were produced by a parser that
+ * actually inspected the affiliation, so "no affiliate" on them is a real answer and they
+ * are kept (same contract as wantsRicherRecord in the service worker). Everything
+ * else is genuinely unknown and has to be refetched, otherwise adding an affiliation
+ * appears to do nothing until the cache expires.
+ */
+function reprocessRowsMissingAffiliation() {
+    let dropped = 0;
+    for (const [screenName, info] of userInfoCache.entries()) {
+        if (info && !affiliationWasChecked(info.meta)) {
+            userInfoCache.delete(screenName);
+            dropped++;
+        }
+    }
+    debug(`Affiliation filter changed: dropped ${dropped} cache entries with no affiliation data`);
+
+    // Same teardown the settings-change path uses: a hidden row has no layout box, so the
+    // IntersectionObserver would never report it visible and it could never re-process.
+    // Un-hide and un-mark everything first, then let the rescan re-derive each row.
+    document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
+    document.querySelectorAll('[data-x-processed]').forEach(el => {
+        delete el.dataset.xProcessed;
+        delete el.dataset.xScreenName;
+    });
+    document.querySelectorAll('.x-tweet-blocked, .x-tweet-vpn-blocked, .x-tweet-highlighted')
+        .forEach(el => el.classList.remove('x-tweet-blocked', 'x-tweet-vpn-blocked', 'x-tweet-highlighted'));
+    document.querySelectorAll('[data-x-block]').forEach(el => { delete el.dataset.xBlock; });
+    document.querySelectorAll('[data-x-quote-block]').forEach(el => { delete el.dataset.xQuoteBlock; });
+
+    if (memoizedScanPageFn) memoizedScanPageFn();
+}
+
+/**
  * Listen for messages from background script
  */
 function setupBackgroundListener() {
@@ -296,27 +334,42 @@ async function handleBackgroundMessage(type, payload) {
 
         case MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED:
             blockedCountries = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED:
             blockedRegions = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_TAGS_UPDATED:
             blockedTags = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED:
             blockedLanguages = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+            return { success: true };
+
+        case MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED:
+            blockedAffiliations = new Set(payload);
+            if (blockedAffiliations.size > 0) {
+                // Rows already on screen were resolved before this filter existed, and a
+                // community-cache hit carries no affiliation at all. Re-deriving from that
+                // cache would silently conclude "not affiliated" and block nothing, so
+                // drop the unchecked entries and re-process instead. The background then
+                // re-checks the CLOUD for a richer record (see wantsRicherRecord); it
+                // never spends an X API call, so this can't trip the rate limit.
+                reprocessRowsMissingAffiliation();
+            } else {
+                updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+            }
             return { success: true };
 
         case MESSAGE_TYPES.ALLOWED_USERS_UPDATED:
             allowedUsers = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers);
+            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
             return { success: true };
 
         default:
@@ -363,6 +416,9 @@ async function initialize() {
         setupPageScriptListener();
         setupBackgroundListener();
         setupAuthoritativeInfoListener();
+        // "Click to show" on a collapsed quote card (issue #32). Must be bound in the
+        // capture phase before X's own handlers, so bind it here at document_start.
+        setupQuoteReveal();
 
         // Extract CSRF token
         csrfToken = getCsrfToken();
@@ -371,13 +427,14 @@ async function initialize() {
         injectPageScript();
 
         // Load initial settings, blocked countries/regions/tags/languages, and allowlisted accounts
-        const [settingsResponse, blockedResponse, blockedRegionsResponse, blockedTagsResponse, blockedLanguagesResponse, allowedUsersResponse] = await Promise.all([
+        const [settingsResponse, blockedResponse, blockedRegionsResponse, blockedTagsResponse, blockedLanguagesResponse, allowedUsersResponse, blockedAffiliationsResponse] = await Promise.all([
             sendMessage({ type: MESSAGE_TYPES.GET_SETTINGS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_REGIONS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_TAGS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_LANGUAGES }),
-            sendMessage({ type: MESSAGE_TYPES.GET_ALLOWED_USERS })
+            sendMessage({ type: MESSAGE_TYPES.GET_ALLOWED_USERS }),
+            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS })
         ]);
 
         if (settingsResponse?.success) {
@@ -409,6 +466,10 @@ async function initialize() {
 
         if (allowedUsersResponse?.success) {
             allowedUsers = new Set(allowedUsersResponse.data);
+        }
+
+        if (blockedAffiliationsResponse?.success) {
+            blockedAffiliations = new Set(blockedAffiliationsResponse.data);
         }
 
         createMemoizedFunctions();
@@ -471,6 +532,7 @@ function createMemoizedFunctions() {
         get blockedTags() { return blockedTags; },
         get blockedLanguages() { return blockedLanguages; },
         get allowedUsers() { return allowedUsers; },
+        get blockedAffiliations() { return blockedAffiliations; },
         get settings() { return settings; },
         get csrfToken() { return csrfToken; },
         sendMessage,
@@ -561,6 +623,7 @@ window.__X_POSED_CONTENT__ = {
         blockedTags: Array.from(blockedTags),
         blockedLanguages: Array.from(blockedLanguages),
         allowedUsers: Array.from(allowedUsers),
+        blockedAffiliations: Array.from(blockedAffiliations),
         settings
     })
 };

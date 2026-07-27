@@ -2,6 +2,20 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [3.4.0] - 2026-07-27
+
+### New
+- **Block by affiliation**: X shows the parent organisation on affiliated accounts, so blocking one organisation hides every one of its staff accounts at once. Part of the name is enough. Find it in **Settings → Blocking → Affiliations**, and it's part of import/export.
+- **Hovering an account now records more about it**: opening an info card reads its affiliation, when the account was created, its account ID and how often the handle has changed, and (with the community cache on) shares those so the next person gets them instantly. So if an account slips past the affiliation filter, hover it once and it stays known. Nothing is ever looked up in the background just to check, so none of this eats into your rate limit.
+- **Followers, Verified followers and Following are flagged too**: accounts matching any of your filters now get an amber accent in those lists. They are only ever flagged there, never hidden, so the lists stay complete and the counts still add up.
+- **Quoted posts are filtered too** ([#32](https://github.com/xaitax/x-account-location-device/issues/32), requested by **@jackvanwinkle**): a blocked country, region, or tag now collapses the quote card as well, with a "click to show" placeholder suggested by **@TMCAtom**. Only the quote is affected, and highlight mode flags it in amber instead.
+
+### Bug Fixes
+- **Quoting a proxied account no longer hides the whole post.** With VPN/proxy hiding on, the entire row disappeared. VPN hiding now only applies to a post's own author.
+- **Countries X names differently are now blocked correctly.** Blocking compared names exactly, so picking "North Macedonia" never matched an account X reported as "Macedonia". Same for the UK, US, UAE, Bosnia, Czechia, Myanmar, Macao, Türkiye, Vietnam, Timor-Leste and Russia aliases.
+- **Added 42 missing territories**, including Réunion, Jersey, Gibraltar, Guernsey, Isle of Man, Greenland, Martinique, Guadeloupe, Curaçao, Aruba, Bermuda and the Cayman Islands. They previously showed no flag and could not be blocked.
+- **Added the missing "East Asia" and "Eastern Europe (Non-EU)" regions**, which X reports but the Regions tab did not offer.
+
 ## [3.3.0] - 2026-07-06
 
 ### New

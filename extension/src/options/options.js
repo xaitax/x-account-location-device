@@ -43,16 +43,23 @@ const elements = {
     tabCountries: document.getElementById('tab-countries'),
     tabRegions: document.getElementById('tab-regions'),
     tabTags: document.getElementById('tab-tags'),
+    tabAffiliations: document.getElementById('tab-affiliations'),
     tabLanguages: document.getElementById('tab-languages'),
     panelCountries: document.getElementById('panel-countries'),
     panelRegions: document.getElementById('panel-regions'),
     panelTags: document.getElementById('panel-tags'),
+    panelAffiliations: document.getElementById('panel-affiliations'),
     panelLanguages: document.getElementById('panel-languages'),
     // Blocked Tags
     blockedTagsList: document.getElementById('blocked-tags-list'),
     blockedTagsCount: document.getElementById('blocked-tags-count'),
     tagInput: document.getElementById('tag-input'),
     btnAddTag: document.getElementById('btn-add-tag'),
+    blockedAffiliationsList: document.getElementById('blocked-affiliations-list'),
+    blockedAffiliationsCount: document.getElementById('blocked-affiliations-count'),
+    affiliationInput: document.getElementById('affiliation-input'),
+    btnAddAffiliation: document.getElementById('btn-add-affiliation'),
+    btnClearBlockedAffiliations: document.getElementById('btn-clear-blocked-affiliations'),
     btnClearBlockedTags: document.getElementById('btn-clear-blocked-tags'),
     // Blocked Languages
     blockedLanguagesList: document.getElementById('blocked-languages-list'),
@@ -100,6 +107,7 @@ let currentSettings = {};
 let blockedCountries = [];
 let blockedRegions = [];
 let blockedTags = [];
+let blockedAffiliations = [];
 let blockedLanguages = [];
 let allowedUsers = [];
 let rateLimitMonitorInterval = null;
@@ -157,6 +165,7 @@ async function initialize() {
     await loadBlockedCountries();
     await loadBlockedRegions();
     await loadBlockedTags();
+    await loadBlockedAffiliations();
     await loadBlockedLanguages();
     await loadAllowedUsers();
     await loadCacheStats();
@@ -453,6 +462,156 @@ function renderBlockedTags() {
         
         item.appendChild(removeBtn);
         list.appendChild(item);
+    }
+}
+
+/**
+ * Load blocked affiliations (organisations whose affiliated accounts are hidden)
+ */
+async function loadBlockedAffiliations() {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS
+        });
+
+        if (response?.success) {
+            blockedAffiliations = response.data || [];
+            renderBlockedAffiliations();
+            updateBlockedAffiliationsCount();
+        }
+    } catch (error) {
+        console.error('Failed to load blocked affiliations:', error);
+    }
+}
+
+/**
+ * Update blocked affiliations count badge
+ */
+function updateBlockedAffiliationsCount() {
+    if (elements.blockedAffiliationsCount) {
+        elements.blockedAffiliationsCount.textContent = blockedAffiliations.length;
+        elements.blockedAffiliationsCount.style.display = blockedAffiliations.length > 0 ? 'inline-flex' : 'none';
+    }
+}
+
+/**
+ * Render the blocked affiliations list
+ */
+function renderBlockedAffiliations() {
+    const list = elements.blockedAffiliationsList;
+    if (!list) return;
+
+    list.replaceChildren();
+
+    if (blockedAffiliations.length === 0) {
+        const emptyState = document.createElement('p');
+        emptyState.className = 'empty-state';
+        emptyState.textContent = 'No affiliations blocked';
+        list.appendChild(emptyState);
+        return;
+    }
+
+    for (const affiliation of [...blockedAffiliations].sort()) {
+        const item = document.createElement('div');
+        item.className = 'blocked-item';
+
+        const itemInfo = document.createElement('div');
+        itemInfo.className = 'blocked-item-info';
+
+        const label = document.createElement('span');
+        label.className = 'blocked-tag-text';
+        label.textContent = affiliation;
+        itemInfo.appendChild(label);
+        item.appendChild(itemInfo);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'blocked-remove';
+        removeBtn.setAttribute('aria-label', `Remove ${affiliation}`);
+
+        const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        removeSvg.setAttribute('viewBox', '0 0 24 24');
+        removeSvg.setAttribute('width', '16');
+        removeSvg.setAttribute('height', '16');
+        const removePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        removePath.setAttribute('fill', 'currentColor');
+        removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
+        removeSvg.appendChild(removePath);
+        removeBtn.appendChild(removeSvg);
+
+        removeBtn.addEventListener('click', async () => {
+            await removeBlockedAffiliation(affiliation);
+        });
+
+        item.appendChild(removeBtn);
+        list.appendChild(item);
+    }
+}
+
+/**
+ * Add a blocked affiliation
+ */
+async function addBlockedAffiliation(affiliation) {
+    if (!affiliation || affiliation.trim() === '') return;
+
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
+            payload: { action: 'add', affiliation: affiliation.trim() }
+        });
+
+        if (response?.success) {
+            blockedAffiliations = response.data || [];
+            renderBlockedAffiliations();
+            updateBlockedAffiliationsCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to add blocked affiliation:', error);
+    }
+}
+
+/**
+ * Remove a blocked affiliation
+ */
+async function removeBlockedAffiliation(affiliation) {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
+            payload: { action: 'remove', affiliation }
+        });
+
+        if (response?.success) {
+            blockedAffiliations = response.data || [];
+            renderBlockedAffiliations();
+            updateBlockedAffiliationsCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to remove blocked affiliation:', error);
+    }
+}
+
+/**
+ * Clear all blocked affiliations
+ */
+async function clearAllBlockedAffiliations() {
+    if (blockedAffiliations.length === 0) return;
+    if (!confirm('Are you sure you want to unblock all affiliations?')) return;
+
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
+            payload: { action: 'clear' }
+        });
+
+        if (response?.success) {
+            blockedAffiliations = [];
+            renderBlockedAffiliations();
+            updateBlockedAffiliationsCount();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to clear blocked affiliations:', error);
     }
 }
 
@@ -1925,6 +2084,9 @@ function setupEventListeners() {
             elements.tabCountries.classList.toggle('active', tab === 'countries');
             elements.tabRegions.classList.toggle('active', tab === 'regions');
             elements.tabTags.classList.toggle('active', tab === 'tags');
+            if (elements.tabAffiliations) {
+                elements.tabAffiliations.classList.toggle('active', tab === 'affiliations');
+            }
             if (elements.tabLanguages) {
                 elements.tabLanguages.classList.toggle('active', tab === 'languages');
             }
@@ -1939,6 +2101,9 @@ function setupEventListeners() {
             if (elements.panelTags) {
                 elements.panelTags.style.display = tab === 'tags' ? 'block' : 'none';
             }
+            if (elements.panelAffiliations) {
+                elements.panelAffiliations.style.display = tab === 'affiliations' ? 'block' : 'none';
+            }
             if (elements.panelLanguages) {
                 elements.panelLanguages.style.display = tab === 'languages' ? 'block' : 'none';
             }
@@ -1947,9 +2112,33 @@ function setupEventListeners() {
         elements.tabCountries.addEventListener('click', () => switchBlockedTab('countries'));
         elements.tabRegions.addEventListener('click', () => switchBlockedTab('regions'));
         elements.tabTags.addEventListener('click', () => switchBlockedTab('tags'));
+        if (elements.tabAffiliations) {
+            elements.tabAffiliations.addEventListener('click', () => switchBlockedTab('affiliations'));
+        }
         if (elements.tabLanguages) {
             elements.tabLanguages.addEventListener('click', () => switchBlockedTab('languages'));
         }
+    }
+
+    // Affiliations: add / clear
+    if (elements.btnAddAffiliation && elements.affiliationInput) {
+        const submitAffiliation = () => {
+            const value = elements.affiliationInput.value.trim();
+            if (value) {
+                addBlockedAffiliation(value);
+                elements.affiliationInput.value = '';
+            }
+        };
+        elements.btnAddAffiliation.addEventListener('click', submitAffiliation);
+        elements.affiliationInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitAffiliation();
+            }
+        });
+    }
+    if (elements.btnClearBlockedAffiliations) {
+        elements.btnClearBlockedAffiliations.addEventListener('click', clearAllBlockedAffiliations);
     }
 
     // Tags: Add tag button
@@ -2059,6 +2248,7 @@ function setupEventListeners() {
                 blockedRegions,
                 blockedTags,
                 blockedLanguages,
+                blockedAffiliations,
                 allowedUsers,
 
                 // User data
@@ -2151,6 +2341,7 @@ async function handleImportFile(file) {
         const blockedRegionsCount = Array.isArray(data.blockedRegions) ? data.blockedRegions.length : 0;
         const blockedTagsCount = Array.isArray(data.blockedTags) ? data.blockedTags.length : 0;
         const blockedLanguagesCount = Array.isArray(data.blockedLanguages) ? data.blockedLanguages.length : 0;
+        const blockedAffiliationsCount = Array.isArray(data.blockedAffiliations) ? data.blockedAffiliations.length : 0;
         const allowedUsersCount = Array.isArray(data.allowedUsers) ? data.allowedUsers.length : 0;
         const hasSettings = data.settings && typeof data.settings === 'object';
 
@@ -2163,6 +2354,7 @@ async function handleImportFile(file) {
             blockedRegionsCount > 0 ? `• ${blockedRegionsCount} blocked regions` : '',
             blockedTagsCount > 0 ? `• ${blockedTagsCount} blocked tags` : '',
             blockedLanguagesCount > 0 ? `• ${blockedLanguagesCount} blocked languages` : '',
+            blockedAffiliationsCount > 0 ? `• ${blockedAffiliationsCount} blocked affiliations` : '',
             allowedUsersCount > 0 ? `• ${allowedUsersCount} always-show accounts` : '',
             cacheCount > 0 ? `• ${cacheCount} cached users` : '',
             '',
@@ -2184,6 +2376,7 @@ async function handleImportFile(file) {
                 blockedRegions: data.blockedRegions,
                 blockedTags: data.blockedTags,
                 blockedLanguages: data.blockedLanguages,
+                blockedAffiliations: data.blockedAffiliations,
                 allowedUsers: data.allowedUsers,
                 cache: data.cache
             }
@@ -2196,6 +2389,7 @@ async function handleImportFile(file) {
             if (response.importedBlockedRegions) results.push(`${response.importedBlockedRegions} blocked regions`);
             if (response.importedBlockedTags) results.push(`${response.importedBlockedTags} blocked tags`);
             if (response.importedBlockedLanguages) results.push(`${response.importedBlockedLanguages} blocked languages`);
+            if (response.importedBlockedAffiliations) results.push(`${response.importedBlockedAffiliations} blocked affiliations`);
             if (response.importedAllowedUsers) results.push(`${response.importedAllowedUsers} always-show accounts`);
             if (response.importedCache) results.push(`${response.importedCache} cached users`);
 
@@ -2207,6 +2401,7 @@ async function handleImportFile(file) {
             await loadBlockedRegions();
             await loadBlockedTags();
             await loadBlockedLanguages();
+            await loadBlockedAffiliations();
             await loadAllowedUsers();
             await loadCacheStats();
             await loadStatistics();
