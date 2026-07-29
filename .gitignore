@@ -17,3 +17,12 @@ CLAUDE.md
 /cloud-server
 /docs
 /extension/design-preview
+
+# Local marketing source files and store-upload assets
+/screenshots/raw-v3.4/
+/screenshots/marketing/source/
+/screenshots/marketing/campaign-background.png
+/screenshots/marketing/promo-small-440x280.png
+/screenshots/marketing/render.mjs
+/screenshots/marketing/README.md
+/screenshots/marketing/prototype-*
