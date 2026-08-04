@@ -106,6 +106,19 @@ const GLYPHS = {
         s.appendChild(el('path', { d: 'M9 9h.01M9 13h.01M15 9h.01M15 13h.01M10 21v-4h4v4' }));
         return s;
     },
+    followers(size) {
+        const s = base(size, true);
+        s.appendChild(el('path', { d: 'M16 20v-1.6a4 4 0 0 0-4-4H6.6a4 4 0 0 0-4 4V20' }));
+        s.appendChild(el('circle', { cx: '9.3', cy: '7.2', r: '3.4' }));
+        s.appendChild(el('path', { d: 'M21.5 20v-1.6a4 4 0 0 0-3-3.87M15.8 4.2a3.4 3.4 0 0 1 0 6.1' }));
+        return s;
+    },
+    posts(size) {
+        const s = base(size, true);
+        s.appendChild(el('rect', { x: '3.5', y: '4.5', width: '17', height: '15', rx: '2.5' }));
+        s.appendChild(el('path', { d: 'M7 9h6M7 12.5h10M7 16h8' }));
+        return s;
+    },
     clock(size) {
         const s = base(size, true);
         s.appendChild(el('circle', { cx: '12', cy: '12', r: '8.5' }));

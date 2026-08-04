@@ -1050,12 +1050,13 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
     margin-top: 16px;
 }
 
+/* No inner scroller: .x-blocker-body already scrolls this panel, and a 200px box nested
+   inside it produced two scrollbars competing for the same gesture — made worse once the
+   list gained group headings, which ate a third of that budget. One scroll context. */
 .x-blocker-tags-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 200px;
-    overflow-y: auto;
 }
 
 .x-blocker-tag-item {
@@ -1382,4 +1383,99 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
     .x-toast-message {
         font-size: 12px;
     }
+}
+
+/* Blocked-tags group headings (see options.css for the rationale). Margins are small
+   because the list is a flex column with its own 8px gap, which margins add to. */
+.x-blocker-tag-group {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 4px 0 0;
+}
+.x-blocker-tag-group:first-child { margin-top: 0; }
+.x-blocker-tag-group-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--xp-text);
+}
+.x-blocker-tag-group-hint {
+    font-size: 12px;
+    color: var(--xp-text-dim);
+}
+
+/* Non-blocking caution for an over-matching tag. */
+.x-blocker-risk-note {
+    margin: 10px 0 0;
+    padding: 9px 12px;
+    border-left: 3px solid var(--xp-alert);
+    border-radius: 6px;
+    background: var(--xp-alert-soft);
+    color: var(--xp-text);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+/* ============================================
+   TAGS PANEL LAYOUT
+   Three self-contained sections, so they need real separation — and blocked terms read
+   as chips rather than full-width slabs. Most values are a single emoji or one short word,
+   and a full-width row per value turned three short lists into a wall of blocks.
+   ============================================ */
+.x-blocker-tag-section {
+    margin-bottom: 26px;
+}
+.x-blocker-tag-section:last-child {
+    margin-bottom: 4px;
+}
+
+.x-blocker-tag-section .x-blocker-tag-group {
+    margin: 0 0 10px;
+}
+
+.x-blocker-tag-section .x-blocker-tag-input-section {
+    margin-bottom: 0;
+}
+
+.x-blocker-tag-section .x-blocker-risk-note {
+    margin-top: 10px;
+}
+
+.x-blocker-tags-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.x-blocker-tag-item {
+    display: inline-flex;
+    width: auto;
+    max-width: 100%;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 6px 6px 6px 13px;
+    border-radius: var(--xp-r-pill);
+}
+
+.x-blocker-tag-text {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.x-blocker-tag-remove {
+    font-size: 17px;
+    padding: 0 5px;
+    line-height: 1.1;
+}
+
+/* Left-aligned inside a wrapping row, rather than centred as a full-width block. */
+.x-blocker-tag-section .x-blocker-empty {
+    padding: 2px 0;
+    text-align: left;
 }

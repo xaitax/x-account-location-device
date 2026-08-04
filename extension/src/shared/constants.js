@@ -18,6 +18,8 @@ export const STORAGE_KEYS = {
     BLOCKED_COUNTRIES: 'x_blocked_countries',
     BLOCKED_REGIONS: 'x_blocked_regions',
     BLOCKED_TAGS: 'x_blocked_tags',
+    BLOCKED_BIO_TAGS: 'x_blocked_bio_tags',
+    BLOCKED_PCF: 'x_blocked_pcf',
     BLOCKED_LANGUAGES: 'x_blocked_languages',
     BLOCKED_AFFILIATIONS: 'x_blocked_affiliations',
     ALLOWED_USERS: 'x_allowed_users',
@@ -144,6 +146,10 @@ export const MESSAGE_TYPES = {
     SET_BLOCKED_REGIONS: 'SET_BLOCKED_REGIONS',
     GET_BLOCKED_TAGS: 'GET_BLOCKED_TAGS',
     SET_BLOCKED_TAGS: 'SET_BLOCKED_TAGS',
+    GET_BLOCKED_BIO_TAGS: 'GET_BLOCKED_BIO_TAGS',
+    SET_BLOCKED_BIO_TAGS: 'SET_BLOCKED_BIO_TAGS',
+    GET_BLOCKED_PCF: 'GET_BLOCKED_PCF',
+    SET_BLOCKED_PCF: 'SET_BLOCKED_PCF',
     GET_BLOCKED_LANGUAGES: 'GET_BLOCKED_LANGUAGES',
     SET_BLOCKED_LANGUAGES: 'SET_BLOCKED_LANGUAGES',
     GET_BLOCKED_AFFILIATIONS: 'GET_BLOCKED_AFFILIATIONS',
@@ -170,6 +176,8 @@ export const MESSAGE_TYPES = {
     BLOCKED_COUNTRIES_UPDATED: 'BLOCKED_COUNTRIES_UPDATED',
     BLOCKED_REGIONS_UPDATED: 'BLOCKED_REGIONS_UPDATED',
     BLOCKED_TAGS_UPDATED: 'BLOCKED_TAGS_UPDATED',
+    BLOCKED_BIO_TAGS_UPDATED: 'BLOCKED_BIO_TAGS_UPDATED',
+    BLOCKED_PCF_UPDATED: 'BLOCKED_PCF_UPDATED',
     BLOCKED_LANGUAGES_UPDATED: 'BLOCKED_LANGUAGES_UPDATED',
     BLOCKED_AFFILIATIONS_UPDATED: 'BLOCKED_AFFILIATIONS_UPDATED',
     ALLOWED_USERS_UPDATED: 'ALLOWED_USERS_UPDATED',
@@ -189,10 +197,19 @@ export const DEFAULT_SETTINGS = {
     showDevices: true,
     showVpnIndicator: true,
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
+    showInfoIcon: true,  // The circled-i at the end of the badge (issue #38). Hiding it frees
+    // horizontal space on narrow/mobile layouts, where X truncates the name and handle to fit.
+    // The badge stays hoverable/clickable either way, so nothing becomes unreachable.
+    hovercardTrigger: 'hover',  // 'hover' | 'click' — how the account dossier opens on
+    // pointer devices. Touch devices are always click-to-toggle (they have no hover).
     showCaptureButton: true,  // The badge "Share" button (capture + quote/reply/post to X)
     showSidebarBlockerLink: true,
     openChangelogOnUpdate: true,  // Open the "What's New"/changelog tab after a major/minor update (issue #24)
     debugMode: false,
+    // Read the profile data X already sends with the timeline (bio, account label, follower
+    // counts) instead of requesting it. Costs no extra API calls and never leaves the device.
+    // Exposed as a kill switch because X can change these response shapes without notice.
+    profileEnrichment: true,
     cloudCacheEnabled: false,  // Opt-in only
     highlightBlockedTweets: false  // If true, highlight instead of hide blocked tweets
 };
@@ -337,6 +354,7 @@ export const COUNTRY_LIST = Object.keys(COUNTRY_FLAGS)
 export const REGION_DATA = [
     { name: 'Africa', key: 'africa', flag: '🌍' },
     { name: 'Australasia', key: 'australasia', flag: '🌏' },
+    { name: 'Caribbean', key: 'caribbean', flag: '🌎' },
     { name: 'East Asia', key: 'east asia', flag: '🌏' },
     { name: 'East Asia & Pacific', key: 'east asia & pacific', flag: '🌏' },
     { name: 'Eastern Europe (Non-EU)', key: 'eastern europe (non-eu)', flag: '🌍' },
@@ -371,6 +389,50 @@ export function isRegion(location) {
     if (!location) return false;
     return Object.hasOwn(REGION_FLAGS, location.toLowerCase());
 }
+
+/**
+ * X's Parody / Commentary / Fan labels (issue #41).
+ *
+ * X exposes this as a structured `parody_commentary_fan_label` enum on the user object in
+ * its own timeline responses, so it is read exactly rather than scraped — no locale
+ * dependence and no guessing at icon asset names. "None" means the account carries no label.
+ */
+export const PCF_LABELS = [
+    { value: 'parody', name: 'Parody' },
+    { value: 'commentary', name: 'Commentary' },
+    { value: 'fan', name: 'Fan' }
+];
+
+export const PCF_LABEL_NAMES = Object.fromEntries(PCF_LABELS.map(l => [l.value, l.name]));
+
+/**
+ * Normalise X's raw label to our stored value, or '' when the account has none.
+ * @param {string|null|undefined} raw
+ * @returns {string}
+ */
+export function normalizePcfLabel(raw) {
+    if (!raw || typeof raw !== 'string') return '';
+    const value = raw.trim().toLowerCase();
+    if (value === '' || value === 'none') return '';
+    return value;
+}
+
+/**
+ * Memory budget for the profile data harvested from X's own timeline responses.
+ *
+ * This data is SESSION-ONLY and never written to storage: bios are personal free text and
+ * follower counts go stale within minutes, so persisting either would be both a privacy
+ * problem and wrong. The cache is a bounded LRU, so a long scrolling session evicts rather
+ * than grows — at these limits the worst case is roughly 500 × ~550 B ≈ 270 KB.
+ */
+export const PROFILE_CACHE_CONFIG = {
+    MAX_ENTRIES: 500,
+    MAX_BIO_LENGTH: 200,
+    // Hard ceiling on nodes visited while walking one response, so a pathological payload
+    // can't pin the main thread. X sends ~20 tweets per page; this is orders of magnitude
+    // above what that needs.
+    MAX_WALK_NODES: 200000
+};
 
 // Curated list of languages that can be blocked by post language (issue #25).
 // X tags each tweet's text with its own ML-detected BCP-47 language on the

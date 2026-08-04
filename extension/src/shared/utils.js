@@ -211,6 +211,23 @@ export function formatCountryName(country) {
  * @param {HTMLElement} element - The DOM element containing username info
  * @returns {string|null} - The extracted username (without @) or null if not found
  */
+// X routes that are not accounts, so a path segment matching one of these never
+// identifies a user.
+const RESERVED_PATHS = new Set([
+    'home', 'explore', 'notifications', 'messages', 'search', 'settings', 'i', 'compose'
+]);
+
+/**
+ * The account whose profile page we are currently on, from the URL, or null.
+ * @returns {string|null}
+ */
+function currentProfileHandle() {
+    if (typeof location === 'undefined') return null;
+    const match = location.pathname.match(/^\/([a-zA-Z0-9_]{1,15})(?:\/|$)/);
+    if (!match) return null;
+    return RESERVED_PATHS.has(match[1].toLowerCase()) ? null : match[1];
+}
+
 export function extractUsername(element) {
     // 1. Try to find the username link (Timeline/Feed)
     const link = element.querySelector('a[href^="/"]');
@@ -219,22 +236,47 @@ export function extractUsername(element) {
         const match = href.match(/^\/([^/]+)$/);
         if (match) {
             const username = match[1];
-            const invalid = ['home', 'explore', 'notifications', 'messages', 'search', 'settings', 'i', 'compose'];
-            if (!invalid.includes(username.toLowerCase())) return username;
+            if (!RESERVED_PATHS.has(username.toLowerCase())) return username;
         }
     }
 
     // 2. Profile Header Case (Username is text, not a link)
+    //
+    // Issue #40: a DISPLAY NAME can itself look like a handle — @anurag_vb's display name
+    // is literally "@anurag" — and X renders the display name BEFORE the real handle. So
+    // returning the first "@…" match resolved the wrong account entirely, then applied that
+    // account's country, device and every block verdict to this one. Timeline rows were
+    // unaffected because step 1 finds their profile link and step 2 never runs; only the
+    // profile header (which has no link) reached this path.
+    //
+    // Collect every candidate in DOM order instead, then disambiguate:
+    //   a) prefer the one matching the profile in the URL — a profile header always
+    //      describes the profile you are on, which is the strongest signal available;
+    //   b) otherwise take the LAST candidate, because X renders the handle after the
+    //      display name. This keeps hover-preview cards for OTHER accounts correct, since
+    //      none of their candidates match the URL and (b) still picks their handle.
+    const candidates = [];
     const textNodes = Array.from(element.querySelectorAll('span, div[dir="ltr"]'));
     for (const node of textNodes) {
         const text = node.textContent.trim();
-        if (text.startsWith('@') && text.length > 1) {
-            const username = text.substring(1);
-            // Basic validation to ensure it's a username
-            if (/^[a-zA-Z0-9_]+$/.test(username)) {
-                return username;
-            }
+        if (!text.startsWith('@') || text.length < 2) continue;
+        const username = text.substring(1);
+        // Bounded to X's real handle rule, so an over-long display-name token can't
+        // masquerade as a candidate and crowd out the genuine handle.
+        if (/^[a-zA-Z0-9_]{1,15}$/.test(username) && !candidates.includes(username)) {
+            candidates.push(username);
         }
+    }
+
+    if (candidates.length > 0) {
+        const profileHandle = currentProfileHandle();
+        if (profileHandle) {
+            const onProfile = candidates.find(
+                c => c.toLowerCase() === profileHandle.toLowerCase()
+            );
+            if (onProfile) return onProfile;
+        }
+        return candidates[candidates.length - 1];
     }
 
     return null;
@@ -536,22 +578,33 @@ export function extractTagsFromText(text) {
 }
 
 /**
- * Common/popular tags that users frequently use for identification
- * This list can be used to populate a quick-select UI
+ * Explain how a tag will over-match, or null when it is specific enough.
+ *
+ * Tags are matched as a SUBSTRING (of the display name, or of the bio), so "fan" also hits
+ * "Fantastic Mr Fox" — the extension then looks like it is hiding accounts at random. This
+ * returns a plain-language caution shown at the moment the tag is added; it never blocks the
+ * action, because over-matching is sometimes exactly what the user wants.
+ *
+ * Emoji and bracketed markers ("[BOT]") are left alone: they are specific by construction.
+ * @param {string} tag
+ * @returns {string|null}
  */
-export const COMMON_PROFILE_TAGS = [
-    // Country flags (most common)
-    '🇺🇸', '🇬🇧', '🇷🇺', '🇺🇦', '🇨🇳', '🇮🇳', '🇮🇱', '🇵🇸', '🇮🇷', '🇹🇷',
-    '🇩🇪', '🇫🇷', '🇯🇵', '🇰🇷', '🇧🇷', '🇲🇽', '🇨🇦', '🇦🇺', '🇪🇺',
-    // Political/identity symbols
-    '🏳️‍🌈', '🏳️‍⚧️', '✡️', '☪️', '✝️', '🕉️', '☸️', '✊', '✊🏿', '✊🏻',
-    // Common decorative
-    '⭐', '🌟', '✨', '💫', '🔥', '💀', '👻', '🎭', '🎪', '🎯',
-    '💎', '👑', '🏆', '🎖️', '🏅', '🎗️',
-    // Status/role indicators
-    '🤖', '🔵', '✅', '❌', '⚠️', '🔒', '🔓',
-    '📢', '📣', '🎙️', '📰', '🗞️',
-    // Common bracket tags
-    '[BOT]', '[PARODY]', '[FAN]', '[RP]', '[18+]', '[NSFW]',
-    '(parody)', '(fan account)', '(satire)', '(not affiliated)'
-];
+export function describeTagRisk(tag) {
+    if (!tag || typeof tag !== 'string') return null;
+
+    const trimmed = tag.trim();
+    if (!trimmed) return null;
+
+    // Only plain words over-match; anything with punctuation or emoji is precise enough.
+    if (!/^[a-z0-9 ]+$/i.test(trimmed)) return null;
+    if (trimmed.length >= 4) return null;
+
+    return `“${trimmed}” matches any text containing those letters, including longer words that merely contain them.`;
+}
+
+// A curated COMMON_PROFILE_TAGS list used to live here and was never rendered. It has been
+// deleted rather than left dormant: it nominated specific national flags, religious symbols
+// and identity markers as suggested things to block, which is an editorial position the
+// extension must not take — and dormant code can always be revived by mistake. Users type
+// what they want to filter. The only pills offered are ACCOUNT_LABEL_TAGS above, which are
+// X's own structural labels and carry no such judgement.

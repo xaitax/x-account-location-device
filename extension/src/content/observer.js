@@ -7,6 +7,7 @@ import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, canonicalCountry } from 
 import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
+import { getProfile } from './profile-cache.js';
 
 /**
  * Resolve the country used for the flag, the xCountry dataset, and country/region
@@ -102,7 +103,8 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
  * @param {string|null} [opts.csrfToken]
  */
 function applyInfoToElement(element, screenName, info, opts) {
-    const { blockedCountries, blockedRegions, blockedAffiliations, allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
+    const { blockedCountries, blockedRegions, blockedAffiliations, blockedBioTags, blockedPcf,
+        allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
@@ -122,10 +124,14 @@ function applyInfoToElement(element, screenName, info, opts) {
     // Who-they-are filters (country/region/tag) apply to quoted authors too — they just
     // collapse the quote card instead of the row (issue #32).
     const affiliationBlocked = hasBlockedAffiliation(info.meta, blockedAffiliations);
+    // Bio and account label come from the profile data X already sent with the timeline,
+    // so neither costs a lookup — see profile-cache.js.
+    const bioBlocked = hasBlockedBio(screenName, blockedBioTags);
+    const labelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
     const matchesBlockList =
         ((locationLower !== '' &&
             (blockedCountries.has(locationLower) || (blockedRegions && blockedRegions.has(locationLower)))) ||
-            tagBlocked || affiliationBlocked) &&
+            tagBlocked || affiliationBlocked || bioBlocked || labelBlocked) &&
         !isExempt;
     // VPN-hide is a hard filter, but only for the MAIN author: a quoted account being
     // flagged as proxied must never hide the quoting user's own post.
@@ -428,9 +434,173 @@ function hasBlockedAffiliation(meta, blockedAffiliations) {
     return false;
 }
 
+// ============================================
+// ACCOUNT TYPE LABEL — Parody / Commentary / Fan (issue #41)
+// ============================================
+
+// X's authenticity labels render on BOTH the timeline row and the profile header, but not
+// identically: the timeline wraps the label in a link to the authenticity policy, while the
+// profile header is bare divs. Only the icon and the text are common to both, so we match on
+// any of the three and normalise afterwards.
+const ACCOUNT_TYPE_LINK_SELECTOR = 'a[href*="rules-and-policies/authenticity"]';
+const ACCOUNT_TYPE_IMG_SELECTOR = 'img[src*="-mask."]';
+const ACCOUNT_TYPE_SELECTOR = `${ACCOUNT_TYPE_LINK_SELECTOR}, ${ACCOUNT_TYPE_IMG_SELECTOR}`;
+
+// How far up from a username element to look when there is no enclosing article to scope
+// to (profile header, people-list row). Bounded so a neighbouring row's label can't leak in.
+const ACCOUNT_TYPE_MAX_ANCESTORS = 5;
+
+/**
+ * First account-type label node inside `scope`, skipping any that belongs to a quoted
+ * account when `tweetForQuoteCheck` is supplied.
+ */
+function firstAccountTypeNode(scope, tweetForQuoteCheck) {
+    const nodes = scope.querySelectorAll(ACCOUNT_TYPE_SELECTOR);
+    for (const node of nodes) {
+        if (tweetForQuoteCheck && isInsideQuoteTweet(node, tweetForQuoteCheck)) continue;
+        return node;
+    }
+    return null;
+}
+
+/**
+ * Normalise a matched node to the element that actually carries the label TEXT.
+ * On the timeline that is the anchor; on a profile header there is no anchor, so climb
+ * from the icon to the nearest small ancestor holding the text.
+ */
+function accountTypeRoot(node) {
+    const link = node.closest?.(ACCOUNT_TYPE_LINK_SELECTOR);
+    if (link) return link;
+
+    // On the profile header the icon sits five wrappers below the element that also holds
+    // the label text, so the climb needs real headroom; the length guard below — not the
+    // depth — is what stops us swallowing the whole header if X restructures this.
+    let el = node.parentElement;
+    for (let i = 0; i < 8 && el; i++) {
+        const text = el.textContent.trim();
+        if (text.length > 0 && text.length <= 60) return el;
+        el = el.parentElement;
+    }
+    return node;
+}
+
+/**
+ * Locate the account-type label that belongs to THIS username element.
+ * @param {HTMLElement} element
+ * @param {HTMLElement|null} tweet
+ * @returns {HTMLElement|null}
+ */
+function findAccountTypeNode(element, tweet) {
+    // A quoted account's label lives inside the quote card and must not be read as the
+    // main author's (and vice versa) — same separation as the rest of the quote handling.
+    if (isInsideQuoteTweet(element, tweet)) {
+        const card = element.closest(QUOTE_CARD_SELECTOR);
+        return card ? firstAccountTypeNode(card, null) : null;
+    }
+
+    if (tweet) return firstAccountTypeNode(tweet, tweet);
+
+    // Profile header / people-list row: no article to bound the search, so walk up.
+    let scope = element.parentElement;
+    for (let i = 0; i < ACCOUNT_TYPE_MAX_ANCESTORS && scope; i++) {
+        const found = firstAccountTypeNode(scope, null);
+        if (found) return found;
+        scope = scope.parentElement;
+    }
+    return null;
+}
+
+/**
+ * Matchable tokens for an account's authenticity label, or null when it has none.
+ *
+ * Deliberately returns several tokens rather than one canonical type, because we cannot
+ * assume how X names things: the label text ("Parody account") carries the type but is
+ * localised, while the icon asset (".../parody-mask.<hash>.svg") is locale-independent but
+ * only carries the type if X ships a distinct asset per label. Emitting both means a
+ * blocked value matches whichever of the two happens to be meaningful — and an authenticity
+ * label X adds in future is still captured instead of silently ignored.
+ * @param {HTMLElement} element
+ * @param {HTMLElement|null} tweet
+ * @returns {Set<string>|null} lowercase tokens, e.g. {"parody account", "parody"}
+ */
+function getAccountTypeTokens(element, tweet) {
+    const node = findAccountTypeNode(element, tweet);
+    if (!node) return null;
+
+    const tokens = new Set();
+    const root = accountTypeRoot(node);
+
+    const text = (root.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (text && text.length <= 60) {
+        tokens.add(text);
+        const firstWord = text.split(' ')[0];
+        if (firstWord) tokens.add(firstWord);
+    }
+
+    const img = node.tagName === 'IMG' ? node : root.querySelector('img');
+    const assetMatch = (img?.getAttribute('src') || '').match(/\/([a-z0-9]+)-mask\./i);
+    if (assetMatch) tokens.add(assetMatch[1].toLowerCase());
+
+    return tokens.size > 0 ? tokens : null;
+}
+
+/**
+ * Does this account's BIO contain a blocked term?
+ *
+ * The bio comes from the profile data X already ships with its own timeline responses
+ * (see profile-cache.js), so this costs no lookup. Absent profile data simply means "not
+ * blocked" — never a guess.
+ * @param {string|null|undefined} screenName
+ * @param {Set<string>|null} blockedBioTags - lowercase terms
+ * @returns {boolean}
+ */
+function hasBlockedBio(screenName, blockedBioTags) {
+    if (!screenName || !blockedBioTags || blockedBioTags.size === 0) return false;
+
+    const bio = getProfile(screenName)?.bio;
+    if (!bio) return false;
+
+    const haystack = bio.toLowerCase();
+    for (const term of blockedBioTags) {
+        const needle = term.trim().toLowerCase();
+        if (needle && haystack.includes(needle)) return true;
+    }
+    return false;
+}
+
+/**
+ * Does this account carry a blocked Parody / Commentary / Fan label (issue #41)?
+ *
+ * Prefers X's STRUCTURED `parody_commentary_fan_label`, harvested from its own responses —
+ * exact, and locale-independent. Falls back to the label rendered in the DOM, which is what
+ * keeps this working with profile enrichment switched off and before the first timeline
+ * response has landed.
+ * @param {HTMLElement} element
+ * @param {HTMLElement|null} tweet
+ * @param {string|null|undefined} screenName
+ * @param {Set<string>|null} blockedPcf - lowercase label values
+ * @returns {boolean}
+ */
+function hasBlockedAccountLabel(element, tweet, screenName, blockedPcf) {
+    if (!blockedPcf || blockedPcf.size === 0) return false;
+
+    const structured = getProfile(screenName)?.pcf;
+    if (structured) return blockedPcf.has(structured);
+
+    const tokens = getAccountTypeTokens(element, tweet);
+    if (!tokens) return false;
+    for (const value of blockedPcf) {
+        for (const token of tokens) {
+            if (token.includes(value)) return true;
+        }
+    }
+    return false;
+}
+
 function hasBlockedTag(displayName, blockedTags) {
-    if (!displayName || !blockedTags || blockedTags.size === 0) return false;
-    
+    if (!blockedTags || blockedTags.size === 0) return false;
+    if (!displayName) return false;
+
     // Extract tags from display name
     const nameTags = extractTagsFromText(displayName);
     
@@ -585,8 +755,19 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug) {
         }, 50);
     };
 
+    // Re-derive recycled rows after an in-place SPA navigation, then rescan so the
+    // released elements are picked up again (issue #40).
+    const onNavigate = () => {
+        if (!isEnabled()) return;
+        if (releaseRecycledElements(debug) > 0) scanPage();
+    };
+    startNavigationWatcher(onNavigate);
+
     observer = new MutationObserver(mutations => {
         if (!isEnabled()) return;
+
+        // One string compare per batch; only does real work when the path changed.
+        checkForNavigation(onNavigate);
 
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
@@ -698,6 +879,8 @@ export async function processElement(element, {
     blockedCountries,
     blockedRegions,
     blockedTags,
+    blockedBioTags,
+    blockedPcf,
     blockedLanguages,
     blockedAffiliations,
     allowedUsers,
@@ -807,6 +990,8 @@ export async function processElement(element, {
         blockedCountries,
         blockedRegions,
         blockedAffiliations,
+        blockedBioTags,
+        blockedPcf,
         allowedUsers,
         settings,
         isUserCell,
@@ -1002,24 +1187,32 @@ let pendingBlockedTweetsArgs = null;
  * @param {Set} blockedTags - Set of blocked tags (lowercase)
  * @param {Object} settings - Settings object with highlightBlockedTweets flag
  */
-export function updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null, blockedAffiliations = null) {
-    pendingBlockedTweetsArgs = { blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations };
+export function updateBlockedTweets(filters) {
+    pendingBlockedTweetsArgs = filters || {};
     if (pendingBlockedTweetsUpdate !== null) return;
 
     pendingBlockedTweetsUpdate = requestAnimationFrame(() => {
         pendingBlockedTweetsUpdate = null;
         const args = pendingBlockedTweetsArgs;
         pendingBlockedTweetsArgs = null;
-        if (args) {
-            runUpdateBlockedTweets(args.blockedCountries, args.blockedRegions, args.blockedTags, args.settings, args.blockedLanguages, args.allowedUsers, args.blockedAffiliations);
-        }
+        if (args) runUpdateBlockedTweets(args);
     });
 }
 
 /**
  * Perform the actual single-pass tweet visibility update. See updateBlockedTweets.
  */
-function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings = {}, blockedLanguages = null, allowedUsers = null, blockedAffiliations = null) {
+function runUpdateBlockedTweets({
+    blockedCountries,
+    blockedRegions,
+    blockedTags,
+    blockedBioTags = null,
+    blockedPcf = null,
+    settings = {},
+    blockedLanguages = null,
+    allowedUsers = null,
+    blockedAffiliations = null
+} = {}) {
     const highlightMode = settings.highlightBlockedTweets === true;
     const hasTags = blockedTags && blockedTags.size > 0;
     const loggedInUser = getLoggedInUsername();
@@ -1047,6 +1240,8 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
         // removing a tag re-apply to already-rendered tweets — and, because we never
         // trust a cached flag, a recycled row can't inherit a previous occupant's block.
         const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
+        const isBioBlocked = hasBlockedBio(screenName, blockedBioTags);
+        const isLabelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
 
         // Affiliation lives on the cached info, keyed by name, like locationAccurate below.
         const cachedInfo = screenName ? userInfoCache.get(screenName) : null;
@@ -1055,7 +1250,8 @@ function runUpdateBlockedTweets(blockedCountries, blockedRegions, blockedTags, s
         // Who-they-are filters apply to quoted authors too; applyBlockState routes a
         // quoted verdict to the card-only marker instead of the row (issue #32).
         const matchesBlockList =
-            (isBlockedCountry || isBlockedRegion || isTagBlocked || isAffiliationBlocked) && !isExempt;
+            (isBlockedCountry || isBlockedRegion || isTagBlocked || isAffiliationBlocked ||
+                isBioBlocked || isLabelBlocked) && !isExempt;
 
         // VPN-hide is a setting, not a blocked-list entry, so it isn't what changed here —
         // but we must still honor it, or a blocked-list edit would wrongly un-hide a VPN
@@ -1127,6 +1323,98 @@ export function setupQuoteReveal() {
     document.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') reveal(event);
     }, true);
+}
+
+// ============================================
+// SPA NAVIGATION (issue #40)
+// ============================================
+
+/**
+ * Drop our markers from elements X has recycled for a DIFFERENT account.
+ *
+ * processElement already detects recycling — but only when it is actually invoked, and
+ * nothing re-invokes it on an in-place SPA navigation. Elements reach it via the
+ * MutationObserver (added nodes only) or scanPage, and queueForVisibility skips anything
+ * already carrying data-x-processed. So when X reuses the profile header for a different
+ * account — swapping only the TEXT inside it, which adds no node matching our selector —
+ * the previous account's badge, country and block verdict stay on screen and keep being
+ * applied to the new account (reported as @anurag_vb showing @anurag's data).
+ *
+ * Clearing the markers here is what lets the following scanPage re-derive the row from
+ * scratch. Uses the same extractors as processElement, so the two can't disagree about
+ * who a given element now belongs to.
+ * @param {Function} [debug]
+ * @returns {number} how many elements were released
+ */
+export function releaseRecycledElements(debug) {
+    let released = 0;
+
+    document.querySelectorAll('[data-x-screen-name]').forEach(element => {
+        const isUserCell = !!element.matches && element.matches(SELECTORS.USER_CELL);
+        const current = isUserCell
+            ? extractUsernameFromUserCell(element)
+            : extractUsername(element);
+
+        // Unreadable mid-render, or still the same account — leave it alone. A later
+        // pass in this navigation's settle window retries.
+        if (!current || current === element.dataset.xScreenName) return;
+
+        const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+        if (badge) badge.remove();
+        delete element.dataset.xProcessed;
+        delete element.dataset.xScreenName;
+        delete element.dataset.xCountry;
+        delete element.dataset.xBlock;
+        delete element.dataset.xQuoteBlock;
+        released++;
+    });
+
+    if (released > 0 && debug) {
+        debug(`Navigation: released ${released} recycled element(s)`);
+    }
+    return released;
+}
+
+// X swaps the header content asynchronously after the URL changes, so a single pass can
+// land before the new account is in the DOM (we'd re-read the OLD handle and conclude
+// nothing changed). Re-check across a short settle window instead.
+const NAV_SETTLE_DELAYS_MS = [150, 600, 1500];
+
+let lastPath = '';
+let navTimeouts = [];
+
+/**
+ * Detect an in-place SPA navigation and re-derive recycled rows.
+ *
+ * Deliberately NOT done by patching history.pushState: content scripts run in an isolated
+ * world, so a patch here never sees the page's own calls. We piggyback on the
+ * MutationObserver instead (X mutates heavily during navigation, so this fires promptly
+ * and costs one string compare per batch) with popstate covering back/forward.
+ * @param {Function} onNavigate - invoked after each settle-window pass
+ */
+function checkForNavigation(onNavigate) {
+    if (typeof location === 'undefined' || location.pathname === lastPath) return;
+    lastPath = location.pathname;
+
+    for (const id of navTimeouts) clearTimeout(id);
+    navTimeouts = NAV_SETTLE_DELAYS_MS.map(delay => setTimeout(onNavigate, delay));
+}
+
+/**
+ * Start watching for SPA navigations. Idempotent per observer lifecycle.
+ * @param {Function} onNavigate
+ */
+export function startNavigationWatcher(onNavigate) {
+    lastPath = typeof location !== 'undefined' ? location.pathname : '';
+
+    const onPopState = () => checkForNavigation(onNavigate);
+    window.addEventListener('popstate', onPopState);
+
+    observerCleanupFunctions.push(() => {
+        window.removeEventListener('popstate', onPopState);
+        for (const id of navTimeouts) clearTimeout(id);
+        navTimeouts = [];
+    });
 }
 
 // ============================================

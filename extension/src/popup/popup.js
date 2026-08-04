@@ -15,6 +15,8 @@ const elements = {
     toggleVpn: document.getElementById('toggle-vpn'),
     toggleVpnUsers: document.getElementById('toggle-vpn-users'),
     toggleSidebarLink: document.getElementById('toggle-sidebar-link'),
+    toggleInfoIcon: document.getElementById('toggle-info-icon'),
+    toggleClickDetails: document.getElementById('toggle-click-details'),
     toggleCaptureButton: document.getElementById('toggle-capture-button'),
     statCommunity: document.getElementById('stat-community'),
     btnClearCache: document.getElementById('btn-clear-cache'),
@@ -185,6 +187,12 @@ async function loadSettings() {
             elements.toggleVpnUsers.checked = settings.showVpnUsers !== false;
             elements.toggleSidebarLink.checked = settings.showSidebarBlockerLink !== false;
             elements.toggleCaptureButton.checked = settings.showCaptureButton !== false;
+            if (elements.toggleInfoIcon) {
+                elements.toggleInfoIcon.checked = settings.showInfoIcon !== false;
+            }
+            if (elements.toggleClickDetails) {
+                elements.toggleClickDetails.checked = settings.hovercardTrigger === 'click';
+            }
         }
     } catch (error) {
         console.error('Failed to load settings:', error);
@@ -282,6 +290,20 @@ function setupEventListeners() {
     elements.toggleSidebarLink.addEventListener('change', async e => {
         await saveSettings({ showSidebarBlockerLink: e.target.checked });
     });
+
+    // Info icon toggle (issue #38)
+    if (elements.toggleInfoIcon) {
+        elements.toggleInfoIcon.addEventListener('change', async e => {
+            await saveSettings({ showInfoIcon: e.target.checked });
+        });
+    }
+
+    // Hover vs click to open the account dossier (issue #38)
+    if (elements.toggleClickDetails) {
+        elements.toggleClickDetails.addEventListener('change', async e => {
+            await saveSettings({ hovercardTrigger: e.target.checked ? 'click' : 'hover' });
+        });
+    }
 
     // Capture button toggle
     if (elements.toggleCaptureButton) {

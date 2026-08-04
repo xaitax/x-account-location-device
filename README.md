@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.4.0-20c8e5?style=flat-square" alt="Version 3.4.0">
+  <img src="https://img.shields.io/badge/version-3.5.0-20c8e5?style=flat-square" alt="Version 3.5.0">
   <img src="https://img.shields.io/badge/Chrome_users-5%2C000%2B-20c8e5?style=flat-square" alt="More than 5,000 Chrome users">
   <img src="https://img.shields.io/badge/Firefox_users-about_500-20c8e5?style=flat-square" alt="About 500 Firefox users">
   <img src="https://img.shields.io/badge/community_cache-3.3M%2B-20c8e5?style=flat-square" alt="More than 3.3 million community cache entries">
@@ -41,8 +41,8 @@ X-Posed is a browser extension for Chrome and Firefox. It reads the same account
 <table>
   <tr>
     <td width="33%"><strong>Inline account details</strong><br>Country flags, source icons, location warnings, and an account-info button beside usernames.</td>
-    <td width="33%"><strong>Full account card</strong><br>Account age, verification, handle changes, account ID, affiliation, and the full source label.</td>
-    <td width="33%"><strong>Timeline filters</strong><br>Hide or highlight by country, region, language, display-name tag, affiliation, or location warning.</td>
+    <td width="33%"><strong>Full account card</strong><br>Account age, verification, handle changes, account ID, affiliation, follower, following and post counts, and the full source label.</td>
+    <td width="33%"><strong>Timeline filters</strong><br>Hide or highlight by country, region, language, display-name tag, bio tag, account type, affiliation, or location warning.</td>
   </tr>
   <tr>
     <td><strong>Quoted posts and people lists</strong><br>Quotes can be collapsed on their own. Matching accounts in people lists are highlighted, never removed.</td>
@@ -58,6 +58,13 @@ X-Posed reads these X fields:
 | `account_based_in` | Country or regional label |
 | `source` | Connection-source label and optional source-country flag |
 | `location_accurate` | Possible VPN/proxy warning |
+| `profile_bio.description` | Optional bio-tag filter |
+| `parody_commentary_fan_label` | Optional Parody / Commentary / Fan filter |
+| `relationship_counts`, `tweet_counts` | Follower, following and post counts on the account card |
+
+The last three arrive with the timeline X already loads, so reading them costs no additional
+requests and no rate limit. They are held in memory for the browsing session only, never written
+to disk and never sent to the community cache. Turn it off under **Settings → Display**.
 
 ## Screenshots
 
@@ -160,6 +167,8 @@ To call X's AboutAccount endpoint, the extension captures X authorization and CS
 
 When the community cache is enabled, X-Posed can contribute the public handle, country or region, source label, location-accuracy value, affiliation, account creation time, numeric account ID, and handle-change count. It does not send post text, direct messages, biographies, profile images, email addresses, follower lists, or X session headers to the cache.
 
+To power the bio and account-type filters and the counts on the account card, the extension reads the profile data X already includes in its own timeline responses. This happens entirely in the page: the relevant values are copied out, everything else is discarded, and nothing about it is written to disk or sent anywhere — including to the community cache. Values that describe *your* relationship to an account, such as whether you follow, mute or block it, are never read. The whole behaviour can be switched off under **Settings → Display**.
+
 Evidence images are created locally. Nothing is copied, saved, or shared until the user chooses to do so.
 
 | Permission | Reason |
@@ -203,7 +212,7 @@ Badge, account card, and filter result
 ```
 
 1. The content script watches X's changing page and queues visible usernames.
-2. A script in X's page context observes the authorization and CSRF headers used by X's own GraphQL requests.
+2. A script in X's page context observes the authorization and CSRF headers used by X's own GraphQL requests. The same script reads the profile data X already includes in its timeline responses, which is where bios, account-type labels and follower counts come from. This bypasses the lookup chain above entirely: nothing is requested, so nothing is spent against the rate limit.
 3. The headers are stored in extension-local storage and used only for requests to X.
 4. The background script checks the negative cache, local cache, community cache, and finally X.
 5. Requests for the same handle share one in-flight promise.
@@ -219,10 +228,13 @@ X frequently replaces and reuses page elements while scrolling. X-Posed keeps fi
 | Negative cache | Up to 1,000 entries for 5 minutes | Avoid repeated requests for unresolved handles |
 | Content-script cache | Up to 1,000 users per page session | Avoid repeated background messages while scrolling |
 | Account-card cache | Up to 200 users for 60 seconds | Avoid repeated full lookups between cards |
+| Profile cache | Up to 500 users per page session | Hold bios, account-type labels and counts read from the timeline |
 | Local extension cache | Up to 50,000 entries for 60 days | Keep common account data across restarts |
 | Community cache | 60-day Worker KV lifetime | Reuse public account data between users |
 
 The local cache stores location, source, accuracy, and affiliation state. Names, avatars, verification details, and most other card fields normally stay in memory. If extension storage reaches its quota, X-Posed removes the oldest quarter of the cache and retries.
+
+The profile cache is deliberately the most tightly bounded of these, because a long scrolling session can surface tens of thousands of accounts. It keeps a fixed 500 most-recently-seen accounts and evicts the oldest beyond that, stores only the handful of plain values it actually uses rather than X's original objects, truncates bios to 200 characters, and is discarded when the tab closes. Its memory ceiling is therefore a few hundred kilobytes regardless of how long the session runs.
 
 The community cache is enabled for new browser-extension installs and can be disabled in Options. Direct X lookups and the local cache still work when it is off, subject to X's rate limits.
 

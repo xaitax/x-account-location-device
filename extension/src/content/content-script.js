@@ -32,6 +32,7 @@ import {
 
 import { hovercard } from './hovercard.js';
 import { glyph } from './icons.js';
+import { setProfile, clearProfiles, profileCount } from './profile-cache.js';
 
 // ============================================
 // STATE
@@ -41,6 +42,8 @@ let isEnabled = true;
 let blockedCountries = new Set();
 let blockedRegions = new Set();
 let blockedTags = new Set();
+let blockedBioTags = new Set();
+let blockedPcf = new Set();
 let blockedLanguages = new Set();
 let allowedUsers = new Set();
 let blockedAffiliations = new Set();
@@ -132,7 +135,18 @@ function getCsrfToken() {
 }
 
 /**
- * Inject page script into MAIN world for header interception
+ * Fallback injection of the MAIN-world page script.
+ *
+ * The manifest registers page-script.js as a `world: "MAIN"` content script at
+ * document_start, which is what normally installs it: the browser guarantees that runs
+ * before any of X's own scripts. This appends it a second way, and matters because a
+ * <script src> load is asynchronous — X's bundle keeps running while it fetches, so a
+ * request issued in that window is missed. That is invisible on the timeline, where
+ * HomeTimeline fires again on every scroll, but a profile issues UserByScreenName exactly
+ * once, so losing that race means no bio, account type or counts for that profile at all.
+ *
+ * page-script.js short-circuits on window.__X_POSED_INJECTED__, so whichever path lands
+ * first wins and the other is a no-op.
  */
 function injectPageScript() {
     const scriptUrl = browserAPI.runtime.getURL('page-script.js');
@@ -206,6 +220,84 @@ function reprocessRowsMissingAffiliation() {
     document.querySelectorAll('[data-x-quote-block]').forEach(el => { delete el.dataset.xQuoteBlock; });
 
     if (memoizedScanPageFn) memoizedScanPageFn();
+}
+
+/**
+ * Snapshot of every filter, passed as one object so a new filter can't be mis-ordered
+ * into the wrong parameter slot.
+ */
+function currentFilters() {
+    return {
+        blockedCountries,
+        blockedRegions,
+        blockedTags,
+        blockedBioTags,
+        blockedPcf,
+        blockedLanguages,
+        blockedAffiliations,
+        allowedUsers,
+        settings
+    };
+}
+
+/**
+ * Tell the page script whether to read profile data out of X's own responses.
+ * Sent on page-script ready and whenever the setting changes, so the kill switch takes
+ * effect immediately rather than at the next reload.
+ */
+function syncEnrichmentSetting() {
+    window.dispatchEvent(new CustomEvent('x-posed-set-enrichment', {
+        detail: JSON.stringify({ enabled: settings.profileEnrichment !== false })
+    }));
+}
+
+/**
+ * Receive the profile data the page script harvested from X's timeline responses.
+ *
+ * This costs no API call — X already sent it. Everything lands in a bounded, session-only
+ * cache (see profile-cache.js for the memory contract); nothing here is persisted or
+ * contributed to the community cache, because bios are personal free text and follower
+ * counts are stale within minutes.
+ */
+function setupProfileListener() {
+    const onReady = () => syncEnrichmentSetting();
+
+    const onProfiles = event => {
+        let users;
+        try {
+            ({ users } = JSON.parse(event.detail || '{}'));
+        } catch {
+            return;
+        }
+        if (!Array.isArray(users) || users.length === 0) return;
+
+        for (const entry of users) {
+            setProfile(entry.u, {
+                bio: entry.b,
+                pcf: entry.p,
+                followers: entry.f,
+                following: entry.g,
+                tweets: entry.t,
+                media: entry.m
+            });
+        }
+        debug(`Harvested ${users.length} profile(s) from X's own response`);
+
+        // Newly known bios/labels can change a row's verdict, so re-derive what's on screen.
+        // Coalesced by updateBlockedTweets, so a burst of scroll responses costs one pass.
+        if (blockedBioTags.size > 0 || blockedPcf.size > 0) {
+            updateBlockedTweets(currentFilters());
+        }
+    };
+
+    window.addEventListener('x-posed-page-ready', onReady);
+    window.addEventListener('x-posed-profiles', onProfiles);
+
+    cleanupFunctions.push(() => {
+        window.removeEventListener('x-posed-page-ready', onReady);
+        window.removeEventListener('x-posed-profiles', onProfiles);
+        clearProfiles();
+    });
 }
 
 /**
@@ -299,8 +391,13 @@ async function handleBackgroundMessage(type, payload) {
                 // (so no new API calls). showVpnUsers and highlightBlockedTweets are in
                 // here because flipping them must recover rows hidden under the old value —
                 // otherwise a re-enabled "Show VPN/Proxy Users" never un-hides what it hid.
+                // showInfoIcon and hovercardTrigger are in here because both are baked into
+                // the badge at creation time (the circled-i is a child node; the trigger is
+                // the listener bound in hovercard.attach), so they only take effect once the
+                // badge is rebuilt.
                 const reapplyKeys = ['showFlags', 'flagFromDevice', 'showDevices', 'showVpnIndicator',
-                    'showCaptureButton', 'showVpnUsers', 'highlightBlockedTweets'];
+                    'showCaptureButton', 'showVpnUsers', 'highlightBlockedTweets',
+                    'showInfoIcon', 'hovercardTrigger'];
                 if (reapplyKeys.some(k => prevSettings[k] !== settings[k])) {
                     document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
                     document.querySelectorAll('[data-x-processed]').forEach(el => {
@@ -322,6 +419,10 @@ async function handleBackgroundMessage(type, payload) {
                 }
             }
             
+            if (prevSettings.profileEnrichment !== settings.profileEnrichment) {
+                syncEnrichmentSetting();
+            }
+
             if (prevSettings.showSidebarBlockerLink !== settings.showSidebarBlockerLink) {
                 if (settings.showSidebarBlockerLink === false) {
                     removeSidebarLink(debug);
@@ -334,22 +435,32 @@ async function handleBackgroundMessage(type, payload) {
 
         case MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED:
             blockedCountries = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+            updateBlockedTweets(currentFilters());
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED:
             blockedRegions = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+            updateBlockedTweets(currentFilters());
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_TAGS_UPDATED:
             blockedTags = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+            updateBlockedTweets(currentFilters());
+            return { success: true };
+
+        case MESSAGE_TYPES.BLOCKED_BIO_TAGS_UPDATED:
+            blockedBioTags = new Set(payload);
+            updateBlockedTweets(currentFilters());
+            return { success: true };
+
+        case MESSAGE_TYPES.BLOCKED_PCF_UPDATED:
+            blockedPcf = new Set(payload);
+            updateBlockedTweets(currentFilters());
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED:
             blockedLanguages = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+            updateBlockedTweets(currentFilters());
             return { success: true };
 
         case MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED:
@@ -363,13 +474,13 @@ async function handleBackgroundMessage(type, payload) {
                 // never spends an X API call, so this can't trip the rate limit.
                 reprocessRowsMissingAffiliation();
             } else {
-                updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+                updateBlockedTweets(currentFilters());
             }
             return { success: true };
 
         case MESSAGE_TYPES.ALLOWED_USERS_UPDATED:
             allowedUsers = new Set(payload);
-            updateBlockedTweets(blockedCountries, blockedRegions, blockedTags, settings, blockedLanguages, allowedUsers, blockedAffiliations);
+            updateBlockedTweets(currentFilters());
             return { success: true };
 
         default:
@@ -414,6 +525,7 @@ async function initialize() {
     try {
         // Set up listeners BEFORE injecting page script
         setupPageScriptListener();
+        setupProfileListener();
         setupBackgroundListener();
         setupAuthoritativeInfoListener();
         // "Click to show" on a collapsed quote card (issue #32). Must be bound in the
@@ -427,11 +539,13 @@ async function initialize() {
         injectPageScript();
 
         // Load initial settings, blocked countries/regions/tags/languages, and allowlisted accounts
-        const [settingsResponse, blockedResponse, blockedRegionsResponse, blockedTagsResponse, blockedLanguagesResponse, allowedUsersResponse, blockedAffiliationsResponse] = await Promise.all([
+        const [settingsResponse, blockedResponse, blockedRegionsResponse, blockedTagsResponse, blockedBioTagsResponse, blockedPcfResponse, blockedLanguagesResponse, allowedUsersResponse, blockedAffiliationsResponse] = await Promise.all([
             sendMessage({ type: MESSAGE_TYPES.GET_SETTINGS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_REGIONS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_TAGS }),
+            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_BIO_TAGS }),
+            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_PCF }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_LANGUAGES }),
             sendMessage({ type: MESSAGE_TYPES.GET_ALLOWED_USERS }),
             sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS })
@@ -458,6 +572,14 @@ async function initialize() {
 
         if (blockedTagsResponse?.success) {
             blockedTags = new Set(blockedTagsResponse.data);
+        }
+
+        if (blockedBioTagsResponse?.success) {
+            blockedBioTags = new Set(blockedBioTagsResponse.data);
+        }
+
+        if (blockedPcfResponse?.success) {
+            blockedPcf = new Set(blockedPcfResponse.data);
         }
 
         if (blockedLanguagesResponse?.success) {
@@ -530,6 +652,8 @@ function createMemoizedFunctions() {
         get blockedCountries() { return blockedCountries; },
         get blockedRegions() { return blockedRegions; },
         get blockedTags() { return blockedTags; },
+        get blockedBioTags() { return blockedBioTags; },
+        get blockedPcf() { return blockedPcf; },
         get blockedLanguages() { return blockedLanguages; },
         get allowedUsers() { return allowedUsers; },
         get blockedAffiliations() { return blockedAffiliations; },
@@ -616,11 +740,16 @@ window.__X_POSED_CONTENT__ = {
             memoizedScanPageFn();
         }
     },
+    // Harvest diagnostics: how many accounts we hold profile data for, and whether the
+    // page script was told enrichment is on.
+    profiles: () => ({ cached: profileCount(), enabled: settings.profileEnrichment !== false }),
     getState: () => ({
         isEnabled,
         blockedCountries: Array.from(blockedCountries),
         blockedRegions: Array.from(blockedRegions),
         blockedTags: Array.from(blockedTags),
+        blockedBioTags: Array.from(blockedBioTags),
+        blockedPcf: Array.from(blockedPcf),
         blockedLanguages: Array.from(blockedLanguages),
         allowedUsers: Array.from(allowedUsers),
         blockedAffiliations: Array.from(blockedAffiliations),

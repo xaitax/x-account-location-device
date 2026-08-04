@@ -574,6 +574,20 @@ export const blockedTags = new BlockedSetStorage({
     label: 'blocked tags',
     normalize: normalizeTag
 });
+// Bio tags are matched case-insensitively against the account's bio, so they are stored
+// lowercased — unlike display-name tags, which keep their case because emoji and bracketed
+// markers are compared literally.
+export const blockedBioTags = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_BIO_TAGS,
+    label: 'blocked bio tags',
+    normalize: normalizeLower
+});
+// X's Parody/Commentary/Fan labels, stored as the lowercase enum value.
+export const blockedPcf = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_PCF,
+    label: 'blocked account labels',
+    normalize: normalizeLower
+});
 export const blockedLanguages = new BlockedSetStorage({
     storageKey: STORAGE_KEYS.BLOCKED_LANGUAGES,
     label: 'blocked languages',
@@ -607,6 +621,8 @@ export async function initializeStorage() {
         blockedCountries.load(),
         blockedRegions.load(),
         blockedTags.load(),
+        blockedBioTags.load(),
+        blockedPcf.load(),
         blockedLanguages.load(),
         blockedAffiliations.load(),
         allowedUsers.load(),

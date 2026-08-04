@@ -4,14 +4,16 @@
  * Uses tabbed interface for switching between countries and regions
  */
 
-import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, CSS_CLASSES, TIMING } from '../shared/constants.js';
-import { formatCountryName, createElement, debounce, COMMON_PROFILE_TAGS } from '../shared/utils.js';
+import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, PCF_LABELS, CSS_CLASSES, TIMING } from '../shared/constants.js';
+import { formatCountryName, createElement, debounce, describeTagRisk } from '../shared/utils.js';
 import { glyph, flagImage } from './icons.js';
 
 // Track blocked sets globally for proper syncing
 let localBlockedCountries = null;
 let localBlockedRegions = null;
 let localBlockedTags = null;
+let localBlockedBioTags = null;
+let localBlockedPcf = null;
 let localBlockedLanguages = null;
 let localBlockedAffiliations = null;
 
@@ -28,10 +30,6 @@ let cachedLanguageFilter = '';
 // Current tab state
 let activeTab = 'countries';
 
-// Track custom tags added by user
-let cachedFilteredTags = null;
-let cachedTagFilter = '';
-
 /**
  * Show the blocker modal
  * @param {Set} blockedCountries - Set of currently blocked countries
@@ -43,7 +41,16 @@ let cachedTagFilter = '';
  * @param {Set} blockedLanguages - Set of currently blocked language codes (optional)
  * @param {Function} onLanguageAction - Callback for language actions (optional)
  */
-export function showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags = null, onTagAction = null, blockedLanguages = null, onLanguageAction = null, blockedAffiliations = null, onAffiliationAction = null) {
+export function showModal(config = {}) {
+    const {
+        blockedCountries, blockedRegions, onCountryAction, onRegionAction,
+        blockedTags = null, onTagAction = null,
+        blockedBioTags = null, onBioTagAction = null,
+        blockedPcf = null, onPcfAction = null,
+        blockedLanguages = null, onLanguageAction = null,
+        blockedAffiliations = null, onAffiliationAction = null
+    } = config;
+
     // Remove existing modal if present
     if (currentModal) {
         currentModal.remove();
@@ -54,6 +61,8 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     localBlockedCountries = blockedCountries;
     localBlockedRegions = blockedRegions;
     localBlockedTags = blockedTags || new Set();
+    localBlockedBioTags = blockedBioTags || new Set();
+    localBlockedPcf = blockedPcf || new Set();
     localBlockedLanguages = blockedLanguages || new Set();
     localBlockedAffiliations = blockedAffiliations || new Set();
 
@@ -78,12 +87,12 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     const { tabBar, switchTab, updateTabCounts } = createTabBar();
 
     // Initial tab counts
-    updateTabCounts(blockedCountries.size, blockedRegions.size, localBlockedTags.size, localBlockedLanguages.size, localBlockedAffiliations.size);
+    updateTabCounts(blockedCountries.size, blockedRegions.size, tagTotal(), localBlockedLanguages.size, localBlockedAffiliations.size);
 
     // Create bodies for all tabs
     const { body: countryBody, renderCountries, searchInput: countrySearch } = createCountryBody(blockedCountries, onCountryAction);
     const { body: regionBody, renderRegions, searchInput: regionSearch } = createRegionBody(blockedRegions, onRegionAction);
-    const { body: tagBody, renderTags, searchInput: tagSearch } = createTagBody(localBlockedTags, onTagAction);
+    const { body: tagBody, renderTags, searchInput: tagSearch } = createTagBody(onTagAction, onBioTagAction, onPcfAction);
     const { body: languageBody, renderLanguages, searchInput: languageSearch } = createLanguageBody(localBlockedLanguages, onLanguageAction);
     const { body: affiliationBody, renderAffiliations, searchInput: affiliationInput } = createAffiliationBody(localBlockedAffiliations, onAffiliationAction);
 
@@ -120,7 +129,7 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
             updateStats(blockedRegions.size, 'regions');
             setTimeout(() => regionSearch.focus(), 50);
         } else if (tab === 'tags') {
-            updateStats(localBlockedTags.size, 'tags');
+            updateStats(tagTotal(), 'tags');
             setTimeout(() => tagSearch.focus(), 50);
         } else if (tab === 'languages') {
             updateStats(localBlockedLanguages.size, 'languages');
@@ -139,24 +148,36 @@ export function showModal(blockedCountries, blockedRegions, onCountryAction, onR
     tabBar.querySelector('[data-tab="affiliations"]').addEventListener('click', () => handleTabSwitch('affiliations'));
 
     // Create footer
-    const footer = createFooter(
+    // Clearing the Tags tab clears all three of its lists — leaving two behind while the
+    // button says "Clear All" is exactly the kind of half-action that reads as a bug.
+    const onClearTags = async () => {
+        await Promise.all([
+            onTagAction ? onTagAction('clear') : null,
+            onBioTagAction ? onBioTagAction('clear') : null,
+            onPcfAction ? onPcfAction('clear') : null
+        ]);
+        localBlockedTags.clear();
+        localBlockedBioTags.clear();
+        localBlockedPcf.clear();
+    };
+
+    const footer = createFooter({
         blockedCountries,
         blockedRegions,
-        localBlockedTags,
-        localBlockedLanguages,
+        blockedLanguages: localBlockedLanguages,
         onCountryAction,
         onRegionAction,
-        onTagAction,
         onLanguageAction,
+        onClearTags,
         renderCountries,
         renderRegions,
         renderTags,
         renderLanguages,
-        () => {
+        onClose: () => {
             overlay.remove();
             currentModal = null;
         }
-    );
+    });
 
     // Assemble modal
     modal.appendChild(header);
@@ -667,237 +688,194 @@ function createAffiliationBody(blockedAffiliations, onAction) {
     return { body, renderAffiliations, searchInput: affiliationInput };
 }
 
-function createTagBody(blockedTags, onAction) {
-    const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'tags' });
-
-    const info = createElement('div', {
-        className: 'x-blocker-info',
-        textContent: 'Block users based on emojis, flags, or tags in their display names. Click to toggle blocking.'
-    });
-
-    // Custom tag input section
-    const inputSection = createElement('div', { className: 'x-blocker-tag-input-section' });
-    
-    const tagInput = createElement('input', {
-        type: 'text',
-        className: 'x-blocker-search x-blocker-tag-input',
-        placeholder: 'Enter emoji or tag (e.g., 🇷🇺 or [BOT])...'
-    });
-
-    const addBtn = createElement('button', {
-        className: 'x-blocker-btn x-blocker-btn-add',
-        textContent: '+ Add'
-    });
-
-    inputSection.appendChild(tagInput);
-    inputSection.appendChild(addBtn);
-
-    // Search for filtering existing tags
-    const search = createElement('input', {
-        type: 'text',
-        className: 'x-blocker-search',
-        placeholder: 'Search tags...'
-    });
-
-    // Common tags section
-    const commonSection = createElement('div', { className: 'x-blocker-common-tags-section' });
-    const commonLabel = createElement('div', { 
-        className: 'x-blocker-section-label',
-        textContent: 'Common Tags (click to block)'
-    });
-    const commonTagsContainer = createElement('div', { className: 'x-blocker-common-tags' });
-    commonSection.appendChild(commonLabel);
-    commonSection.appendChild(commonTagsContainer);
-
-    // Blocked tags section
-    const blockedSection = createElement('div', { className: 'x-blocker-blocked-tags-section' });
-    const blockedLabel = createElement('div', { 
-        className: 'x-blocker-section-label',
-        textContent: 'Blocked Tags'
-    });
-    const tagsContainer = createElement('div', { className: 'x-blocker-tags-list' });
-    blockedSection.appendChild(blockedLabel);
-    blockedSection.appendChild(tagsContainer);
-
-    body.appendChild(info);
-    body.appendChild(inputSection);
-    body.appendChild(search);
-    body.appendChild(blockedSection);
-
-    let currentFilter = '';
-
-    // Render common tags
-    const renderCommonTags = () => {
-        commonTagsContainer.replaceChildren();
-        const fragment = document.createDocumentFragment();
-
-        for (const tag of COMMON_PROFILE_TAGS) {
-            const isBlocked = blockedTags && blockedTags.has(tag);
-            const tagEl = createElement('span', {
-                className: `x-blocker-common-tag${isBlocked ? ' blocked' : ''}`,
-                textContent: tag,
-                title: isBlocked ? 'Click to unblock' : 'Click to block'
-            });
-
-            tagEl.addEventListener('click', async () => {
-                if (onAction) {
-                    const response = await onAction('toggle', tag);
-                    if (response?.success && response.data) {
-                        localBlockedTags.clear();
-                        for (const t of response.data) {
-                            localBlockedTags.add(t);
-                        }
-                        // Invalidate cache to force re-render (blockedTags mutated)
-                        cachedFilteredTags = null;
-                        cachedTagFilter = '';
-                        renderCommonTags();
-                        renderTags();
-                        updateStats(localBlockedTags.size, 'tags');
-                    }
-                }
-            });
-
-            fragment.appendChild(tagEl);
-        }
-
-        commonTagsContainer.appendChild(fragment);
-    };
-
-    // Render blocked tags list
-    const renderTags = (filter = currentFilter) => {
-        currentFilter = filter;
-        tagsContainer.replaceChildren();
-
-        if (!blockedTags || blockedTags.size === 0) {
-            const emptyMsg = createElement('div', {
-                className: 'x-blocker-empty',
-                textContent: 'No tags blocked yet. Add tags above or click common tags.'
-            });
-            tagsContainer.appendChild(emptyMsg);
-            return;
-        }
-
-        const filterLower = filter.toLowerCase();
-        const allTags = Array.from(blockedTags);
-        
-        let filteredTags;
-        if (cachedTagFilter === filterLower && cachedFilteredTags) {
-            filteredTags = cachedFilteredTags;
-        } else {
-            filteredTags = filterLower 
-                ? allTags.filter(tag => tag.toLowerCase().includes(filterLower))
-                : allTags;
-            cachedTagFilter = filterLower;
-            cachedFilteredTags = filteredTags;
-        }
-
-        const fragment = document.createDocumentFragment();
-
-        for (const tag of filteredTags) {
-            const item = createTagItem(tag, blockedTags, onAction, () => {
-                renderCommonTags();
-                renderTags();
-            });
-            fragment.appendChild(item);
-        }
-
-        tagsContainer.appendChild(fragment);
-    };
-
-    // Add tag handler
-    const addTag = async () => {
-        const tag = tagInput.value.trim();
-        if (!tag) return;
-
-        if (onAction) {
-            const response = await onAction('add', tag);
-            if (response?.success && response.data) {
-                localBlockedTags.clear();
-                for (const t of response.data) {
-                    localBlockedTags.add(t);
-                }
-                tagInput.value = '';
-                // Invalidate cache to force re-render
-                cachedFilteredTags = null;
-                cachedTagFilter = '';
-                renderCommonTags();
-                renderTags();
-                updateStats(localBlockedTags.size, 'tags');
-            }
-        }
-    };
-
-    addBtn.addEventListener('click', addTag);
-    tagInput.addEventListener('keydown', e => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            addTag();
-        }
-    });
-
-    // Search functionality with debouncing
-    const debouncedRender = debounce(value => {
-        renderTags(value);
-    }, TIMING.SEARCH_DEBOUNCE_MS);
-    
-    search.addEventListener('input', e => {
-        debouncedRender(e.target.value);
-    });
-
-    // Combined render function
-    const renderAll = () => {
-        renderCommonTags();
-        renderTags();
-    };
-
-    return { body, renderTags: renderAll, searchInput: tagInput };
+/** Total across every "who they are" tag list, for the tab badge and footer. */
+function tagTotal() {
+    return (localBlockedTags?.size || 0) + (localBlockedBioTags?.size || 0) + (localBlockedPcf?.size || 0);
 }
 
 /**
- * Create a single tag item for the blocked tags list
+ * One free-text tag section (display name, or bio). Each gets its own input, list and
+ * over-matching caution: the two match against completely different text, and presenting
+ * them as a single undifferentiated list is what made over-matching read as a bug.
+ * @param {{title: string, hint: string, placeholder: string, getSet: Function, onAction: Function}} opts
  */
-function createTagItem(tag, blockedTags, onAction, onUpdate) {
-    const item = createElement('div', { className: 'x-blocker-tag-item' });
+function createTagSection({ title, hint, placeholder, getSet, onAction }) {
+    const section = createElement('div', { className: 'x-blocker-tag-section' });
 
-    const tagText = createElement('span', {
-        className: 'x-blocker-tag-text',
-        textContent: tag
+    const heading = createElement('div', { className: 'x-blocker-tag-group' });
+    heading.appendChild(createElement('span', { className: 'x-blocker-tag-group-label', textContent: title }));
+    heading.appendChild(createElement('span', { className: 'x-blocker-tag-group-hint', textContent: hint }));
+
+    const inputRow = createElement('div', { className: 'x-blocker-tag-input-section' });
+    const input = createElement('input', {
+        type: 'text',
+        className: 'x-blocker-search x-blocker-tag-input',
+        placeholder
     });
+    const addBtn = createElement('button', { className: 'x-blocker-btn x-blocker-btn-add', textContent: '+ Add' });
+    inputRow.appendChild(input);
+    inputRow.appendChild(addBtn);
 
-    const removeBtn = createElement('button', {
-        className: 'x-blocker-tag-remove',
-        textContent: '×',
-        title: 'Remove tag'
-    });
+    const riskNote = createElement('div', { className: 'x-blocker-risk-note' });
+    riskNote.style.display = 'none';
 
-    item.appendChild(tagText);
-    item.appendChild(removeBtn);
+    const list = createElement('div', { className: 'x-blocker-tags-list' });
 
-    removeBtn.addEventListener('click', async e => {
-        e.stopPropagation();
-        if (onAction) {
-            const response = await onAction('remove', tag);
-            if (response?.success && response.data) {
-                localBlockedTags.clear();
-                for (const t of response.data) {
-                    localBlockedTags.add(t);
+    section.appendChild(heading);
+    section.appendChild(inputRow);
+    section.appendChild(riskNote);
+    section.appendChild(list);
+
+    const showRisk = tag => {
+        const message = tag ? describeTagRisk(tag) : null;
+        riskNote.textContent = message || '';
+        riskNote.style.display = message ? 'block' : 'none';
+    };
+
+    const render = () => {
+        list.replaceChildren();
+        const values = Array.from(getSet() || []);
+
+        if (values.length === 0) {
+            list.appendChild(createElement('div', {
+                className: 'x-blocker-empty',
+                textContent: 'Nothing blocked here yet.'
+            }));
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        for (const value of values.sort()) {
+            const item = createElement('div', { className: 'x-blocker-tag-item' });
+            item.appendChild(createElement('span', { className: 'x-blocker-tag-text', textContent: value }));
+
+            const removeBtn = createElement('button', {
+                className: 'x-blocker-tag-remove',
+                textContent: '×',
+                title: `Remove ${value}`
+            });
+            removeBtn.addEventListener('click', async e => {
+                e.stopPropagation();
+                if (!onAction) return;
+                const response = await onAction('remove', value);
+                if (response?.success) {
+                    showRisk(null);
+                    render();
+                    updateStats(tagTotal(), 'tags');
                 }
-                // Invalidate cache to force re-render
-                cachedFilteredTags = null;
-                cachedTagFilter = '';
-                updateStats(localBlockedTags.size, 'tags');
-                // Update tab count by directly accessing the DOM element
-                const tagsCountEl = document.getElementById('modal-tags-count');
-                if (tagsCountEl) {
-                    tagsCountEl.textContent = localBlockedTags.size;
-                    tagsCountEl.style.display = localBlockedTags.size > 0 ? 'inline-flex' : 'none';
-                }
-                if (onUpdate) onUpdate();
-            }
+            });
+
+            item.appendChild(removeBtn);
+            fragment.appendChild(item);
+        }
+        list.appendChild(fragment);
+    };
+
+    const add = async () => {
+        const value = input.value.trim();
+        if (!value || !onAction) return;
+        const response = await onAction('add', value);
+        if (response?.success) {
+            input.value = '';
+            render();
+            showRisk(value);
+            updateStats(tagTotal(), 'tags');
+        }
+    };
+
+    addBtn.addEventListener('click', add);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            add();
         }
     });
 
-    return item;
+    return { section, render, input };
+}
+
+/**
+ * Tags panel: three things an account can be filtered by, each matched against a different
+ * part of the account and therefore given its own section.
+ *   - Display name  - substring of the name shown next to the handle
+ *   - Bio           - substring of the profile description
+ *   - Account label - X's own structured Parody / Commentary / Fan value
+ */
+function createTagBody(onTagAction, onBioTagAction, onPcfAction) {
+    const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'tags' });
+
+    body.appendChild(createElement('div', {
+        className: 'x-blocker-info',
+        textContent: 'Filter accounts by what they say about themselves — the name they display, the text of their bio, or the account label X gives them.'
+    }));
+
+    const nameSection = createTagSection({
+        title: 'Display name contains',
+        hint: 'Matched anywhere inside the name shown on a post',
+        placeholder: 'Enter emoji or text (e.g., ⭐ or [BOT])...',
+        getSet: () => localBlockedTags,
+        onAction: onTagAction
+    });
+
+    const bioSection = createTagSection({
+        title: 'Bio contains',
+        hint: ' Matched anywhere inside the account’s bio',
+        placeholder: 'Enter a word or phrase from a bio...',
+        getSet: () => localBlockedBioTags,
+        onAction: onBioTagAction
+    });
+
+    // Account label is a CLOSED set, so it gets pills rather than free text.
+    const labelSection = createElement('div', { className: 'x-blocker-tag-section' });
+    const labelHeading = createElement('div', { className: 'x-blocker-tag-group' });
+    labelHeading.appendChild(createElement('span', {
+        className: 'x-blocker-tag-group-label',
+        textContent: 'Account label'
+    }));
+    labelHeading.appendChild(createElement('span', {
+        className: 'x-blocker-tag-group-hint',
+        textContent: 'X’s own label — works even when the name doesn’t say so'
+    }));
+    const labelPills = createElement('div', { className: 'x-blocker-common-tags' });
+    labelSection.appendChild(labelHeading);
+    labelSection.appendChild(labelPills);
+
+    const renderLabels = () => {
+        labelPills.replaceChildren();
+        const fragment = document.createDocumentFragment();
+        for (const label of PCF_LABELS) {
+            const isBlocked = localBlockedPcf.has(label.value);
+            const pill = createElement('span', {
+                className: `x-blocker-common-tag${isBlocked ? ' blocked' : ''}`,
+                textContent: label.name,
+                title: isBlocked ? 'Click to unblock' : 'Click to block'
+            });
+            pill.addEventListener('click', async () => {
+                if (!onPcfAction) return;
+                const response = await onPcfAction('toggle', label.value);
+                if (response?.success && response.data) {
+                    localBlockedPcf.clear();
+                    for (const v of response.data) localBlockedPcf.add(v);
+                    renderLabels();
+                    updateStats(tagTotal(), 'tags');
+                }
+            });
+            fragment.appendChild(pill);
+        }
+        labelPills.appendChild(fragment);
+    };
+
+    body.appendChild(nameSection.section);
+    body.appendChild(bioSection.section);
+    body.appendChild(labelSection);
+
+    const renderAll = () => {
+        nameSection.render();
+        bioSection.render();
+        renderLabels();
+    };
+
+    return { body, renderTags: renderAll, searchInput: nameSection.input };
 }
 
 /**
@@ -1080,7 +1058,11 @@ function createLanguageItem(language, blockedLanguages, onAction) {
 /**
  * Create modal footer
  */
-function createFooter(blockedCountries, blockedRegions, blockedTags, blockedLanguages, onCountryAction, onRegionAction, onTagAction, onLanguageAction, renderCountries, renderRegions, renderTags, renderLanguages, onClose) {
+function createFooter({
+    blockedCountries, blockedRegions, blockedLanguages,
+    onCountryAction, onRegionAction, onLanguageAction, onClearTags,
+    renderCountries, renderRegions, renderTags, renderLanguages, onClose
+}) {
     const footer = createElement('div', { className: 'x-blocker-footer' });
 
     const stats = createElement('div', {
@@ -1112,16 +1094,10 @@ function createFooter(blockedCountries, blockedRegions, blockedTags, blockedLang
                     renderRegions();
                     updateStats(0, 'regions');
                 }
-            } else if (activeTab === 'tags' && onTagAction) {
-                const response = await onTagAction('clear');
-                if (response?.success) {
-                    blockedTags.clear();
-                    // Invalidate cache to force re-render (blockedTags mutated)
-                    cachedFilteredTags = null;
-                    cachedTagFilter = '';
-                    renderTags();
-                    updateStats(0, 'tags');
-                }
+            } else if (activeTab === 'tags' && onClearTags) {
+                await onClearTags();
+                renderTags();
+                updateStats(0, 'tags');
             } else if (activeTab === 'languages' && onLanguageAction) {
                 const response = await onLanguageAction('clear');
                 if (response?.success) {

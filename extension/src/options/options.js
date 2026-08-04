@@ -4,8 +4,8 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, LANGUAGE_LIST, LANGUAGE_NAMES, STORAGE_KEYS, TIMING } from '../shared/constants.js';
-import { getFlagEmoji, formatCountryName, debounce } from '../shared/utils.js';
+import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, LANGUAGE_LIST, LANGUAGE_NAMES, PCF_LABELS, STORAGE_KEYS, TIMING } from '../shared/constants.js';
+import { getFlagEmoji, formatCountryName, debounce, describeTagRisk } from '../shared/utils.js';
 import { deviceIcon, glyph } from '../content/icons.js';
 
 // Region storage uses lowercase keys, but we display proper names
@@ -21,6 +21,9 @@ const elements = {
     optDevices: document.getElementById('opt-devices'),
     optVpn: document.getElementById('opt-vpn'),
     optCaptureButton: document.getElementById('opt-capture-button'),
+    optProfileEnrichment: document.getElementById('opt-profile-enrichment'),
+    optInfoIcon: document.getElementById('opt-info-icon'),
+    optClickDetails: document.getElementById('opt-click-details'),
     optShowVpnUsers: document.getElementById('opt-show-vpn-users'),
     optSidebarLink: document.getElementById('opt-sidebar-link'),
     optChangelogOnUpdate: document.getElementById('opt-changelog-on-update'),
@@ -55,6 +58,12 @@ const elements = {
     blockedTagsCount: document.getElementById('blocked-tags-count'),
     tagInput: document.getElementById('tag-input'),
     btnAddTag: document.getElementById('btn-add-tag'),
+    tagRiskNote: document.getElementById('tag-risk-note'),
+    blockedBioTagsList: document.getElementById('blocked-bio-tags-list'),
+    bioTagInput: document.getElementById('bio-tag-input'),
+    btnAddBioTag: document.getElementById('btn-add-bio-tag'),
+    bioTagRiskNote: document.getElementById('bio-tag-risk-note'),
+    pcfLabelPills: document.getElementById('pcf-label-pills'),
     blockedAffiliationsList: document.getElementById('blocked-affiliations-list'),
     blockedAffiliationsCount: document.getElementById('blocked-affiliations-count'),
     affiliationInput: document.getElementById('affiliation-input'),
@@ -107,6 +116,8 @@ let currentSettings = {};
 let blockedCountries = [];
 let blockedRegions = [];
 let blockedTags = [];
+let blockedBioTags = [];
+let blockedPcf = [];
 let blockedAffiliations = [];
 let blockedLanguages = [];
 let allowedUsers = [];
@@ -292,6 +303,15 @@ async function loadSettings() {
             if (elements.optCaptureButton) {
                 elements.optCaptureButton.checked = currentSettings.showCaptureButton !== false;
             }
+            if (elements.optProfileEnrichment) {
+                elements.optProfileEnrichment.checked = currentSettings.profileEnrichment !== false;
+            }
+            if (elements.optInfoIcon) {
+                elements.optInfoIcon.checked = currentSettings.showInfoIcon !== false;
+            }
+            if (elements.optClickDetails) {
+                elements.optClickDetails.checked = currentSettings.hovercardTrigger === 'click';
+            }
             if (elements.optSidebarLink) {
                 elements.optSidebarLink.checked = currentSettings.showSidebarBlockerLink !== false;
             }
@@ -377,74 +397,96 @@ function updateBlockedRegionsCount() {
 }
 
 /**
- * Load blocked tags
+ * The Tags panel holds three lists, each matched against a different part of an account:
+ * the display name, the bio, and X's own Parody/Commentary/Fan label. They are rendered
+ * separately because presenting them as one list is what makes an over-matching term read
+ * as a bug in the extension.
  */
+
 async function loadBlockedTags() {
     try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_BLOCKED_TAGS
-        });
+        const [tagsResponse, bioResponse, pcfResponse] = await Promise.all([
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_TAGS }),
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_BIO_TAGS }),
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_PCF })
+        ]);
 
-        if (response?.success) {
-            blockedTags = response.data || [];
-            renderBlockedTags();
-            updateBlockedTagsCount();
-        }
+        if (tagsResponse?.success) blockedTags = tagsResponse.data || [];
+        if (bioResponse?.success) blockedBioTags = bioResponse.data || [];
+        if (pcfResponse?.success) blockedPcf = pcfResponse.data || [];
+
+        renderAllTagLists();
     } catch (error) {
         console.error('Failed to load blocked tags:', error);
     }
 }
 
-/**
- * Update blocked tags count badge
- */
-function updateBlockedTagsCount() {
-    if (elements.blockedTagsCount) {
-        elements.blockedTagsCount.textContent = blockedTags.length;
-        elements.blockedTagsCount.style.display = blockedTags.length > 0 ? 'inline-flex' : 'none';
-    }
+function renderAllTagLists() {
+    renderBlockedTags();
+    renderBlockedBioTags();
+    renderPcfLabels();
+    updateBlockedTagsCount();
 }
 
 /**
- * Render blocked tags list
+ * The tab badge counts every kind of "who they are" tag, so the number matches what the
+ * panel actually contains.
  */
-function renderBlockedTags() {
-    const list = elements.blockedTagsList;
+function updateBlockedTagsCount() {
+    if (!elements.blockedTagsCount) return;
+    const total = blockedTags.length + blockedBioTags.length + blockedPcf.length;
+    elements.blockedTagsCount.textContent = total;
+    elements.blockedTagsCount.style.display = total > 0 ? 'inline-flex' : 'none';
+}
+
+/**
+ * Show (or clear) the over-matching caution for a term that was just added.
+ * Non-blocking by design — over-matching is sometimes intended.
+ * @param {HTMLElement|null} note
+ * @param {string|null} tag
+ */
+function showTagRisk(note, tag) {
+    if (!note) return;
+    const message = tag ? describeTagRisk(tag) : null;
+    note.textContent = message || '';
+    note.hidden = !message;
+}
+
+/**
+ * Render one blocked-term list.
+ * @param {HTMLElement|null} list
+ * @param {string[]} values
+ * @param {string} emptyText
+ * @param {(value: string) => void} onRemove
+ */
+function renderTermList(list, values, emptyText, onRemove) {
     if (!list) return;
-    
-    // Clear list safely
     list.replaceChildren();
-    
-    if (blockedTags.length === 0) {
+
+    if (values.length === 0) {
         const emptyState = document.createElement('p');
         emptyState.className = 'empty-state';
-        emptyState.textContent = 'No tags blocked';
+        emptyState.textContent = emptyText;
         list.appendChild(emptyState);
         return;
     }
-    
-    for (const tag of blockedTags.sort()) {
+
+    for (const value of [...values].sort()) {
         const item = document.createElement('div');
         item.className = 'blocked-item';
-        
-        // Build blocked-item-info
+
         const itemInfo = document.createElement('div');
         itemInfo.className = 'blocked-item-info';
-        
-        // Tag display
-        const tagSpan = document.createElement('span');
-        tagSpan.className = 'blocked-tag-text';
-        tagSpan.textContent = tag;
-        itemInfo.appendChild(tagSpan);
-        
+        const label = document.createElement('span');
+        label.className = 'blocked-tag-text';
+        label.textContent = value;
+        itemInfo.appendChild(label);
         item.appendChild(itemInfo);
-        
-        // Remove button
+
         const removeBtn = document.createElement('button');
         removeBtn.className = 'blocked-remove';
-        removeBtn.dataset.tag = tag;
-        removeBtn.setAttribute('aria-label', `Remove ${tag}`);
-        
+        removeBtn.setAttribute('aria-label', `Remove ${value}`);
+
         const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         removeSvg.setAttribute('viewBox', '0 0 24 24');
         removeSvg.setAttribute('width', '16');
@@ -454,14 +496,142 @@ function renderBlockedTags() {
         removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
         removeSvg.appendChild(removePath);
         removeBtn.appendChild(removeSvg);
-        
-        // Add event handler directly
-        removeBtn.addEventListener('click', async () => {
-            await removeBlockedTag(tag);
-        });
-        
+        removeBtn.addEventListener('click', () => onRemove(value));
+
         item.appendChild(removeBtn);
         list.appendChild(item);
+    }
+}
+
+function renderBlockedTags() {
+    renderTermList(
+        elements.blockedTagsList,
+        blockedTags,
+        'No display-name tags blocked',
+        value => removeTagFrom(MESSAGE_TYPES.SET_BLOCKED_TAGS, 'tag', value)
+    );
+}
+
+function renderBlockedBioTags() {
+    renderTermList(
+        elements.blockedBioTagsList,
+        blockedBioTags,
+        'No bio terms blocked',
+        value => removeTagFrom(MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, 'tag', value)
+    );
+}
+
+/** X's account labels are a closed set, so they are pills rather than a free-text list. */
+function renderPcfLabels() {
+    const container = elements.pcfLabelPills;
+    if (!container) return;
+
+    container.replaceChildren();
+    for (const label of PCF_LABELS) {
+        const isBlocked = blockedPcf.includes(label.value);
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = `tag-pill${isBlocked ? ' blocked' : ''}`;
+        pill.textContent = label.name;
+        pill.title = isBlocked ? `Click to unblock ${label.name}` : `Click to block ${label.name}`;
+        pill.setAttribute('aria-pressed', isBlocked ? 'true' : 'false');
+        pill.addEventListener('click', () => togglePcfLabel(label.value));
+        container.appendChild(pill);
+    }
+}
+
+/**
+ * Generic add for the two free-text term lists.
+ * @param {string} messageType
+ * @param {string} key - payload key the background expects
+ * @param {string} value
+ * @param {HTMLElement|null} riskNote
+ */
+async function addTagTo(messageType, key, value, riskNote) {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return;
+
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: messageType,
+            payload: { action: 'add', [key]: trimmed }
+        });
+        if (response?.success) {
+            applyTagResponse(messageType, response.data || []);
+            renderAllTagLists();
+            showTagRisk(riskNote, trimmed);
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to add blocked term:', error);
+    }
+}
+
+async function removeTagFrom(messageType, key, value) {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: messageType,
+            payload: { action: 'remove', [key]: value }
+        });
+        if (response?.success) {
+            applyTagResponse(messageType, response.data || []);
+            renderAllTagLists();
+            showTagRisk(elements.tagRiskNote, null);
+            showTagRisk(elements.bioTagRiskNote, null);
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to remove blocked term:', error);
+    }
+}
+
+async function togglePcfLabel(value) {
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_PCF,
+            payload: { action: 'toggle', label: value }
+        });
+        if (response?.success) {
+            blockedPcf = response.data || [];
+            renderAllTagLists();
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to toggle account label:', error);
+    }
+}
+
+/** Route a blocked-set response back to the right local array. */
+function applyTagResponse(messageType, data) {
+    if (messageType === MESSAGE_TYPES.SET_BLOCKED_TAGS) blockedTags = data;
+    else if (messageType === MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS) blockedBioTags = data;
+    else if (messageType === MESSAGE_TYPES.SET_BLOCKED_PCF) blockedPcf = data;
+}
+
+/**
+ * Clear every list in the panel. Clearing only one while the button says "Clear All" is
+ * the kind of half-action that reads as a bug.
+ */
+async function clearAllBlockedTags() {
+    const total = blockedTags.length + blockedBioTags.length + blockedPcf.length;
+    if (total === 0) return;
+    if (!confirm('Are you sure you want to clear all display-name tags, bio terms and account labels?')) return;
+
+    try {
+        await Promise.all([
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_TAGS, payload: { action: 'clear' } }),
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, payload: { action: 'clear' } }),
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_PCF, payload: { action: 'clear' } })
+        ]);
+        blockedTags = [];
+        blockedBioTags = [];
+        blockedPcf = [];
+        renderAllTagLists();
+        showTagRisk(elements.tagRiskNote, null);
+        showTagRisk(elements.bioTagRiskNote, null);
+        showSaveStatus();
+    } catch (error) {
+        console.error('Failed to clear blocked tags:', error);
     }
 }
 
@@ -616,75 +786,6 @@ async function clearAllBlockedAffiliations() {
 }
 
 /**
- * Add a new blocked tag
- */
-async function addBlockedTag(tag) {
-    if (!tag || tag.trim() === '') return;
-    
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_TAGS,
-            payload: { action: 'add', tag: tag.trim() }
-        });
-
-        if (response?.success) {
-            blockedTags = response.data || [];
-            renderBlockedTags();
-            updateBlockedTagsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to add blocked tag:', error);
-    }
-}
-
-/**
- * Remove a blocked tag
- */
-async function removeBlockedTag(tag) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_TAGS,
-            payload: { action: 'remove', tag }
-        });
-
-        if (response?.success) {
-            blockedTags = response.data || [];
-            renderBlockedTags();
-            updateBlockedTagsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to remove blocked tag:', error);
-    }
-}
-
-/**
- * Clear all blocked tags
- */
-async function clearAllBlockedTags() {
-    if (blockedTags.length === 0) return;
-    
-    if (!confirm('Are you sure you want to unblock all tags?')) return;
-    
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_TAGS,
-            payload: { action: 'clear' }
-        });
-
-        if (response?.success) {
-            blockedTags = [];
-            renderBlockedTags();
-            updateBlockedTagsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to clear blocked tags:', error);
-    }
-}
-
-/**
  * Load blocked languages (issue #25)
  */
 async function loadBlockedLanguages() {
@@ -831,7 +932,7 @@ function renderLanguageGrid(filter = '') {
         if (isBlocked) {
             const blockedSpan = document.createElement('span');
             blockedSpan.className = 'country-item-blocked';
-            blockedSpan.textContent = '✓';
+            blockedSpan.textContent = 'BLOCKED';
             item.appendChild(blockedSpan);
         }
 
@@ -1154,7 +1255,7 @@ function renderCountryGrid(filter = '') {
         if (isBlocked) {
             const blockedSpan = document.createElement('span');
             blockedSpan.className = 'country-item-blocked';
-            blockedSpan.textContent = '✓';
+            blockedSpan.textContent = 'BLOCKED';
             item.appendChild(blockedSpan);
         }
         
@@ -1212,7 +1313,7 @@ function renderRegionGrid(filter = '') {
         if (isBlocked) {
             const blockedSpan = document.createElement('span');
             blockedSpan.className = 'country-item-blocked';
-            blockedSpan.textContent = '✓';
+            blockedSpan.textContent = 'BLOCKED';
             item.appendChild(blockedSpan);
         }
         
@@ -1963,6 +2064,27 @@ function setupEventListeners() {
         });
     }
 
+    // Profile enrichment kill switch
+    if (elements.optProfileEnrichment) {
+        elements.optProfileEnrichment.addEventListener('change', e => {
+            saveSettings({ profileEnrichment: e.target.checked });
+        });
+    }
+
+    // Info icon toggle (issue #38)
+    if (elements.optInfoIcon) {
+        elements.optInfoIcon.addEventListener('change', e => {
+            saveSettings({ showInfoIcon: e.target.checked });
+        });
+    }
+
+    // Hover vs click to open the account dossier (issue #38)
+    if (elements.optClickDetails) {
+        elements.optClickDetails.addEventListener('change', e => {
+            saveSettings({ hovercardTrigger: e.target.checked ? 'click' : 'hover' });
+        });
+    }
+
     // Sidebar link toggle
     if (elements.optSidebarLink) {
         elements.optSidebarLink.addEventListener('change', e => {
@@ -2141,28 +2263,25 @@ function setupEventListeners() {
         elements.btnClearBlockedAffiliations.addEventListener('click', clearAllBlockedAffiliations);
     }
 
-    // Tags: Add tag button
-    if (elements.btnAddTag && elements.tagInput) {
-        elements.btnAddTag.addEventListener('click', async () => {
-            const tag = elements.tagInput.value.trim();
-            if (tag) {
-                await addBlockedTag(tag);
-                elements.tagInput.value = '';
-            }
-        });
-        
-        // Also allow Enter key to add tag
-        elements.tagInput.addEventListener('keydown', e => {
+    // Tags: display-name and bio inputs (button + Enter on each)
+    const wireTagInput = (input, button, messageType, riskNote) => {
+        if (!input || !button) return;
+        const submit = () => {
+            const value = input.value.trim();
+            if (!value) return;
+            addTagTo(messageType, 'tag', value, riskNote);
+            input.value = '';
+        };
+        button.addEventListener('click', submit);
+        input.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                const tag = elements.tagInput.value.trim();
-                if (tag) {
-                    addBlockedTag(tag);
-                    elements.tagInput.value = '';
-                }
+                submit();
             }
         });
-    }
+    };
+    wireTagInput(elements.tagInput, elements.btnAddTag, MESSAGE_TYPES.SET_BLOCKED_TAGS, elements.tagRiskNote);
+    wireTagInput(elements.bioTagInput, elements.btnAddBioTag, MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, elements.bioTagRiskNote);
 
     // Clear all blocked tags
     if (elements.btnClearBlockedTags) {
@@ -2247,6 +2366,8 @@ function setupEventListeners() {
                 blockedCountries,
                 blockedRegions,
                 blockedTags,
+                blockedBioTags,
+                blockedPcf,
                 blockedLanguages,
                 blockedAffiliations,
                 allowedUsers,
@@ -2375,6 +2496,8 @@ async function handleImportFile(file) {
                 blockedCountries: data.blockedCountries,
                 blockedRegions: data.blockedRegions,
                 blockedTags: data.blockedTags,
+                blockedBioTags: data.blockedBioTags,
+                blockedPcf: data.blockedPcf,
                 blockedLanguages: data.blockedLanguages,
                 blockedAffiliations: data.blockedAffiliations,
                 allowedUsers: data.allowedUsers,
@@ -2388,6 +2511,8 @@ async function handleImportFile(file) {
             if (response.importedBlockedCountries) results.push(`${response.importedBlockedCountries} blocked countries`);
             if (response.importedBlockedRegions) results.push(`${response.importedBlockedRegions} blocked regions`);
             if (response.importedBlockedTags) results.push(`${response.importedBlockedTags} blocked tags`);
+            if (response.importedBlockedBioTags) results.push(`${response.importedBlockedBioTags} blocked bio terms`);
+            if (response.importedBlockedPcf) results.push(`${response.importedBlockedPcf} blocked account labels`);
             if (response.importedBlockedLanguages) results.push(`${response.importedBlockedLanguages} blocked languages`);
             if (response.importedBlockedAffiliations) results.push(`${response.importedBlockedAffiliations} blocked affiliations`);
             if (response.importedAllowedUsers) results.push(`${response.importedAllowedUsers} always-show accounts`);

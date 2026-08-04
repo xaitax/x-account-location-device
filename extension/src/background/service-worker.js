@@ -10,7 +10,7 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, affiliationWasChecked } from '../shared/constants.js';
-import { userCache, blockedCountries, blockedRegions, blockedTags, blockedLanguages, blockedAffiliations, allowedUsers, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { userCache, blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedPcf, blockedLanguages, blockedAffiliations, allowedUsers, settings, headersStorage, initializeStorage } from '../shared/storage.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
 import cloudCache from './cloud-cache.js';
@@ -107,6 +107,22 @@ async function handleMessage(message, _sender) {
 
             case MESSAGE_TYPES.SET_BLOCKED_TAGS:
                 return await handleSetBlockedTags(payload);
+
+            case MESSAGE_TYPES.GET_BLOCKED_BIO_TAGS:
+                return handleGetBlockedSet(blockedBioTags);
+
+            case MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS:
+                return await handleSetBlockedSet(blockedBioTags, MESSAGE_TYPES.BLOCKED_BIO_TAGS_UPDATED, {
+                    action: payload?.action, value: payload?.tag, values: payload?.tags
+                });
+
+            case MESSAGE_TYPES.GET_BLOCKED_PCF:
+                return handleGetBlockedSet(blockedPcf);
+
+            case MESSAGE_TYPES.SET_BLOCKED_PCF:
+                return await handleSetBlockedSet(blockedPcf, MESSAGE_TYPES.BLOCKED_PCF_UPDATED, {
+                    action: payload?.action, value: payload?.label, values: payload?.labels
+                });
 
             case MESSAGE_TYPES.GET_BLOCKED_LANGUAGES:
                 return handleGetBlockedLanguages();
@@ -550,6 +566,14 @@ function handleGetBlockedCountries() {
 }
 
 /**
+ * Generic read handler for a blocked-set storage.
+ * @param {object} store - a BlockedSetStorage singleton
+ */
+function handleGetBlockedSet(store) {
+    return { success: true, data: store.getAll(), size: store.size };
+}
+
+/**
  * Generic handler for the blocked-set storages (countries/regions/tags).
  * Applies the requested mutation, persists, then broadcasts `updatedType`.
  *
@@ -912,13 +936,20 @@ async function handleSyncLocalToCloud() {
 /**
  * Import data handler - imports settings, blocked countries, blocked regions, and cache from exported JSON
  */
-async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedLanguages: importBlockedLanguages, blockedAffiliations: importBlockedAffiliations, allowedUsers: importAllowedUsers, cache: importCache }) {
+async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedBioTags: importBlockedBioTags, blockedPcf: importBlockedPcf, blockedLanguages: importBlockedLanguages, blockedAffiliations: importBlockedAffiliations, allowedUsers: importAllowedUsers, cache: importCache }) {
     const results = {
         settings: false,
         blockedCountries: { count: 0 },
         blockedRegions: { count: 0 },
         blockedTags: { count: 0 },
+        blockedBioTags: { count: 0 },
+        blockedPcf: { count: 0 },
         blockedLanguages: { count: 0 },
+        // Was missing: the import path writes results.blockedAffiliations.count, and the
+        // catch block reads it again, so a backup containing affiliations threw a
+        // TypeError mid-import — leaving allowlist and cache unimported and no tab
+        // broadcast sent, reported to the user only as "Cannot read properties of undefined".
+        blockedAffiliations: { count: 0 },
         allowedUsers: { count: 0 },
         cache: { count: 0 }
     };
@@ -946,6 +977,18 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
         if (Array.isArray(importBlockedTags)) {
             await blockedTags.setAll(importBlockedTags);
             results.blockedTags.count = importBlockedTags.length;
+        }
+
+        // Import blocked bio tags if provided (one mutation + one write)
+        if (Array.isArray(importBlockedBioTags)) {
+            await blockedBioTags.setAll(importBlockedBioTags);
+            results.blockedBioTags.count = importBlockedBioTags.length;
+        }
+
+        // Import blocked account labels if provided (one mutation + one write)
+        if (Array.isArray(importBlockedPcf)) {
+            await blockedPcf.setAll(importBlockedPcf);
+            results.blockedPcf.count = importBlockedPcf.length;
         }
 
         // Import blocked languages if provided (one mutation + one write)
@@ -982,6 +1025,8 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED, payload: blockedCountries.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, payload: blockedRegions.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_TAGS_UPDATED, payload: blockedTags.getAll() }),
+            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_BIO_TAGS_UPDATED, payload: blockedBioTags.getAll() }),
+            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_PCF_UPDATED, payload: blockedPcf.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, payload: blockedLanguages.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED, payload: blockedAffiliations.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.ALLOWED_USERS_UPDATED, payload: allowedUsers.getAll() })
@@ -993,6 +1038,8 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             importedBlockedCountries: results.blockedCountries.count,
             importedBlockedRegions: results.blockedRegions.count,
             importedBlockedTags: results.blockedTags.count,
+            importedBlockedBioTags: results.blockedBioTags.count,
+            importedBlockedPcf: results.blockedPcf.count,
             importedBlockedLanguages: results.blockedLanguages.count,
             importedBlockedAffiliations: results.blockedAffiliations.count,
             importedAllowedUsers: results.allowedUsers.count,
@@ -1006,6 +1053,8 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             importedBlockedCountries: results.blockedCountries.count,
             importedBlockedRegions: results.blockedRegions.count,
             importedBlockedTags: results.blockedTags.count,
+            importedBlockedBioTags: results.blockedBioTags.count,
+            importedBlockedPcf: results.blockedPcf.count,
             importedBlockedLanguages: results.blockedLanguages.count,
             importedBlockedAffiliations: results.blockedAffiliations.count,
             importedAllowedUsers: results.allowedUsers.count,

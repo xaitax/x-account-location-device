@@ -2,6 +2,23 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [3.5.0] - 2026-08-04
+
+### New
+- **Block parody, commentary and fan accounts** ([#41](https://github.com/xaitax/x-account-location-device/issues/41), requested by **@Kaltern75**): X labels accounts that present themselves as parody, commentary or fan accounts, and those labels can now be filtered with one click in **Blocking → Tags**. Read from X's own structured label rather than the display name, so it still works when the name gives nothing away.
+- **Block by bio**: filter accounts by what their bio says, alongside the display name. Both live in **Blocking → Tags**, each with its own list, since they match against different text. Adding a term short enough to catch accounts you didn't mean now says so up front.
+- **Follower, following and post counts in the account dossier**: hover any badge to see them.
+- **All of the above costs no extra lookups.** X already sends this profile data with your timeline; the extension now reads what's there instead of asking for it again, so bios, account types and counts arrive for free and nothing is spent against your rate limit. Only the few values actually used are kept, capped at the 500 most recently seen accounts and dropped when the tab closes, so a long scrolling session can't grow without bound. It stays on your device — never written to disk, never shared with the community cache — and can be switched off in **Settings → Display**.
+- **Hide the info icon** ([#38](https://github.com/xaitax/x-account-location-device/issues/38), requested by **@algorythmic**): the circled-i at the end of each badge can be turned off, freeing horizontal space on narrow screens where X truncates long names and handles. Account details still open from the badge itself.
+- **Open account details on click**: prefer clicking a badge over hovering it. Touch devices already worked this way; this brings the same option to desktop. Both settings are in **Settings → Display**.
+- **The blocking page was reworked**: Settings and the in-page sidebar blocker now share one look. Blocked tags are grouped by what they actually match, and adding a tag broad enough to catch accounts you didn't intend now says so up front.
+
+### Bug Fixes
+- **Profiles could show a completely different account** ([#40](https://github.com/xaitax/x-account-location-device/issues/40), reported by **@Martin-L-H**): when a display name was itself written like a handle, the profile header resolved to that account instead of the real one — showing its country and device, and applying every filter to the wrong person. Posts were unaffected, which is why it went unnoticed.
+- **Backups containing blocked affiliations failed to import**, stopping partway and leaving the allowlist and cached accounts behind. Every filter, setting and list now imports and exports in full.
+- **Added the missing "Caribbean" region**, which X reports but the Regions tab did not offer.
+- Hardened the fallback lookup used when the extension can't authenticate, so it can no longer accept data belonging to a different account.
+
 ## [3.4.0] - 2026-07-27
 
 ### New

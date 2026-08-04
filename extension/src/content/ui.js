@@ -401,9 +401,17 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     // "More info" affordance: a static circled-i. (The hovercard shows full details on
     // hover; we intentionally do NOT expand any text here so the badge width stays fixed
     // and the capture button never shifts out from under the cursor.)
-    const hint = document.createElement('span');
-    hint.className = 'x-hover-hint';
-    hint.appendChild(glyph('info', 14));
+    //
+    // Issue #38: optional, because on narrow/mobile layouts every pixel of the badge is
+    // taken from the name and handle, which X then truncates (and can overlap). Purely an
+    // affordance — the whole badge is the hover/click target, so hiding it removes no
+    // functionality, only the hint that the dossier exists.
+    const showInfoIcon = settings.showInfoIcon !== false;
+    const hint = showInfoIcon ? document.createElement('span') : null;
+    if (hint) {
+        hint.className = 'x-hover-hint';
+        hint.appendChild(glyph('info', 14));
+    }
 
     // Share button — added before the circled-i so the (i) stays the last item.
     // Skipped on UserCell badges (follower/following lists, People search): the
@@ -431,8 +439,8 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
         });
     }
 
-    // Circled-i is always the last item in the badge.
-    badge.appendChild(hint);
+    // Circled-i is always the last item in the badge (when shown).
+    if (hint) badge.appendChild(hint);
 
     const insertionPoint = isUserCell
         ? findUserCellInsertionPoint(element, screenName)
@@ -445,8 +453,13 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
         if (debug) debug(`No insertion point found for @${screenName}${isUserCell ? ' (UserCell)' : ''}`);
     }
 
-    // Attach hovercard; we fetch rich metadata only on hover
-    hovercard.attach(badge, { screenName, info, csrfToken });
+    // Attach hovercard; we fetch rich metadata only when it actually opens.
+    hovercard.attach(badge, {
+        screenName,
+        info,
+        csrfToken,
+        clickToOpen: settings.hovercardTrigger === 'click'
+    });
 }
 
 // ============================================
@@ -739,6 +752,8 @@ async function showBlockerModal(blockedCountries, blockedRegions, sendMessage, M
     // Get blockedTags + blockedLanguages from the global state (window.__X_POSED_CONTENT__)
     const state = window.__X_POSED_CONTENT__?.getState?.() || {};
     const blockedTags = new Set(state.blockedTags || []);
+    const blockedBioTags = new Set(state.blockedBioTags || []);
+    const blockedPcf = new Set(state.blockedPcf || []);
     const blockedLanguages = new Set(state.blockedLanguages || []);
 
     // Read affiliations straight from the background rather than the content script's
@@ -806,7 +821,32 @@ async function showBlockerModal(blockedCountries, blockedRegions, sendMessage, M
         return response;
     };
 
-    showModal(blockedCountries, blockedRegions, onCountryAction, onRegionAction, blockedTags, onTagAction, blockedLanguages, onLanguageAction, blockedAffiliations, onAffiliationAction);
+    // Bio tags and account labels use the same generic shape as the other blocked sets.
+    const makeSetHandler = (messageType, key, localSet) => async (action, value) => {
+        const response = await sendMessage({ type: messageType, payload: { action, [key]: value } });
+        if (response?.success && response.data) {
+            localSet.clear();
+            for (const v of response.data) localSet.add(v);
+        }
+        return response;
+    };
+
+    showModal({
+        blockedCountries,
+        blockedRegions,
+        onCountryAction,
+        onRegionAction,
+        blockedTags,
+        onTagAction,
+        blockedBioTags,
+        onBioTagAction: makeSetHandler(MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, 'tag', blockedBioTags),
+        blockedPcf,
+        onPcfAction: makeSetHandler(MESSAGE_TYPES.SET_BLOCKED_PCF, 'label', blockedPcf),
+        blockedLanguages,
+        onLanguageAction,
+        blockedAffiliations,
+        onAffiliationAction
+    });
 }
 
 // ============================================

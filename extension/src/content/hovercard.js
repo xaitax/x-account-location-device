@@ -12,6 +12,21 @@ import browserAPI from '../shared/browser-api.js';
 import { CSS_CLASSES, MESSAGE_TYPES, Z_INDEX } from '../shared/constants.js';
 import { LRUCache } from '../shared/lru-cache.js';
 import { deviceIcon, glyph, flagImage } from './icons.js';
+import { getProfile } from './profile-cache.js';
+
+/**
+ * Thousands-separated count, or null when we have no number.
+ * @param {number|null|undefined} value
+ * @returns {string|null}
+ */
+function formatCount(value) {
+    if (!Number.isInteger(value) || value < 0) return null;
+    try {
+        return value.toLocaleString();
+    } catch {
+        return String(value);
+    }
+}
 
 const CARD_ID = 'x-posed-hovercard';
 
@@ -253,6 +268,31 @@ function buildCardContent({ screenName, info, loading = false, errorText = '' })
         body.appendChild(createRow({ icon: glyph('vpn', 16), label: 'Signal', value: 'VPN / Proxy suspected', primary: true, alert: true }));
     }
 
+    // Follower / following / post counts, harvested from the profile data X already ships
+    // with its own timeline responses — no lookup was spent to show these, and they are
+    // simply absent for an account we have not seen in a response yet.
+    const profile = getProfile(screenName);
+    if (profile) {
+        const followers = formatCount(profile.followers);
+        const following = formatCount(profile.following);
+        const posts = formatCount(profile.tweets);
+        const media = formatCount(profile.media);
+
+        if (followers) {
+            body.appendChild(createRow({ icon: glyph('followers', 16), label: 'Followers', value: followers }));
+        }
+        if (following) {
+            body.appendChild(createRow({ icon: glyph('followers', 16), label: 'Following', value: following }));
+        }
+        if (posts) {
+            body.appendChild(createRow({
+                icon: glyph('posts', 16),
+                label: 'Posts',
+                value: media ? `${posts} · ${media} media` : posts
+            }));
+        }
+    }
+
     // Verification summary row (if any signal exists)
     const verificationBits = [];
     if (meta.blueVerified) verificationBits.push('Blue');
@@ -365,20 +405,28 @@ class HovercardController {
         this._handleOutsideTap = this._handleOutsideTap.bind(this);
     }
 
-    attach(badgeEl, { screenName, info, csrfToken = null }) {
+    /**
+     * @param {HTMLElement} badgeEl
+     * @param {object} opts
+     * @param {boolean} [opts.clickToOpen] - open on click instead of hover (issue #38).
+     *   Touch devices always use click regardless, since they have no hover at all.
+     */
+    attach(badgeEl, { screenName, info, csrfToken = null, clickToOpen = false }) {
         if (!badgeEl || badgeEl.dataset.xPosedHovercardAttached === 'true') return;
         badgeEl.dataset.xPosedHovercardAttached = 'true';
 
-        if (TOUCH) {
-            // No hover on touch: tap the badge to toggle the dossier. Stop the tap
-            // from bubbling/navigating to the profile or triggering X's own handlers.
+        const useClick = TOUCH || clickToOpen;
+
+        if (useClick) {
+            // Tap/click the badge to toggle the dossier. Stop the event from
+            // bubbling/navigating to the profile or triggering X's own handlers.
             badgeEl.addEventListener('click', e => {
                 e.preventDefault();
                 e.stopPropagation();
                 const open = this.currentAnchor === badgeEl &&
                     this.card?.classList.contains('x-posed-hovercard-visible');
                 if (open) this.hide();
-                else this.show(badgeEl, { screenName, info, csrfToken });
+                else this.show(badgeEl, { screenName, info, csrfToken, clickToOpen: true });
             });
         } else {
             const onEnter = () => this.show(badgeEl, { screenName, info, csrfToken });
@@ -391,8 +439,12 @@ class HovercardController {
         badgeEl.classList.add('x-posed-has-hovercard');
     }
 
-    show(anchorEl, { screenName, info, csrfToken = null }) {
+    show(anchorEl, { screenName, info, csrfToken = null, clickToOpen = false }) {
         if (!anchorEl || !anchorEl.isConnected) return;
+
+        // Click-opened cards must not close on mouseleave — the reader deliberately
+        // opened this one and expects it to stay until they dismiss it.
+        const useClick = TOUCH || clickToOpen;
 
         if (this.hideTimeout) {
             clearTimeout(this.hideTimeout);
@@ -410,19 +462,21 @@ class HovercardController {
         // Pass the badge's known info so an error card can still show it (issue #14).
         this._fetchAndUpdate(anchorEl, screenName, csrfToken, info).catch(() => {});
 
-        // Keep visible if hovering card
+        // Keep visible if hovering card (hover mode only — see _clickMode above)
         this.card.removeEventListener('mouseenter', this._handleCardEnter);
         this.card.removeEventListener('mouseleave', this._handleCardLeave);
-        this.card.addEventListener('mouseenter', this._handleCardEnter);
-        this.card.addEventListener('mouseleave', this._handleCardLeave);
+        if (!useClick) {
+            this.card.addEventListener('mouseenter', this._handleCardEnter);
+            this.card.addEventListener('mouseleave', this._handleCardLeave);
+        }
 
         // Reposition on scroll/resize while visible
         window.addEventListener('scroll', this._handleScroll, true);
         window.addEventListener('resize', this._handleScroll, true);
 
-        // Touch: there is no mouseleave to dismiss, so close on a tap outside the
-        // card or its anchor.
-        if (TOUCH) document.addEventListener('pointerdown', this._handleOutsideTap, true);
+        // Click/touch mode: there is no mouseleave to dismiss it, so close on a
+        // press outside the card or its anchor.
+        if (useClick) document.addEventListener('pointerdown', this._handleOutsideTap, true);
     }
 
     hideSoon(delayMs = 120) {
