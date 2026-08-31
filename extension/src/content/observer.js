@@ -4,7 +4,7 @@
  */
 
 import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, canonicalCountry } from '../shared/constants.js';
-import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
+import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry, statusIdOf } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
 import { getProfile } from './profile-cache.js';
@@ -84,6 +84,11 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
     return { hide, highlight };
 }
 
+function neverHideRow(isUserCell, tweet, focalId) {
+    if (isUserCell) return true;
+    return isFocalTweet(tweet, focalId);
+}
+
 /**
  * Apply resolved user info to an element: write the data-* attributes, run the
  * blocked-country/region/tag + VPN handling, and create the badge. This is the single
@@ -143,7 +148,7 @@ function applyInfoToElement(element, screenName, info, opts) {
         isVpnHidden,
         highlightMode: settings.highlightBlockedTweets === true,
         isQuote,
-        neverHide: isUserCell
+        neverHide: neverHideRow(isUserCell, tweet)
     });
 
     if (hide) return; // hidden row → don't build a badge
@@ -200,6 +205,27 @@ function isInsideQuoteTweet(element, tweet = element.closest(SELECTORS.TWEET)) {
     return false;
 }
 
+function isOwnPermalink(link, tweet, focalId) {
+    if (statusIdOf(link.getAttribute('href')) !== focalId) return false;
+    return !isInsideQuoteTweet(link, tweet);
+}
+
+function hasSelfPermalink(tweet, focalId) {
+    const links = tweet.querySelectorAll(`a[href*="/status/${focalId}"]`);
+    return [...links].some(link => isOwnPermalink(link, tweet, focalId));
+}
+
+function isFocusedArticle(tweet) {
+    return tweet.getAttribute('tabindex') === '-1';
+}
+
+export function isFocalTweet(tweet, focalId = statusIdOf(location.pathname)) {
+    if (!tweet) return false;
+    if (!focalId) return false;
+    if (hasSelfPermalink(tweet, focalId)) return true;
+    return isFocusedArticle(tweet);
+}
+
 /**
  * Read the language X assigned to the MAIN tweet's text (issue #25). X tags every
  * text tweet with its own ML-detected BCP-47 language on the tweetText node
@@ -254,6 +280,12 @@ function isAuthorAllowlisted(tweet, allowedUsers) {
     return author !== '' && allowedUsers.has(author);
 }
 
+function languageBlockMode(tweet, settings) {
+    if (settings.highlightBlockedTweets === true) return 'highlight';
+    if (isFocalTweet(tweet)) return 'highlight';
+    return 'hide';
+}
+
 /**
  * Mark (or unmark) a tweet article for language blocking. Uses a SEPARATE
  * article-level marker (data-x-lang-block) from the per-author data-x-block, so
@@ -277,7 +309,7 @@ function applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers) {
     }
 
     if (blocked) {
-        tweet.dataset.xLangBlock = settings.highlightBlockedTweets === true ? 'highlight' : 'hide';
+        tweet.dataset.xLangBlock = languageBlockMode(tweet, settings);
     } else if (tweet.dataset.xLangBlock) {
         delete tweet.dataset.xLangBlock;
     }
@@ -851,6 +883,13 @@ export function processElementsBatch(elements, processElementSafe, debug) {
 // USER ELEMENT PROCESSING
 // ============================================
 
+function shouldHideForTag(isQuote, tweet, settings) {
+    if (isQuote) return false;
+    if (!tweet) return false;
+    if (settings.highlightBlockedTweets === true) return false;
+    return !isFocalTweet(tweet);
+}
+
 /**
  * Safe wrapper for processElement with error boundary
  */
@@ -977,7 +1016,7 @@ export async function processElement(element, {
                 // Only the MAIN author's tag can hide the whole row, so only that case
                 // can short-circuit here. A quoted author's tag collapses just the quote
                 // card, which applyInfoToElement resolves alongside country/region (#32).
-                if (!isQuote && tweet && settings.highlightBlockedTweets !== true) {
+                if (shouldHideForTag(isQuote, tweet, settings)) {
                     applyBlockState(element, tweet, { isListBlocked: true, isVpnHidden: false, highlightMode: false });
                     return;
                 }
@@ -1216,6 +1255,7 @@ function runUpdateBlockedTweets({
     const highlightMode = settings.highlightBlockedTweets === true;
     const hasTags = blockedTags && blockedTags.size > 0;
     const loggedInUser = getLoggedInUsername();
+    const focalId = statusIdOf(location.pathname);
 
     document.querySelectorAll('[data-x-screen-name]').forEach(element => {
         const tweet = element.closest(SELECTORS.TWEET);
@@ -1266,7 +1306,7 @@ function runUpdateBlockedTweets({
             isVpnHidden,
             highlightMode,
             isQuote,
-            neverHide: isUserCell
+            neverHide: neverHideRow(isUserCell, tweet, focalId)
         });
 
         const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);

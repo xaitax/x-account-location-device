@@ -228,6 +228,15 @@ function currentProfileHandle() {
     return RESERVED_PATHS.has(match[1].toLowerCase()) ? null : match[1];
 }
 
+const STATUS_URL_RE = /^(?:https?:\/\/[^/]*)?\/(?:i\/web|[^/]+)\/status\/(\d+)(?:[/?#]|$)/;
+
+export function statusIdOf(url) {
+    if (!url) return null;
+    const match = STATUS_URL_RE.exec(url);
+    if (!match) return null;
+    return match[1];
+}
+
 export function extractUsername(element) {
     // 1. Try to find the username link (Timeline/Feed)
     const link = element.querySelector('a[href^="/"]');
