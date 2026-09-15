@@ -48,15 +48,15 @@ function effectiveCountry(info, flagFromDevice) {
 function resolveBlockReason({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
     isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked }) {
     if (isExempt) return '';
-    return [
-        isBlockedCountry && 'country',
-        isBlockedRegion && 'region',
-        isTagBlocked && 'tag',
-        isBioBlocked && 'bio',
-        isLinkBlocked && 'link',
-        isLabelBlocked && 'label',
-        isAffiliationBlocked && 'affiliation'
-    ].filter(Boolean).join(',');
+    let reason = '';
+    if (isBlockedCountry) reason = 'country';
+    if (isBlockedRegion) reason += reason ? ',region' : 'region';
+    if (isTagBlocked) reason += reason ? ',tag' : 'tag';
+    if (isBioBlocked) reason += reason ? ',bio' : 'bio';
+    if (isLinkBlocked) reason += reason ? ',link' : 'link';
+    if (isLabelBlocked) reason += reason ? ',label' : 'label';
+    if (isAffiliationBlocked) reason += reason ? ',affiliation' : 'affiliation';
+    return reason;
 }
 
 const BLOCK_REASON_LABELS = {
