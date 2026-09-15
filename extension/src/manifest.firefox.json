@@ -3,11 +3,13 @@
   "name": "X-Posed: Account Location & Device Info",
   "version": "3.6.0",
   "description": "See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.",
+  
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+
   "browser_specific_settings": {
     "gecko": {
       "id": "x-posed@xaitax.com",
@@ -20,36 +22,57 @@
       "strict_min_version": "142.0"
     }
   },
-  "permissions": ["storage"],
+
+  "permissions": [
+    "storage"
+  ],
+
   "host_permissions": [
     "*://*.x.com/*",
     "*://*.twitter.com/*",
     "https://x-posed-cache.xaitax.workers.dev/*"
   ],
+
   "background": {
     "scripts": ["background.js"]
   },
+
   "content_scripts": [
     {
-      "matches": ["*://*.x.com/*", "*://*.twitter.com/*"],
+      "matches": [
+        "*://*.x.com/*",
+        "*://*.twitter.com/*"
+      ],
       "js": ["content.js"],
       "css": ["styles/content.css"],
       "run_at": "document_start"
     },
     {
-      "matches": ["*://*.x.com/*", "*://*.twitter.com/*"],
+      "matches": [
+        "*://*.x.com/*",
+        "*://*.twitter.com/*"
+      ],
       "js": ["page-script.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
     }
   ],
+
   "web_accessible_resources": [
     {
-      "resources": ["page-script.js", "styles/content.css", "fonts/*.woff2"],
-      "matches": ["*://*.x.com/*", "*://*.twitter.com/*"]
+      "resources": [
+        "page-script.js",
+        "styles/content.css",
+        "fonts/*.woff2"
+      ],
+      "matches": [
+        "*://*.x.com/*",
+        "*://*.twitter.com/*"
+      ]
     }
   ],
+
   "action": {
     "default_popup": "popup/popup.html",
     "default_icon": {
@@ -59,6 +82,7 @@
     },
     "default_title": "X-Posed"
   },
+
   "options_ui": {
     "page": "options/options.html",
     "open_in_tab": true
