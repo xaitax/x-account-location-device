@@ -4,7 +4,7 @@
  * Uses tabbed interface for switching between countries and regions
  */
 
-import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, TIMING } from '../shared/constants.js';
+import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, TIMING, OVERBROAD_HOSTS, normalizeHost } from '../shared/constants.js';
 import { formatCountryName, createElement, debounce, describeTagRisk } from '../shared/utils.js';
 import { glyph, flagImage } from './icons.js';
 
@@ -13,6 +13,7 @@ let localBlockedCountries = null;
 let localBlockedRegions = null;
 let localBlockedTags = null;
 let localBlockedBioTags = null;
+let localBlockedLinks = null;
 let localBlockedPcf = null;
 let localBlockedLanguages = null;
 let localBlockedAffiliations = null;
@@ -46,6 +47,7 @@ export function showModal(config = {}) {
         blockedCountries, blockedRegions, onCountryAction, onRegionAction,
         blockedTags = null, onTagAction = null,
         blockedBioTags = null, onBioTagAction = null,
+        blockedLinks = null, onLinkAction = null,
         blockedPcf = null, onPcfAction = null,
         blockedLanguages = null, onLanguageAction = null,
         blockedAffiliations = null, onAffiliationAction = null
@@ -62,6 +64,7 @@ export function showModal(config = {}) {
     localBlockedRegions = blockedRegions;
     localBlockedTags = blockedTags || new Set();
     localBlockedBioTags = blockedBioTags || new Set();
+    localBlockedLinks = blockedLinks || new Set();
     localBlockedPcf = blockedPcf || new Set();
     localBlockedLanguages = blockedLanguages || new Set();
     localBlockedAffiliations = blockedAffiliations || new Set();
@@ -92,7 +95,7 @@ export function showModal(config = {}) {
     // Create bodies for all tabs
     const { body: countryBody, renderCountries, searchInput: countrySearch } = createCountryBody(blockedCountries, onCountryAction);
     const { body: regionBody, renderRegions, searchInput: regionSearch } = createRegionBody(blockedRegions, onRegionAction);
-    const { body: tagBody, renderTags, searchInput: tagSearch } = createTagBody(onTagAction, onBioTagAction, onPcfAction);
+    const { body: tagBody, renderTags, searchInput: tagSearch } = createTagBody(onTagAction, onBioTagAction, onLinkAction, onPcfAction);
     const { body: languageBody, renderLanguages, searchInput: languageSearch } = createLanguageBody(localBlockedLanguages, onLanguageAction);
     const { body: affiliationBody, renderAffiliations, searchInput: affiliationInput } = createAffiliationBody(localBlockedAffiliations, onAffiliationAction);
 
@@ -148,16 +151,18 @@ export function showModal(config = {}) {
     tabBar.querySelector('[data-tab="affiliations"]').addEventListener('click', () => handleTabSwitch('affiliations'));
 
     // Create footer
-    // Clearing the Tags tab clears all three of its lists — leaving two behind while the
+    // Clearing the Tags tab clears all four of its lists — leaving one behind while the
     // button says "Clear All" is exactly the kind of half-action that reads as a bug.
     const onClearTags = async () => {
         await Promise.all([
             onTagAction ? onTagAction('clear') : null,
             onBioTagAction ? onBioTagAction('clear') : null,
+            onLinkAction ? onLinkAction('clear') : null,
             onPcfAction ? onPcfAction('clear') : null
         ]);
         localBlockedTags.clear();
         localBlockedBioTags.clear();
+        localBlockedLinks.clear();
         localBlockedPcf.clear();
     };
 
@@ -690,7 +695,7 @@ function createAffiliationBody(blockedAffiliations, onAction) {
 
 /** Total across every "who they are" tag list, for the tab badge and footer. */
 function tagTotal() {
-    return (localBlockedTags?.size || 0) + (localBlockedBioTags?.size || 0) + (localBlockedPcf?.size || 0);
+    return (localBlockedTags?.size || 0) + (localBlockedBioTags?.size || 0) + (localBlockedLinks?.size || 0) + (localBlockedPcf?.size || 0);
 }
 
 /**
@@ -699,7 +704,7 @@ function tagTotal() {
  * them as a single undifferentiated list is what made over-matching read as a bug.
  * @param {{title: string, hint: string, placeholder: string, getSet: Function, onAction: Function}} opts
  */
-function createTagSection({ title, hint, placeholder, getSet, onAction }) {
+function createTagSection({ title, hint, placeholder, getSet, onAction, normalizeInput = value => value.trim(), riskMessage = describeTagRisk }) {
     const section = createElement('div', { className: 'x-blocker-tag-section' });
 
     const heading = createElement('div', { className: 'x-blocker-tag-group' });
@@ -727,7 +732,7 @@ function createTagSection({ title, hint, placeholder, getSet, onAction }) {
     section.appendChild(list);
 
     const showRisk = tag => {
-        const message = tag ? describeTagRisk(tag) : null;
+        const message = tag ? riskMessage(tag) : null;
         riskNote.textContent = message || '';
         riskNote.style.display = message ? 'block' : 'none';
     };
@@ -772,7 +777,7 @@ function createTagSection({ title, hint, placeholder, getSet, onAction }) {
     };
 
     const add = async () => {
-        const value = input.value.trim();
+        const value = normalizeInput(input.value);
         if (!value || !onAction) return;
         const response = await onAction('add', value);
         if (response?.success) {
@@ -795,18 +800,19 @@ function createTagSection({ title, hint, placeholder, getSet, onAction }) {
 }
 
 /**
- * Tags panel: three things an account can be filtered by, each matched against a different
+ * Tags panel: four things an account can be filtered by, each matched against a different
  * part of the account and therefore given its own section.
  *   - Display name  - substring of the name shown next to the handle
  *   - Bio           - substring of the profile description
+ *   - Links        - profile website and bio links, including subdomains
  *   - Account label - X's Parody / Commentary / Fan value or rendered grey badge
  */
-function createTagBody(onTagAction, onBioTagAction, onPcfAction) {
+function createTagBody(onTagAction, onBioTagAction, onLinkAction, onPcfAction) {
     const body = createElement('div', { className: 'x-blocker-body x-blocker-tab-panel', 'data-panel': 'tags' });
 
     body.appendChild(createElement('div', {
         className: 'x-blocker-info',
-        textContent: 'Filter accounts by what they say about themselves — the name they display, the text of their bio, or the account label X gives them.'
+        textContent: 'Filter accounts by what they say about themselves — the name they display, the text of their bio, the sites they link to, or the account label X gives them.'
     }));
 
     const nameSection = createTagSection({
@@ -823,6 +829,18 @@ function createTagBody(onTagAction, onBioTagAction, onPcfAction) {
         placeholder: 'Enter a word or phrase from a bio...',
         getSet: () => localBlockedBioTags,
         onAction: onBioTagAction
+    });
+
+    const linkSection = createTagSection({
+        title: 'Links to',
+        hint: 'Matched against the profile website, location, and bio links, including subdomains',
+        placeholder: 'Enter a domain...',
+        getSet: () => localBlockedLinks,
+        onAction: onLinkAction,
+        normalizeInput: value => normalizeHost(value),
+        riskMessage: value => OVERBROAD_HOSTS.has(value)
+            ? `${value} appears on a very large number of profiles, so this will hide far more accounts than you may intend.`
+            : null
     });
 
     // Account label is a CLOSED set, so it gets pills rather than free text.
@@ -880,11 +898,13 @@ function createTagBody(onTagAction, onBioTagAction, onPcfAction) {
 
     body.appendChild(nameSection.section);
     body.appendChild(bioSection.section);
+    body.appendChild(linkSection.section);
     body.appendChild(labelSection);
 
     const renderAll = () => {
         nameSection.render();
         bioSection.render();
+        linkSection.render();
         renderLabels();
     };
 

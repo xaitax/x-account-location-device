@@ -431,10 +431,10 @@
 
                 <!-- Tags Panel -->
                 <div class="blocked-panel" id="panel-tags" style="display: none;">
-                    <p class="section-hint">
+                                        <p class="section-hint">
                         Filter accounts by what they say about themselves &mdash; the name they display, the text of
-                        their bio, or the account label X gives them. Each is matched against a different part of the
-                        account, so they get their own list.
+                        their bio, the sites they link to, or the account label X gives them. Each is matched against
+                        a different part of the account, so they get their own list.
                     </p>
 
                     <!-- Display name -->
@@ -468,6 +468,23 @@
                     <div class="blocked-list" id="blocked-bio-tags-list">
                         <p class="empty-state">No bio terms blocked</p>
                     </div>
+
+                    <!-- Linked domains -->
+                    <div class="tag-group-heading">
+                        <span class="tag-group-heading-label">Links to</span>
+                        <span class="tag-group-heading-hint">Matched against the profile's website, location, and any link in its bio, including subdomains</span>
+                    </div>
+                    <div class="country-selector">
+                        <div class="tag-input-row">
+                            <input type="text" class="country-search" id="link-input" placeholder="Enter a domain..." inputmode="url" autocomplete="off" spellcheck="false" maxlength="253">
+                            <button class="btn btn-primary btn-small" id="btn-add-link">+ Add</button>
+                        </div>
+                        <p class="tag-risk-note" id="link-risk-note" hidden></p>
+                    </div>
+                    <div class="blocked-list" id="blocked-links-list">
+                        <p class="empty-state">No linked domains blocked</p>
+                    </div>
+                    <p class="section-hint">Paste a full URL if it's easier &mdash; it's reduced to the domain. Link shorteners aren't followed, so a profile linking bit.ly is matched on bit.ly, not its destination.</p>
 
                     <!-- Account label (closed set, so pills rather than free text) -->
                     <div class="tag-group-heading">

@@ -30,7 +30,7 @@ function effectiveCountry(info, flagFromDevice) {
 }
 
 /**
- * Which filter blocked this account, or '' if none did.
+ * Which filters blocked this account, or '' if none did.
  *
  * The verdict used to be computed as one OR'd boolean in two separate places
  * (applyInfoToElement and runUpdateBlockedTweets), which meant the two could drift
@@ -38,23 +38,42 @@ function effectiveCountry(info, flagFromDevice) {
  * so they cannot disagree, and the surviving reason is what labels a collapsed quote
  * card (issue #42).
  *
- * Order is precedence, not importance: an account can trip several filters at once and
- * the reader only sees one label, so the most concrete reason wins. Location first (it
- * is what this extension is for), then the text filters, then affiliation.
+ * The order is stable so the quote-card label is predictable when several filters match.
  *
+ /**
  * @param {Object} r - reason flags, each already resolved by the caller
- * @returns {'country'|'region'|'tag'|'bio'|'label'|'affiliation'|''}
+ * @returns {string} comma-separated reason keys, or ''
  */
+
 function resolveBlockReason({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
-    isBioBlocked, isLabelBlocked, isAffiliationBlocked }) {
+    isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked }) {
     if (isExempt) return '';
-    if (isBlockedCountry) return 'country';
-    if (isBlockedRegion) return 'region';
-    if (isTagBlocked) return 'tag';
-    if (isBioBlocked) return 'bio';
-    if (isLabelBlocked) return 'label';
-    if (isAffiliationBlocked) return 'affiliation';
-    return '';
+    let reason = '';
+    if (isBlockedCountry) reason = 'country';
+    if (isBlockedRegion) reason += reason ? ',region' : 'region';
+    if (isTagBlocked) reason += reason ? ',tag' : 'tag';
+    if (isBioBlocked) reason += reason ? ',bio' : 'bio';
+    if (isLinkBlocked) reason += reason ? ',link' : 'link';
+    if (isLabelBlocked) reason += reason ? ',label' : 'label';
+    if (isAffiliationBlocked) reason += reason ? ',affiliation' : 'affiliation';
+    return reason;
+}
+
+const BLOCK_REASON_LABELS = {
+    country: 'Country',
+    region: 'Region',
+    tag: 'Name tag',
+    bio: 'Bio tag',
+    link: 'Linked domain',
+    label: 'Account type',
+    affiliation: 'Affiliation'
+};
+
+function formatBlockReason(reason) {
+    const labels = String(reason || '').split(',')
+        .map(key => BLOCK_REASON_LABELS[key])
+        .filter(Boolean);
+    return labels.length > 0 ? `Quoted post hidden · ${labels.join(', ')}` : 'Quoted post hidden';
 }
 
 /**
@@ -93,6 +112,8 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
             // alongside the verdict it belongs to, and cleared with it, so a row that
             // stops being blocked — or gets recycled — can never keep a stale reason.
             element.dataset.xQuoteReason = isListBlocked ? reason : '';
+            const quoteCard = element.closest('div[role="link"][tabindex="0"]');
+            if (quoteCard) quoteCard.dataset.xQuoteLabel = isListBlocked ? formatBlockReason(reason) : '';
         }
         // Always report hide:false: the row stays, and the badge is still built so it's
         // already in place inside the card when the reader reveals it.
@@ -141,8 +162,7 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
  * @param {string|null} [opts.csrfToken]
  */
 function applyInfoToElement(element, screenName, info, opts) {
-    const { blockedCountries, blockedRegions, blockedAffiliations, blockedBioTags, blockedPcf,
-        allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
+    const { blockedCountries, blockedRegions, blockedAffiliations, blockedBioTags, blockedLinks, blockedPcf, allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
@@ -162,9 +182,10 @@ function applyInfoToElement(element, screenName, info, opts) {
     // Who-they-are filters (country/region/tag) apply to quoted authors too — they just
     // collapse the quote card instead of the row (issue #32).
     const affiliationBlocked = hasBlockedAffiliation(info?.meta, blockedAffiliations);
-    // Bio and account label come from the profile data X already sent with the timeline,
+    // Bio, links and account label come from the profile data X already sent with the timeline,
     // so neither costs a lookup — see profile-cache.js.
     const bioBlocked = hasBlockedBio(screenName, blockedBioTags);
+    const linkBlocked = hasBlockedLink(screenName, blockedLinks);
     const labelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
     const blockReason = resolveBlockReason({
         isExempt,
@@ -172,6 +193,7 @@ function applyInfoToElement(element, screenName, info, opts) {
         isBlockedRegion: locationLower !== '' && !!blockedRegions && blockedRegions.has(locationLower),
         isTagBlocked: tagBlocked,
         isBioBlocked: bioBlocked,
+        isLinkBlocked: linkBlocked,
         isLabelBlocked: labelBlocked,
         isAffiliationBlocked: affiliationBlocked
     });
@@ -721,6 +743,34 @@ function hasBlockedBio(screenName, blockedBioTags) {
 }
 
 /**
+ * Does this account link to a blocked domain, from its profile website or its bio?
+ *
+ * Like the bio, the links come from the profile data X already ships with its own
+ * timeline responses (see profile-cache.js), so this costs no lookup. Absent profile
+ * data simply means "not blocked" — never a guess.
+ *
+ * Matching is exact-host-or-subdomain, never substring: a substring test would let
+ * 'throne.com' match 'not-throne.com' (false positive) and 'throne.com.evil.net' (a
+ * one-line evasion for anyone who noticed).
+ * @param {string|null|undefined} screenName
+ * @param {Set<string>|null} blockedLinks - normalized lowercase bare hosts
+ * @returns {boolean}
+ */
+function hasBlockedLink(screenName, blockedLinks) {
+    if (!screenName || !blockedLinks || blockedLinks.size === 0) return false;
+
+    const links = getProfile(screenName)?.links;
+    if (!links || links.length === 0) return false;
+
+    for (const host of links) {
+        for (const domain of blockedLinks) {
+            if (host === domain || host.endsWith(`.${domain}`)) return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Does this account carry a selected authenticity label or grey badge?
  *
  * Prefers X's STRUCTURED `parody_commentary_fan_label`, harvested from its own responses —
@@ -1088,6 +1138,7 @@ export async function processElement(element, {
     blockedRegions,
     blockedTags,
     blockedBioTags,
+    blockedLinks,
     blockedPcf,
     blockedLanguages,
     blockedAffiliations,
@@ -1180,6 +1231,7 @@ export async function processElement(element, {
         blockedLanguages,
         blockedAffiliations,
         blockedBioTags,
+        blockedLinks,
         blockedPcf,
         allowedUsers,
         settings,
@@ -1409,9 +1461,10 @@ export function resetProcessedElements(filters) {
         .forEach(el => el.classList.remove('x-tweet-blocked', 'x-tweet-vpn-blocked', 'x-tweet-highlighted'));
     document.querySelectorAll('[data-x-block]').forEach(el => { delete el.dataset.xBlock; });
     document.querySelectorAll('[data-x-lang-block]').forEach(el => { delete el.dataset.xLangBlock; });
-    document.querySelectorAll('[data-x-quote-block], [data-x-quote-reason]').forEach(el => {
+    document.querySelectorAll('[data-x-quote-block], [data-x-quote-reason], [data-x-quote-label]').forEach(el => {
         if (el.dataset.xQuoteBlock !== 'shown') delete el.dataset.xQuoteBlock;
         delete el.dataset.xQuoteReason;
+        if (el.dataset.xQuoteBlock !== 'shown') delete el.dataset.xQuoteLabel;
     });
 
     // Waiting rows skip the visibility queue, but their already-known filters
@@ -1441,6 +1494,7 @@ let pendingBlockedTweetsArgs = null;
  * @param {Set} blockedRegions - Set of blocked region names (lowercase)
  * @param {Set} blockedTags - Set of blocked tags (lowercase)
  * @param {Object} settings - Settings object with highlightBlockedTweets flag
+ * @param {Set} [blockedLinks] - Set of blocked linked domains (normalized bare hosts)
  */
 export function updateBlockedTweets(filters) {
     pendingBlockedTweetsArgs = filters || {};
@@ -1464,6 +1518,7 @@ function runUpdateBlockedTweets({
     blockedRegions,
     blockedTags,
     blockedBioTags = null,
+    blockedLinks = null,
     blockedPcf = null,
     settings = {},
     blockedLanguages = null,
@@ -1496,8 +1551,9 @@ function runUpdateBlockedTweets({
         // display name (the row is still on screen). This is what makes adding OR
         // removing a tag re-apply to already-rendered tweets — and, because we never
         // trust a cached flag, a recycled row can't inherit a previous occupant's block.
-        const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
+                const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
         const isBioBlocked = hasBlockedBio(screenName, blockedBioTags);
+        const isLinkBlocked = hasBlockedLink(screenName, blockedLinks);
         const isLabelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
 
         // Affiliation lives on the cached info, keyed by name, like locationAccurate below.
@@ -1508,7 +1564,7 @@ function runUpdateBlockedTweets({
         // quoted verdict to the card-only marker instead of the row (issue #32).
         const blockReason = resolveBlockReason({
             isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
-            isBioBlocked, isLabelBlocked, isAffiliationBlocked
+            isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked
         });
         const matchesBlockList = blockReason !== '';
 
@@ -1600,6 +1656,7 @@ function releaseElementMarkers(element, currentScreenName) {
     delete element.dataset.xBlock;
     delete element.dataset.xQuoteBlock;
     delete element.dataset.xQuoteReason;
+    element.closest('div[role="link"][tabindex="0"]')?.removeAttribute('data-x-quote-label');
     if (isValidScreenName(currentScreenName)) element.dataset.xScreenName = currentScreenName;
 }
 
