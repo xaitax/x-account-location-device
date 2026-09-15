@@ -294,9 +294,11 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
      * shape for every link on X, so matching on it catches everyone or no one. The
      * `expanded_url` beside it is the real destination and arrives in the same payload.
      *
-     * Both the newer `profile_bio.entities` and the older `legacy.entities` shapes are
-     * read, because X ships both depending on the query, and a filter that silently stops
-     * matching after a response-shape change is worse than one that never worked.
+    * Both the newer `profile_bio.entities` and the older `legacy.entities` shapes are
+    * read, because X ships both depending on the query, and a filter that silently stops
+    * matching after a response-shape change is worse than one that never worked. The
+    * profile location is also scanned as plain text: X exposes it separately from the
+    * bio and does not consistently provide link entities for it.
      */
     function extractLinks(user) {
         const hosts = [];
@@ -322,6 +324,14 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
         const bio = user?.profile_bio?.description;
         if (typeof bio === 'string' && bio) {
             for (const match of bio.slice(0, MAX_BIO_LENGTH).matchAll(BARE_DOMAIN)) {
+                if (add(match[1])) return hosts;
+            }
+        }
+
+        const locations = [user?.profile_bio?.location, user?.legacy?.location, user?.location];
+        for (const location of locations) {
+            if (typeof location !== 'string' || !location) continue;
+            for (const match of location.slice(0, MAX_BIO_LENGTH).matchAll(BARE_DOMAIN)) {
                 if (add(match[1])) return hosts;
             }
         }
