@@ -4,7 +4,7 @@
  * Uses tabbed interface for switching between countries and regions
  */
 
-import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, TIMING } from '../shared/constants.js';
+import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, TIMING, OVERBROAD_HOSTS, normalizeHost } from '../shared/constants.js';
 import { formatCountryName, createElement, debounce, describeTagRisk } from '../shared/utils.js';
 import { glyph, flagImage } from './icons.js';
 
@@ -704,7 +704,7 @@ function tagTotal() {
  * them as a single undifferentiated list is what made over-matching read as a bug.
  * @param {{title: string, hint: string, placeholder: string, getSet: Function, onAction: Function}} opts
  */
-function createTagSection({ title, hint, placeholder, getSet, onAction, normalizeInput = value => value.trim() }) {
+function createTagSection({ title, hint, placeholder, getSet, onAction, normalizeInput = value => value.trim(), riskMessage = describeTagRisk }) {
     const section = createElement('div', { className: 'x-blocker-tag-section' });
 
     const heading = createElement('div', { className: 'x-blocker-tag-group' });
@@ -732,7 +732,7 @@ function createTagSection({ title, hint, placeholder, getSet, onAction, normaliz
     section.appendChild(list);
 
     const showRisk = tag => {
-        const message = tag ? describeTagRisk(tag) : null;
+        const message = tag ? riskMessage(tag) : null;
         riskNote.textContent = message || '';
         riskNote.style.display = message ? 'block' : 'none';
     };
@@ -837,7 +837,10 @@ function createTagBody(onTagAction, onBioTagAction, onLinkAction, onPcfAction) {
         placeholder: 'Enter a domain (e.g., throne.com)...',
         getSet: () => localBlockedLinks,
         onAction: onLinkAction,
-        normalizeInput: value => value.trim().toLowerCase()
+        normalizeInput: value => normalizeHost(value),
+        riskMessage: value => OVERBROAD_HOSTS.has(value)
+            ? `${value} appears on a very large number of profiles, so this will hide far more accounts than you may intend.`
+            : null
     });
 
     // Account label is a CLOSED set, so it gets pills rather than free text.
