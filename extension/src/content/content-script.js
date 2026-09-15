@@ -221,6 +221,7 @@ function reprocessRowsMissingAffiliation() {
     document.querySelectorAll('[data-x-block]').forEach(el => { delete el.dataset.xBlock; });
     document.querySelectorAll('[data-x-quote-block]').forEach(el => { delete el.dataset.xQuoteBlock; });
     document.querySelectorAll('[data-x-quote-reason]').forEach(el => { delete el.dataset.xQuoteReason; });
+    document.querySelectorAll('[data-x-quote-label]').forEach(el => { delete el.dataset.xQuoteLabel; });
 
     if (memoizedScanPageFn) memoizedScanPageFn();
 }

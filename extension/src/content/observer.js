@@ -30,7 +30,7 @@ function effectiveCountry(info, flagFromDevice) {
 }
 
 /**
- * Which filter blocked this account, or '' if none did.
+ * Which filters blocked this account, or '' if none did.
  *
  * The verdict used to be computed as one OR'd boolean in two separate places
  * (applyInfoToElement and runUpdateBlockedTweets), which meant the two could drift
@@ -38,26 +38,42 @@ function effectiveCountry(info, flagFromDevice) {
  * so they cannot disagree, and the surviving reason is what labels a collapsed quote
  * card (issue #42).
  *
- * Order is precedence, not importance: an account can trip several filters at once and
- * the reader only sees one label, so the most concrete reason wins. Location first (it
- * is what this extension is for), then the text filters, then affiliation.
+ * The order is stable so the quote-card label is predictable when several filters match.
  *
  /**
  * @param {Object} r - reason flags, each already resolved by the caller
- * @returns {'country'|'region'|'tag'|'bio'|'link'|'label'|'affiliation'|''}
+ * @returns {string} comma-separated reason keys, or ''
  */
 
 function resolveBlockReason({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
     isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked }) {
     if (isExempt) return '';
-    if (isBlockedCountry) return 'country';
-    if (isBlockedRegion) return 'region';
-    if (isTagBlocked) return 'tag';
-    if (isBioBlocked) return 'bio';
-    if (isLinkBlocked) return 'link';
-    if (isLabelBlocked) return 'label';
-    if (isAffiliationBlocked) return 'affiliation';
-    return '';
+    return [
+        isBlockedCountry && 'country',
+        isBlockedRegion && 'region',
+        isTagBlocked && 'tag',
+        isBioBlocked && 'bio',
+        isLinkBlocked && 'link',
+        isLabelBlocked && 'label',
+        isAffiliationBlocked && 'affiliation'
+    ].filter(Boolean).join(',');
+}
+
+const BLOCK_REASON_LABELS = {
+    country: 'Country',
+    region: 'Region',
+    tag: 'Name tag',
+    bio: 'Bio tag',
+    link: 'Linked domain',
+    label: 'Account type',
+    affiliation: 'Affiliation'
+};
+
+function formatBlockReason(reason) {
+    const labels = String(reason || '').split(',')
+        .map(key => BLOCK_REASON_LABELS[key])
+        .filter(Boolean);
+    return labels.length > 0 ? `Quoted post hidden · ${labels.join(', ')}` : 'Quoted post hidden';
 }
 
 /**
@@ -96,6 +112,8 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
             // alongside the verdict it belongs to, and cleared with it, so a row that
             // stops being blocked — or gets recycled — can never keep a stale reason.
             element.dataset.xQuoteReason = isListBlocked ? reason : '';
+            const quoteCard = element.closest('div[role="link"][tabindex="0"]');
+            if (quoteCard) quoteCard.dataset.xQuoteLabel = isListBlocked ? formatBlockReason(reason) : '';
         }
         // Always report hide:false: the row stays, and the badge is still built so it's
         // already in place inside the card when the reader reveals it.
@@ -1443,9 +1461,10 @@ export function resetProcessedElements(filters) {
         .forEach(el => el.classList.remove('x-tweet-blocked', 'x-tweet-vpn-blocked', 'x-tweet-highlighted'));
     document.querySelectorAll('[data-x-block]').forEach(el => { delete el.dataset.xBlock; });
     document.querySelectorAll('[data-x-lang-block]').forEach(el => { delete el.dataset.xLangBlock; });
-    document.querySelectorAll('[data-x-quote-block], [data-x-quote-reason]').forEach(el => {
+    document.querySelectorAll('[data-x-quote-block], [data-x-quote-reason], [data-x-quote-label]').forEach(el => {
         if (el.dataset.xQuoteBlock !== 'shown') delete el.dataset.xQuoteBlock;
         delete el.dataset.xQuoteReason;
+        if (el.dataset.xQuoteBlock !== 'shown') delete el.dataset.xQuoteLabel;
     });
 
     // Waiting rows skip the visibility queue, but their already-known filters
