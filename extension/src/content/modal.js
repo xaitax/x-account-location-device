@@ -834,7 +834,7 @@ function createTagBody(onTagAction, onBioTagAction, onLinkAction, onPcfAction) {
     const linkSection = createTagSection({
         title: 'Links to',
         hint: 'Matched against the profile website and bio links, including subdomains',
-        placeholder: 'Enter a domain (e.g., throne.com)...',
+        placeholder: 'Enter a domain...',
         getSet: () => localBlockedLinks,
         onAction: onLinkAction,
         normalizeInput: value => normalizeHost(value),
