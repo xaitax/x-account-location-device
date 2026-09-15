@@ -14,7 +14,7 @@ import commonjs from '@rollup/plugin-commonjs';
 import terser from '@rollup/plugin-terser';
 import replace from '@rollup/plugin-replace';
 import copy from 'rollup-plugin-copy';
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
 
 const production = !process.env.ROLLUP_WATCH;
 const browser = process.env.BROWSER || 'chrome';

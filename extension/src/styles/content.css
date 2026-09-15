@@ -646,6 +646,9 @@ article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-bl
 article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="bio"])::before {
     content: "Quoted post hidden · Bio tag";
 }
+article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="link"])::before {
+    content: "Quoted post hidden · Linked domain";
+}
 article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="label"])::before {
     content: "Quoted post hidden · Account type";
 }
@@ -1461,8 +1464,8 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
 /* ============================================
    TAGS PANEL LAYOUT
    Three self-contained sections, so they need real separation — and blocked terms read
-   as chips rather than full-width slabs. Most values are a single emoji or one short word,
-   and a full-width row per value turned three short lists into a wall of blocks.
+    as chips rather than full-width slabs. Most values are a single emoji, short word, or
+    domain, and a full-width row per value turned the filter lists into a wall of blocks.
    ============================================ */
 .x-blocker-tag-section {
     margin-bottom: 26px;
@@ -1501,6 +1504,7 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
 }
 
 .x-blocker-tag-text {
+    min-width: 0;
     font-size: 14px;
     overflow: hidden;
     text-overflow: ellipsis;

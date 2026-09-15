@@ -22,6 +22,7 @@ export const STORAGE_KEYS = {
     BLOCKED_PCF: 'x_blocked_pcf',
     BLOCKED_LANGUAGES: 'x_blocked_languages',
     BLOCKED_AFFILIATIONS: 'x_blocked_affiliations',
+    BLOCKED_LINKS: 'x_blocked_links',
     ALLOWED_USERS: 'x_allowed_users',
     SETTINGS: 'x_location_settings',
     HEADERS: 'x_api_headers',
@@ -156,6 +157,8 @@ export const MESSAGE_TYPES = {
     SET_BLOCKED_LANGUAGES: 'SET_BLOCKED_LANGUAGES',
     GET_BLOCKED_AFFILIATIONS: 'GET_BLOCKED_AFFILIATIONS',
     SET_BLOCKED_AFFILIATIONS: 'SET_BLOCKED_AFFILIATIONS',
+    GET_BLOCKED_LINKS: 'GET_BLOCKED_LINKS',
+    SET_BLOCKED_LINKS: 'SET_BLOCKED_LINKS',
     GET_ALLOWED_USERS: 'GET_ALLOWED_USERS',
     SET_ALLOWED_USERS: 'SET_ALLOWED_USERS',
     GET_STATISTICS: 'GET_STATISTICS',
@@ -182,6 +185,7 @@ export const MESSAGE_TYPES = {
     BLOCKED_PCF_UPDATED: 'BLOCKED_PCF_UPDATED',
     BLOCKED_LANGUAGES_UPDATED: 'BLOCKED_LANGUAGES_UPDATED',
     BLOCKED_AFFILIATIONS_UPDATED: 'BLOCKED_AFFILIATIONS_UPDATED',
+    BLOCKED_LINKS_UPDATED: 'BLOCKED_LINKS_UPDATED',
     ALLOWED_USERS_UPDATED: 'ALLOWED_USERS_UPDATED',
     THEME_UPDATED: 'THEME_UPDATED'
 
@@ -355,6 +359,87 @@ for (const [alias, canonical] of Object.entries(COUNTRY_ALIASES)) {
 }
 
 /**
+ * Hosts that appear on a large share of all profiles. Blocking one is almost never what
+ * was meant, so the input warns first — the same courtesy describeTagRisk() extends to a
+ * display-name tag short enough to over-match.
+ */
+export const OVERBROAD_HOSTS = new Set([
+    'bit.ly', 'facebook.com', 'github.com', 'google.com', 'instagram.com',
+    'linktr.ee', 'reddit.com', 'substack.com', 'tiktok.com', 'twitch.tv',
+    'twitter.com', 'x.com', 'youtu.be', 'youtube.com'
+]);
+
+const HOST_PATTERN =
+    /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+
+/**
+ * Reduce a typed domain OR a full URL to the bare lowercase host used for storage and
+ * comparison. Accepts what people actually paste; returns '' for anything that cannot be
+ * a host, so it can be used directly as a BlockedSetStorage normalizer.
+ *
+ *   'https://www.Throne.com/abc?x=1' → 'throne.com'
+ *   'throne.com/'                    → 'throne.com'
+ *   'not a domain'                   → ''
+ *
+ * @param {string|null|undefined} input
+ * @returns {string}
+ */
+export function normalizeHost(input) {
+    if (!input || typeof input !== 'string') return '';
+
+    let value = input.trim().toLowerCase();
+    if (value === '') return '';
+
+    value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');  // scheme
+    value = value.replace(/^[^/@]*@/, '');                  // userinfo
+    value = value.split(/[/?#]/)[0];                        // path, query, fragment
+    value = value.replace(/:\d+$/, '');                     // port
+    value = value.replace(/\.+$/, '');                      // trailing dots
+    value = value.replace(/^www\./, '');                    // www prefix
+
+    if (value === '' || value.length > 253) return '';
+    return HOST_PATTERN.test(value) ? value : '';
+}
+
+/**
+ * Exact host or a subdomain of it — never a bare substring.
+ *
+ * A substring test would make 'throne.com' match 'not-throne.com' (a false positive) and,
+ * worse, 'throne.com.example.net' (a one-line evasion for anyone who noticed).
+ * @param {string} host
+ * @param {string} domain
+ * @returns {boolean}
+ */
+export function hostMatchesDomain(host, domain) {
+    if (!host || !domain) return false;
+    return host === domain || host.endsWith(`.${domain}`);
+}
+
+/**
+ * First blocked domain an account's profile hosts match.
+ *
+ * Returns the domain rather than a boolean so the block marker can name the reason, the
+ * way the country and tag filters already do. `blocked` may be a Set (content script) or
+ * an array (anywhere else).
+ * @param {string[]|null|undefined} hosts
+ * @param {Set<string>|string[]|null|undefined} blocked
+ * @returns {string|null}
+ */
+export function findBlockedLink(hosts, blocked) {
+    if (!hosts?.length || !blocked) return null;
+    const size = blocked.size ?? blocked.length;
+    if (!size) return null;
+
+    for (const host of hosts) {
+        for (const domain of blocked) {
+            if (hostMatchesDomain(host, domain)) return domain;
+        }
+    }
+    return null;
+}
+
+
+/**
  * Resolve X's location spelling to the lowercase country name used by the picker
  * and stored filters. Unknown names retain their spelling apart from case and
  * whitespace. This never infers a region or expands one into member countries.
@@ -467,7 +552,8 @@ export const PROFILE_CACHE_CONFIG = {
     MAX_BIO_LENGTH: 200,
     // Hard ceiling on nodes visited while walking one response, so a pathological payload
     // can't pin the main thread. X sends ~20 tweets per page; this is orders of magnitude
-    // above what that needs.
+    // above what that needs. Capped so a bio stuffed with links can't inflate one record; a real profile has one or two.
+    MAX_LINKS: 12,
     MAX_WALK_NODES: 200000
 };
 

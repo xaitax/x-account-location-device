@@ -14,11 +14,13 @@
  *    go stale within minutes, so persisting either would be both wrong and a privacy problem.
  *  - Cleared on teardown along with every other content-script cache.
  *
- * At the configured limits the worst case is roughly 500 × ~550 B ≈ 270 KB.
+ * At the configured limits the worst case is roughly 500 × ~800 B ≈ 390 KB. (12 short
+ * hostnames add up to a few hundred bytes on top of the ~550 B baseline; most profiles
+ * contribute zero or one).
  */
 
 import { LRUCache } from '../shared/lru-cache.js';
-import { PROFILE_CACHE_CONFIG, normalizePcfLabel } from '../shared/constants.js';
+import { PROFILE_CACHE_CONFIG, normalizePcfLabel, normalizeHost } from '../shared/constants.js';
 
 /** screenName (lowercase) -> { bio, pcf, followers, following, tweets, media } */
 const profiles = new LRUCache(PROFILE_CACHE_CONFIG.MAX_ENTRIES);
@@ -46,8 +48,20 @@ export function setProfile(screenName, data) {
         ? data.bio.slice(0, PROFILE_CACHE_CONFIG.MAX_BIO_LENGTH)
         : null;
 
+    // page-script.js already normalizes and caps these, but setProfile is the storage
+    // boundary — re-validating here means a future caller (or a malformed relay message)
+    // can't put an oversized array or a non-host string into the cache.
+    const links = Array.isArray(data.links)
+        ? [...new Set(
+            data.links
+                .map(normalizeHost)
+                .filter(Boolean)
+          )].slice(0, PROFILE_CACHE_CONFIG.MAX_LINKS)
+        : [];
+
     profiles.set(screenName.toLowerCase(), {
         bio: bio || null,
+        links,
         pcf: normalizePcfLabel(data.pcf) || null,
         followers: toCount(data.followers),
         following: toCount(data.following),
@@ -58,7 +72,7 @@ export function setProfile(screenName, data) {
 
 /**
  * @param {string|null|undefined} screenName
- * @returns {{bio: string|null, pcf: string|null, followers: number|null, following: number|null, tweets: number|null, media: number|null}|null}
+ * @returns {{bio: string|null, links: string[], pcf: string|null, followers: number|null, following: number|null, tweets: number|null, media: number|null}|null}
  */
 export function getProfile(screenName) {
     if (!screenName || typeof screenName !== 'string') return null;

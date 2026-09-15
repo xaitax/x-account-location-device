@@ -4,7 +4,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, LANGUAGE_LIST, LANGUAGE_NAMES, ACCOUNT_LABELS, STORAGE_KEYS, TIMING, canonicalCountry } from '../shared/constants.js';
+import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, LANGUAGE_LIST, LANGUAGE_NAMES, ACCOUNT_LABELS, STORAGE_KEYS, TIMING, canonicalCountry, normalizeHost, OVERBROAD_HOSTS } from '../shared/constants.js';
 import { getFlagEmoji, formatCountryName, debounce, describeTagRisk } from '../shared/utils.js';
 import { deviceIcon, glyph } from '../content/icons.js';
 
@@ -63,6 +63,10 @@ const elements = {
     bioTagInput: document.getElementById('bio-tag-input'),
     btnAddBioTag: document.getElementById('btn-add-bio-tag'),
     bioTagRiskNote: document.getElementById('bio-tag-risk-note'),
+    blockedLinksList: document.getElementById('blocked-links-list'),
+    linkInput: document.getElementById('link-input'),
+    btnAddLink: document.getElementById('btn-add-link'),
+    linkRiskNote: document.getElementById('link-risk-note'),
     pcfLabelPills: document.getElementById('pcf-label-pills'),
     blockedAffiliationsList: document.getElementById('blocked-affiliations-list'),
     blockedAffiliationsCount: document.getElementById('blocked-affiliations-count'),
@@ -117,6 +121,7 @@ let blockedCountries = [];
 let blockedRegions = [];
 let blockedTags = [];
 let blockedBioTags = [];
+let blockedLinks = [];
 let blockedPcf = [];
 let blockedAffiliations = [];
 let blockedLanguages = [];
@@ -405,14 +410,16 @@ function updateBlockedRegionsCount() {
 
 async function loadBlockedTags() {
     try {
-        const [tagsResponse, bioResponse, pcfResponse] = await Promise.all([
+        const [tagsResponse, bioResponse, linksResponse, pcfResponse] = await Promise.all([
             browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_TAGS }),
             browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_BIO_TAGS }),
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_LINKS }),
             browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_PCF })
         ]);
 
         if (tagsResponse?.success) blockedTags = tagsResponse.data || [];
         if (bioResponse?.success) blockedBioTags = bioResponse.data || [];
+        if (linksResponse?.success) blockedLinks = linksResponse.data || [];
         if (pcfResponse?.success) blockedPcf = pcfResponse.data || [];
 
         renderAllTagLists();
@@ -424,6 +431,7 @@ async function loadBlockedTags() {
 function renderAllTagLists() {
     renderBlockedTags();
     renderBlockedBioTags();
+    renderBlockedLinks();
     renderPcfLabels();
     updateBlockedTagsCount();
 }
@@ -434,7 +442,7 @@ function renderAllTagLists() {
  */
 function updateBlockedTagsCount() {
     if (!elements.blockedTagsCount) return;
-    const total = blockedTags.length + blockedBioTags.length + blockedPcf.length;
+    const total = blockedTags.length + blockedBioTags.length + blockedLinks.length + blockedPcf.length;
     elements.blockedTagsCount.textContent = total;
     elements.blockedTagsCount.style.display = total > 0 ? 'inline-flex' : 'none';
 }
@@ -521,6 +529,15 @@ function renderBlockedBioTags() {
     );
 }
 
+function renderBlockedLinks() {
+    renderTermList(
+        elements.blockedLinksList,
+        blockedLinks,
+        'No linked domains blocked',
+        value => removeTagFrom(MESSAGE_TYPES.SET_BLOCKED_LINKS, 'link', value)
+    );
+}
+
 /** X's account labels are a closed set, so they are pills rather than a free-text list. */
 function renderPcfLabels() {
     const container = elements.pcfLabelPills;
@@ -578,6 +595,7 @@ async function removeTagFrom(messageType, key, value) {
             renderAllTagLists();
             showTagRisk(elements.tagRiskNote, null);
             showTagRisk(elements.bioTagRiskNote, null);
+            showLinkNote(null);
             showSaveStatus();
         }
     } catch (error) {
@@ -605,6 +623,7 @@ async function togglePcfLabel(value) {
 function applyTagResponse(messageType, data) {
     if (messageType === MESSAGE_TYPES.SET_BLOCKED_TAGS) blockedTags = data;
     else if (messageType === MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS) blockedBioTags = data;
+    else if (messageType === MESSAGE_TYPES.SET_BLOCKED_LINKS) blockedLinks = data;
     else if (messageType === MESSAGE_TYPES.SET_BLOCKED_PCF) blockedPcf = data;
 }
 
@@ -613,18 +632,20 @@ function applyTagResponse(messageType, data) {
  * the kind of half-action that reads as a bug.
  */
 async function clearAllBlockedTags() {
-    const total = blockedTags.length + blockedBioTags.length + blockedPcf.length;
+    const total = blockedTags.length + blockedBioTags.length + blockedLinks.length + blockedPcf.length;
     if (total === 0) return;
-    if (!confirm('Are you sure you want to clear all display-name tags, bio terms and account labels?')) return;
+    if (!confirm('Are you sure you want to clear all display-name tags, bio terms, linked domains and account labels?')) return;
 
     try {
         await Promise.all([
             browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_TAGS, payload: { action: 'clear' } }),
             browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, payload: { action: 'clear' } }),
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_LINKS, payload: { action: 'clear' } }),
             browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_PCF, payload: { action: 'clear' } })
         ]);
         blockedTags = [];
         blockedBioTags = [];
+        blockedLinks = [];
         blockedPcf = [];
         renderAllTagLists();
         showTagRisk(elements.tagRiskNote, null);
@@ -717,6 +738,8 @@ function renderBlockedAffiliations() {
     }
 }
 
+
+
 /**
  * Add a blocked affiliation
  */
@@ -783,6 +806,46 @@ async function clearAllBlockedAffiliations() {
     } catch (error) {
         console.error('Failed to clear blocked affiliations:', error);
     }
+}
+
+/**
+ * Add a linked domain.
+ *
+ * Normalizes locally first so a typo gets an explanation instead of vanishing: the
+ * background would reject it too, but a silent no-op reads as the feature being broken.
+ * @param {string} value
+ */
+async function addBlockedLink(value) {
+    const host = normalizeHost(value);
+    if (!host) {
+        showLinkNote(`"${(value || '').trim()}" isn't a domain. Try something like throne.com.`);
+        return;
+    }
+
+    try {
+        const response = await browserAPI.runtime.sendMessage({
+            type: MESSAGE_TYPES.SET_BLOCKED_LINKS,
+            payload: { action: 'add', link: host }
+        });
+        if (response?.success) {
+            blockedLinks = response.data || [];
+            renderAllTagLists();
+            showLinkNote(OVERBROAD_HOSTS.has(host)
+                ? `${host} appears on a very large number of profiles, so this will hide far more accounts than you may intend.`
+                : null);
+            showSaveStatus();
+        }
+    } catch (error) {
+        console.error('Failed to add blocked link:', error);
+    }
+}
+
+/** Show (or clear) the note under the link input. Non-blocking, like the tag risk note. */
+function showLinkNote(message) {
+    const note = elements.linkRiskNote;
+    if (!note) return;
+    note.textContent = message || '';
+    note.hidden = !message;
 }
 
 /**
@@ -2263,13 +2326,13 @@ function setupEventListeners() {
         elements.btnClearBlockedAffiliations.addEventListener('click', clearAllBlockedAffiliations);
     }
 
-    // Tags: display-name and bio inputs (button + Enter on each)
-    const wireTagInput = (input, button, messageType, riskNote) => {
+    // Tags: display-name, bio and linked-domain inputs (button + Enter on each)
+    const wireTagInput = (input, button, submitValue) => {
         if (!input || !button) return;
         const submit = () => {
             const value = input.value.trim();
             if (!value) return;
-            addTagTo(messageType, 'tag', value, riskNote);
+            submitValue(value);
             input.value = '';
         };
         button.addEventListener('click', submit);
@@ -2280,8 +2343,11 @@ function setupEventListeners() {
             }
         });
     };
-    wireTagInput(elements.tagInput, elements.btnAddTag, MESSAGE_TYPES.SET_BLOCKED_TAGS, elements.tagRiskNote);
-    wireTagInput(elements.bioTagInput, elements.btnAddBioTag, MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, elements.bioTagRiskNote);
+    wireTagInput(elements.tagInput, elements.btnAddTag,
+        value => addTagTo(MESSAGE_TYPES.SET_BLOCKED_TAGS, 'tag', value, elements.tagRiskNote));
+    wireTagInput(elements.bioTagInput, elements.btnAddBioTag,
+        value => addTagTo(MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, 'tag', value, elements.bioTagRiskNote));
+    wireTagInput(elements.linkInput, elements.btnAddLink, addBlockedLink);
 
     // Clear all blocked tags
     if (elements.btnClearBlockedTags) {
@@ -2359,7 +2425,7 @@ function setupEventListeners() {
                 // Metadata
                 exportedAt: new Date().toISOString(),
                 version: VERSION,
-                exportFormat: '2.2',
+                exportFormat: '2.3',
                 
                 // Configuration
                 settings: settingsResponse?.data || currentSettings,
@@ -2367,6 +2433,7 @@ function setupEventListeners() {
                 blockedRegions,
                 blockedTags,
                 blockedBioTags,
+                blockedLinks,
                 blockedPcf,
                 blockedLanguages,
                 blockedAffiliations,
@@ -2463,6 +2530,7 @@ async function handleImportFile(file) {
         const blockedTagsCount = Array.isArray(data.blockedTags) ? data.blockedTags.length : 0;
         const blockedLanguagesCount = Array.isArray(data.blockedLanguages) ? data.blockedLanguages.length : 0;
         const blockedAffiliationsCount = Array.isArray(data.blockedAffiliations) ? data.blockedAffiliations.length : 0;
+        const blockedLinksCount = Array.isArray(data.blockedLinks) ? data.blockedLinks.length : 0;
         const allowedUsersCount = Array.isArray(data.allowedUsers) ? data.allowedUsers.length : 0;
         const hasSettings = data.settings && typeof data.settings === 'object';
 
@@ -2476,6 +2544,7 @@ async function handleImportFile(file) {
             blockedTagsCount > 0 ? `• ${blockedTagsCount} blocked tags` : '',
             blockedLanguagesCount > 0 ? `• ${blockedLanguagesCount} blocked languages` : '',
             blockedAffiliationsCount > 0 ? `• ${blockedAffiliationsCount} blocked affiliations` : '',
+            blockedLinksCount > 0 ? `• ${blockedLinksCount} blocked linked domains` : '',
             allowedUsersCount > 0 ? `• ${allowedUsersCount} always-show accounts` : '',
             cacheCount > 0 ? `• ${cacheCount} cached users` : '',
             '',
@@ -2500,6 +2569,7 @@ async function handleImportFile(file) {
                 blockedPcf: data.blockedPcf,
                 blockedLanguages: data.blockedLanguages,
                 blockedAffiliations: data.blockedAffiliations,
+                blockedLinks: data.blockedLinks,
                 allowedUsers: data.allowedUsers,
                 cache: data.cache
             }
@@ -2515,6 +2585,7 @@ async function handleImportFile(file) {
             if (response.importedBlockedPcf) results.push(`${response.importedBlockedPcf} blocked account labels`);
             if (response.importedBlockedLanguages) results.push(`${response.importedBlockedLanguages} blocked languages`);
             if (response.importedBlockedAffiliations) results.push(`${response.importedBlockedAffiliations} blocked affiliations`);
+            if (response.importedBlockedLinks) results.push(`${response.importedBlockedLinks} blocked linked domains`);
             if (response.importedAllowedUsers) results.push(`${response.importedAllowedUsers} always-show accounts`);
             if (response.importedCache) results.push(`${response.importedCache} cached users`);
 

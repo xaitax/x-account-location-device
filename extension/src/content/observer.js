@@ -42,16 +42,19 @@ function effectiveCountry(info, flagFromDevice) {
  * the reader only sees one label, so the most concrete reason wins. Location first (it
  * is what this extension is for), then the text filters, then affiliation.
  *
+ /**
  * @param {Object} r - reason flags, each already resolved by the caller
- * @returns {'country'|'region'|'tag'|'bio'|'label'|'affiliation'|''}
+ * @returns {'country'|'region'|'tag'|'bio'|'link'|'label'|'affiliation'|''}
  */
+
 function resolveBlockReason({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
-    isBioBlocked, isLabelBlocked, isAffiliationBlocked }) {
+    isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked }) {
     if (isExempt) return '';
     if (isBlockedCountry) return 'country';
     if (isBlockedRegion) return 'region';
     if (isTagBlocked) return 'tag';
     if (isBioBlocked) return 'bio';
+    if (isLinkBlocked) return 'link';
     if (isLabelBlocked) return 'label';
     if (isAffiliationBlocked) return 'affiliation';
     return '';
@@ -141,8 +144,7 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
  * @param {string|null} [opts.csrfToken]
  */
 function applyInfoToElement(element, screenName, info, opts) {
-    const { blockedCountries, blockedRegions, blockedAffiliations, blockedBioTags, blockedPcf,
-        allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
+    const { blockedCountries, blockedRegions, blockedAffiliations, blockedBioTags, blockedLinks, blockedPcf, allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
@@ -162,9 +164,10 @@ function applyInfoToElement(element, screenName, info, opts) {
     // Who-they-are filters (country/region/tag) apply to quoted authors too — they just
     // collapse the quote card instead of the row (issue #32).
     const affiliationBlocked = hasBlockedAffiliation(info?.meta, blockedAffiliations);
-    // Bio and account label come from the profile data X already sent with the timeline,
+    // Bio, links and account label come from the profile data X already sent with the timeline,
     // so neither costs a lookup — see profile-cache.js.
     const bioBlocked = hasBlockedBio(screenName, blockedBioTags);
+    const linkBlocked = hasBlockedLink(screenName, blockedLinks);
     const labelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
     const blockReason = resolveBlockReason({
         isExempt,
@@ -172,6 +175,7 @@ function applyInfoToElement(element, screenName, info, opts) {
         isBlockedRegion: locationLower !== '' && !!blockedRegions && blockedRegions.has(locationLower),
         isTagBlocked: tagBlocked,
         isBioBlocked: bioBlocked,
+        isLinkBlocked: linkBlocked,
         isLabelBlocked: labelBlocked,
         isAffiliationBlocked: affiliationBlocked
     });
@@ -721,6 +725,34 @@ function hasBlockedBio(screenName, blockedBioTags) {
 }
 
 /**
+ * Does this account link to a blocked domain, from its profile website or its bio?
+ *
+ * Like the bio, the links come from the profile data X already ships with its own
+ * timeline responses (see profile-cache.js), so this costs no lookup. Absent profile
+ * data simply means "not blocked" — never a guess.
+ *
+ * Matching is exact-host-or-subdomain, never substring: a substring test would let
+ * 'throne.com' match 'not-throne.com' (false positive) and 'throne.com.evil.net' (a
+ * one-line evasion for anyone who noticed).
+ * @param {string|null|undefined} screenName
+ * @param {Set<string>|null} blockedLinks - normalized lowercase bare hosts
+ * @returns {boolean}
+ */
+function hasBlockedLink(screenName, blockedLinks) {
+    if (!screenName || !blockedLinks || blockedLinks.size === 0) return false;
+
+    const links = getProfile(screenName)?.links;
+    if (!links || links.length === 0) return false;
+
+    for (const host of links) {
+        for (const domain of blockedLinks) {
+            if (host === domain || host.endsWith(`.${domain}`)) return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Does this account carry a selected authenticity label or grey badge?
  *
  * Prefers X's STRUCTURED `parody_commentary_fan_label`, harvested from its own responses —
@@ -1088,6 +1120,7 @@ export async function processElement(element, {
     blockedRegions,
     blockedTags,
     blockedBioTags,
+    blockedLinks,
     blockedPcf,
     blockedLanguages,
     blockedAffiliations,
@@ -1180,6 +1213,7 @@ export async function processElement(element, {
         blockedLanguages,
         blockedAffiliations,
         blockedBioTags,
+        blockedLinks,
         blockedPcf,
         allowedUsers,
         settings,
@@ -1441,6 +1475,7 @@ let pendingBlockedTweetsArgs = null;
  * @param {Set} blockedRegions - Set of blocked region names (lowercase)
  * @param {Set} blockedTags - Set of blocked tags (lowercase)
  * @param {Object} settings - Settings object with highlightBlockedTweets flag
+ * @param {Set} [blockedLinks] - Set of blocked linked domains (normalized bare hosts)
  */
 export function updateBlockedTweets(filters) {
     pendingBlockedTweetsArgs = filters || {};
@@ -1464,6 +1499,7 @@ function runUpdateBlockedTweets({
     blockedRegions,
     blockedTags,
     blockedBioTags = null,
+    blockedLinks = null,
     blockedPcf = null,
     settings = {},
     blockedLanguages = null,
@@ -1496,8 +1532,9 @@ function runUpdateBlockedTweets({
         // display name (the row is still on screen). This is what makes adding OR
         // removing a tag re-apply to already-rendered tweets — and, because we never
         // trust a cached flag, a recycled row can't inherit a previous occupant's block.
-        const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
+                const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
         const isBioBlocked = hasBlockedBio(screenName, blockedBioTags);
+        const isLinkBlocked = hasBlockedLink(screenName, blockedLinks);
         const isLabelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
 
         // Affiliation lives on the cached info, keyed by name, like locationAccurate below.
@@ -1508,7 +1545,7 @@ function runUpdateBlockedTweets({
         // quoted verdict to the card-only marker instead of the row (issue #32).
         const blockReason = resolveBlockReason({
             isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
-            isBioBlocked, isLabelBlocked, isAffiliationBlocked
+            isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked
         });
         const matchesBlockList = blockReason !== '';
 
