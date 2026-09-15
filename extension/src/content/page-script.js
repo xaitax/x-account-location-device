@@ -314,7 +314,12 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
 
         for (const entities of [user?.profile_bio?.entities, user?.legacy?.entities]) {
             if (!entities) continue;
-            for (const group of [entities.url?.urls, entities.description?.urls]) {
+            for (const group of [
+                entities.url?.urls,
+                entities.description?.urls,
+                entities.location?.urls,
+                entities.profile_location?.urls
+            ]) {
                 for (const item of group || []) {
                     if (add(item?.expanded_url || item?.display_url)) return hosts;
                 }
@@ -330,8 +335,14 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
 
         const locations = [user?.profile_bio?.location, user?.legacy?.location, user?.location];
         for (const location of locations) {
-            if (typeof location !== 'string' || !location) continue;
-            for (const match of location.slice(0, MAX_BIO_LENGTH).matchAll(BARE_DOMAIN)) {
+            const locationText = typeof location === 'string'
+                ? location
+                : location && typeof location === 'object'
+                    ? [location.location, location.name, location.text, location.value]
+                        .find(value => typeof value === 'string')
+                    : '';
+            if (!locationText) continue;
+            for (const match of locationText.slice(0, MAX_BIO_LENGTH).matchAll(BARE_DOMAIN)) {
                 if (add(match[1])) return hosts;
             }
         }
