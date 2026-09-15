@@ -44,6 +44,8 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
     const MAX_BIO_LENGTH = 200;
     // Bounded so the dedup set can't grow across a long session; cleared wholesale when it
     // fills, which also lets a changed bio or follower count refresh eventually.
+    // Mirrors PROFILE_CACHE_CONFIG.MAX_LINKS.
+    const MAX_LINKS = 12;
     const RECENT_EMIT_LIMIT = 500;
 
     // Starts ON, matching the default setting, and is only ever turned OFF by an explicit
@@ -260,6 +262,91 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
      * Only primitives are copied out — nothing here keeps a reference into the response,
      * so X's payload stays collectable.
      */
+    // A domain typed as plain text that X didn't linkify ("throne me: throne.com/x").
+    const BARE_DOMAIN = /\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24})(?:\/[^\s]*)?/gi;
+
+    /**
+     * Bare lowercase host from a URL or a typed domain, or '' if it isn't one.
+     *
+     * Deliberately duplicated from shared/constants.js rather than imported, for the same
+     * reason MAX_WALK_NODES is: this bundle is injected into the page and importing that
+     * module would drag the country tables in with it.
+     */
+    function hostOf(raw) {
+        if (!raw || typeof raw !== 'string') return '';
+        let value = raw.trim().toLowerCase();
+        value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+        value = value.replace(/^[^/@]*@/, '');
+        value = value.split(/[/?#]/)[0];
+        value = value.replace(/:\d+$/, '');
+        value = value.replace(/\.+$/, '');
+        value = value.replace(/^www\./, '');
+        if (!value || value.length > 253) return '';
+        return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(value)
+            ? value
+            : '';
+    }
+
+    /**
+     * Hosts an account links to, from the profile data X already sent with the timeline.
+     *
+     * Reads `entities`, never the bare `url` field: that is the t.co wrapper, identical in
+     * shape for every link on X, so matching on it catches everyone or no one. The
+     * `expanded_url` beside it is the real destination and arrives in the same payload.
+     *
+    * Both the newer `profile_bio.entities` and the older `legacy.entities` shapes are
+    * read, because X ships both depending on the query, and a filter that silently stops
+    * matching after a response-shape change is worse than one that never worked. The
+    * profile location is also scanned as plain text: X exposes it separately from the
+    * bio and does not consistently provide link entities for it.
+     */
+    function extractLinks(user) {
+        const hosts = [];
+
+        const add = raw => {
+            const host = hostOf(raw);
+            // t.co is every link on X and is never a meaningful target; dropping it here
+            // keeps it from occupying one of the capped slots.
+            if (!host || host === 't.co' || hosts.includes(host)) return false;
+            hosts.push(host);
+            return hosts.length >= MAX_LINKS;
+        };
+
+        for (const entities of [user?.profile_bio?.entities, user?.legacy?.entities]) {
+            if (!entities) continue;
+            for (const group of [
+                entities.url?.urls,
+                entities.description?.urls
+            ]) {
+                for (const item of group || []) {
+                    if (add(item?.expanded_url || item?.display_url)) return hosts;
+                }
+            }
+        }
+
+        const bio = user?.profile_bio?.description;
+        if (typeof bio === 'string' && bio) {
+            for (const match of bio.slice(0, MAX_BIO_LENGTH).matchAll(BARE_DOMAIN)) {
+                if (add(match[1])) return hosts;
+            }
+        }
+
+        const location = user?.location;
+        const locationText = typeof location === 'string'
+            ? location
+            : location && typeof location === 'object'
+                ? [location.location, location.name, location.text, location.value]
+                    .find(value => typeof value === 'string')
+                : '';
+        if (locationText) {
+            for (const match of locationText.slice(0, MAX_BIO_LENGTH).matchAll(BARE_DOMAIN)) {
+                if (add(match[1])) return hosts;
+            }
+        }
+
+        return hosts;
+    }
+
     function projectUser(user) {
         const screenName = user?.core?.screen_name;
         if (!screenName || typeof screenName !== 'string') return null;
@@ -267,10 +354,11 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
         const counts = user.relationship_counts || {};
         const tweets = user.tweet_counts || {};
         const bio = user.profile_bio?.description;
-
+        const links = extractLinks(user);
         return {
             u: screenName,
             b: typeof bio === 'string' && bio ? bio.slice(0, MAX_BIO_LENGTH) : undefined,
+            l: links.length > 0 ? links : undefined,
             p: typeof user.parody_commentary_fan_label === 'string'
                 ? user.parody_commentary_fan_label
                 : undefined,

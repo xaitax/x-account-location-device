@@ -624,7 +624,7 @@ article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-bl
 }
 /* Two-tone label: what happened, then what to do about it */
 article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"])::before {
-    content: "Quoted post hidden";
+    content: attr(data-x-quote-label);
     font-size: 13.5px;
     font-weight: 700;
     letter-spacing: 0.01em;
@@ -634,24 +634,6 @@ article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-bl
    to go look at without revealing the post first. Overrides the generic label above;
    an unrecognised or missing reason simply keeps it. Category only, never the matched
    value — a blocked tag is arbitrary user text and would break this fixed-height row. */
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="country"])::before {
-    content: "Quoted post hidden · Country";
-}
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="region"])::before {
-    content: "Quoted post hidden · Region";
-}
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="tag"])::before {
-    content: "Quoted post hidden · Name tag";
-}
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="bio"])::before {
-    content: "Quoted post hidden · Bio tag";
-}
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="label"])::before {
-    content: "Quoted post hidden · Account type";
-}
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"][data-x-quote-reason="affiliation"])::before {
-    content: "Quoted post hidden · Affiliation";
-}
 article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"])::after {
     content: "click to show";
     font-size: 12.5px;
@@ -1461,8 +1443,8 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
 /* ============================================
    TAGS PANEL LAYOUT
    Three self-contained sections, so they need real separation — and blocked terms read
-   as chips rather than full-width slabs. Most values are a single emoji or one short word,
-   and a full-width row per value turned three short lists into a wall of blocks.
+    as chips rather than full-width slabs. Most values are a single emoji, short word, or
+    domain, and a full-width row per value turned the filter lists into a wall of blocks.
    ============================================ */
 .x-blocker-tag-section {
     margin-bottom: 26px;
@@ -1501,6 +1483,7 @@ article[data-testid="tweet"][data-x-lang-block="hide"] {
 }
 
 .x-blocker-tag-text {
+    min-width: 0;
     font-size: 14px;
     overflow: hidden;
     text-overflow: ellipsis;
