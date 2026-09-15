@@ -1656,6 +1656,7 @@ function releaseElementMarkers(element, currentScreenName) {
     delete element.dataset.xBlock;
     delete element.dataset.xQuoteBlock;
     delete element.dataset.xQuoteReason;
+    element.closest('div[role="link"][tabindex="0"]')?.removeAttribute('data-x-quote-label');
     if (isValidScreenName(currentScreenName)) element.dataset.xScreenName = currentScreenName;
 }
 
