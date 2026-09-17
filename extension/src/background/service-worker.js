@@ -10,7 +10,7 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, affiliationWasChecked } from '../shared/constants.js';
-import { userCache, blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedPcf, blockedLanguages, blockedAffiliations, allowedUsers, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { userCache, blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedPcf, blockedLanguages, blockedAffiliations, blockedLinks, allowedUsers, settings, headersStorage, initializeStorage } from '../shared/storage.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
 import cloudCache from './cloud-cache.js';
@@ -135,6 +135,14 @@ async function handleMessage(message, _sender) {
 
             case MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS:
                 return await handleSetBlockedAffiliations(payload);
+
+            case MESSAGE_TYPES.GET_BLOCKED_LINKS:
+                return handleGetBlockedSet(blockedLinks);
+
+            case MESSAGE_TYPES.SET_BLOCKED_LINKS:
+                return await handleSetBlockedSet(blockedLinks, MESSAGE_TYPES.BLOCKED_LINKS_UPDATED, {
+                    action: payload?.action, value: payload?.link, values: payload?.links
+                });
 
             case MESSAGE_TYPES.GET_ALLOWED_USERS:
                 return handleGetAllowedUsers();
@@ -946,7 +954,7 @@ async function handleSyncLocalToCloud() {
 /**
  * Import data handler - imports settings, blocked countries, blocked regions, and cache from exported JSON
  */
-async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedBioTags: importBlockedBioTags, blockedPcf: importBlockedPcf, blockedLanguages: importBlockedLanguages, blockedAffiliations: importBlockedAffiliations, allowedUsers: importAllowedUsers, cache: importCache }) {
+async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedBioTags: importBlockedBioTags, blockedPcf: importBlockedPcf, blockedLanguages: importBlockedLanguages, blockedAffiliations: importBlockedAffiliations, blockedLinks: importBlockedLinks, allowedUsers: importAllowedUsers, cache: importCache }) {
     const results = {
         settings: false,
         blockedCountries: { count: 0 },
@@ -960,6 +968,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
         // TypeError mid-import — leaving allowlist and cache unimported and no tab
         // broadcast sent, reported to the user only as "Cannot read properties of undefined".
         blockedAffiliations: { count: 0 },
+        blockedLinks: { count: 0 },
         allowedUsers: { count: 0 },
         cache: { count: 0 }
     };
@@ -1013,6 +1022,14 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             results.blockedAffiliations.count = importBlockedAffiliations.length;
         }
 
+        // Import blocked linked domains if provided (one mutation + one write)
+        if (Array.isArray(importBlockedLinks)) {
+            await blockedLinks.setAll(importBlockedLinks);
+            // setAll drops entries that don't normalize, so report what was stored rather
+            // than what the file claimed.
+            results.blockedLinks.count = blockedLinks.size;
+        }
+
         // Import allowlisted ("always show") accounts if provided (one mutation + one write)
         if (Array.isArray(importAllowedUsers)) {
             await allowedUsers.setAll(importAllowedUsers);
@@ -1044,6 +1061,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_PCF_UPDATED, payload: blockedPcf.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, payload: blockedLanguages.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED, payload: blockedAffiliations.getAll() }),
+            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_LINKS_UPDATED, payload: blockedLinks.getAll() }),
             broadcastToTabs({ type: MESSAGE_TYPES.ALLOWED_USERS_UPDATED, payload: allowedUsers.getAll() })
         ]);
 
@@ -1057,6 +1075,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             importedBlockedPcf: results.blockedPcf.count,
             importedBlockedLanguages: results.blockedLanguages.count,
             importedBlockedAffiliations: results.blockedAffiliations.count,
+            importedBlockedLinks: results.blockedLinks.count,
             importedAllowedUsers: results.allowedUsers.count,
             importedCache: results.cache.count
         };
@@ -1072,6 +1091,7 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             importedBlockedPcf: results.blockedPcf.count,
             importedBlockedLanguages: results.blockedLanguages.count,
             importedBlockedAffiliations: results.blockedAffiliations.count,
+            importedBlockedLinks: results.blockedLinks.count,
             importedAllowedUsers: results.allowedUsers.count,
             importedCache: results.cache.count
         };

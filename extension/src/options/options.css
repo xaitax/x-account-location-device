@@ -1718,7 +1718,8 @@ body {
 /* Tag lists read as wrapping chips, not full-width rows — see the matching note in
    content.css. Scoped to the two term lists so the country/region lists keep their rows. */
 #blocked-tags-list,
-#blocked-bio-tags-list {
+#blocked-bio-tags-list,
+#blocked-links-list {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -1727,7 +1728,8 @@ body {
 }
 
 #blocked-tags-list .blocked-item,
-#blocked-bio-tags-list .blocked-item {
+#blocked-bio-tags-list .blocked-item,
+#blocked-links-list .blocked-item {
     width: auto;
     max-width: 100%;
     justify-content: flex-start;
@@ -1738,14 +1740,16 @@ body {
 }
 
 #blocked-tags-list .blocked-tag-text,
-#blocked-bio-tags-list .blocked-tag-text {
+#blocked-bio-tags-list .blocked-tag-text,
+#blocked-links-list .blocked-tag-text {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 #blocked-tags-list .empty-state,
-#blocked-bio-tags-list .empty-state {
+#blocked-bio-tags-list .empty-state,
+#blocked-links-list .empty-state {
     padding: 2px 0;
     text-align: left;
 }

@@ -753,6 +753,7 @@ async function showBlockerModal(blockedCountries, blockedRegions, sendMessage, M
     const state = window.__X_POSED_CONTENT__?.getState?.() || {};
     const blockedTags = new Set(state.blockedTags || []);
     const blockedBioTags = new Set(state.blockedBioTags || []);
+    const blockedLinks = new Set(state.blockedLinks || []);
     const blockedPcf = new Set(state.blockedPcf || []);
     const blockedLanguages = new Set(state.blockedLanguages || []);
 
@@ -840,6 +841,8 @@ async function showBlockerModal(blockedCountries, blockedRegions, sendMessage, M
         onTagAction,
         blockedBioTags,
         onBioTagAction: makeSetHandler(MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, 'tag', blockedBioTags),
+        blockedLinks,
+        onLinkAction: makeSetHandler(MESSAGE_TYPES.SET_BLOCKED_LINKS, 'link', blockedLinks),
         blockedPcf,
         onPcfAction: makeSetHandler(MESSAGE_TYPES.SET_BLOCKED_PCF, 'label', blockedPcf),
         blockedLanguages,

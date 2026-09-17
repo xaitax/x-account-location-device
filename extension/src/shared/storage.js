@@ -4,7 +4,7 @@
  */
 
 import browserAPI from './browser-api.js';
-import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS, canonicalCountry, affiliationWasChecked } from './constants.js';
+import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS, canonicalCountry, affiliationWasChecked, normalizeHost } from './constants.js';
 import { LRUCache } from './lru-cache.js';
 
 /**
@@ -498,6 +498,11 @@ const normalizeUsername = value => {
     const handle = value.trim().replace(/^@+/, '').toLowerCase();
     return /^[a-z0-9_]{1,15}$/.test(handle) ? handle : '';
 };
+// Linked domains are stored as a bare lowercase host: scheme, "www.", port, path and
+// query are all stripped, so pasting a full profile URL works and every stored value is
+// directly comparable. Anything that isn't a plausible host normalizes to '' and is
+// dropped by BlockedSetStorage, which is also what rejects junk on import.
+const normalizeLinkDomain = value => normalizeHost(value);
 
 /**
  * Settings storage
@@ -671,6 +676,11 @@ export const blockedAffiliations = new BlockedSetStorage({
     label: 'blocked affiliations',
     normalize: normalizeLower
 });
+export const blockedLinks = new BlockedSetStorage({
+    storageKey: STORAGE_KEYS.BLOCKED_LINKS,
+    label: 'blocked links',
+    normalize: normalizeLinkDomain
+});
 export const allowedUsers = new BlockedSetStorage({
     storageKey: STORAGE_KEYS.ALLOWED_USERS,
     label: 'always-show accounts',
@@ -698,6 +708,7 @@ export async function initializeStorage() {
         blockedPcf.load(),
         blockedLanguages.load(),
         blockedAffiliations.load(),
+        blockedLinks.load(),
         allowedUsers.load(),
         settings.load(),
         headersStorage.load()
