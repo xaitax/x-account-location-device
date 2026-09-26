@@ -3,80 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>X-Posed Options</title>
+    <title>X-Posed Settings</title>
+    <link rel="stylesheet" href="../styles/graphite-theme.css">
+    <link rel="stylesheet" href="../styles/graphite.css">
     <link rel="stylesheet" href="options.css">
 </head>
 <body>
     <div class="options-container">
         <!-- What's New Banner (hidden by default, shown on update) -->
-        <div class="whats-new-banner" id="whats-new-banner" style="display: none;">
-            <button class="whats-new-close" id="whats-new-close" aria-label="Dismiss">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                    <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                </svg>
-            </button>
+        <div class="whats-new-banner" id="whats-new-banner" role="region" aria-labelledby="whats-new-title" style="display: none;">
+            <button type="button" class="whats-new-close" id="whats-new-close" aria-label="Dismiss what's new" data-settings-icon="close"></button>
             <div class="whats-new-content">
-                <h2>What's New in X-Posed v3.6</h2>
-                <p class="whats-new-subtitle">Better quotes, quicker exceptions, grey-check filtering, and a good pile of fixes</p>
-
-                <div class="whats-new-cta">
-                    <p><strong>Four million accounts. Thank you.</strong> The community cache has crossed <strong>4 million accounts</strong>, and your bug reports and suggestions are still shaping every release. Keep them coming — this one has quite a few of them in it.</p>
-                    <p>The less exciting number is the server bill. August 2026 came to <strong>US$198.86</strong>, and September 2026 is expected to go comfortably past <strong>US$200</strong>. If X-Posed makes your timeline a little better, buying me a coffee would help tremendously with keeping those servers running. Completely optional, of course — and thank you to everyone already chipping in.</p>
-                    <a href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener" class="whats-new-coffee" aria-label="Support development, buy me a coffee on Ko-fi">
-                        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20 3H4v10a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1h1a3 3 0 0 0 0-6h-1V3zm0 4h1a1 1 0 0 1 0 2h-1V7zM4 20h14v2H4z"/></svg>
-                        Buy me a coffee
-                    </a>
-                </div>
+                <h2 id="whats-new-title">What's New in X-Posed v<span data-release-version>4.0.0</span></h2>
+                <p class="whats-new-subtitle">X-Posed kept growing. It was time for a leaner, cleaner design that gives all those features room to breathe.</p>
 
                 <div class="whats-new-features">
                     <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h8v7a4 4 0 0 1-8 0z"/><path d="M13 8h8v7a4 4 0 0 1-8 0z"/><path d="M5.5 8.5h.01M8.5 8.5h.01M15.5 11.5h.01M18.5 11.5h.01"/></svg></span>
+                        <span class="feature-icon" data-settings-icon="settings" aria-hidden="true"></span>
                         <div class="feature-info">
-                            <strong>Quotes that explain themselves</strong>
-                            <span>A hidden quote now tells you which filter caught it, so you know which list to look at without opening it first. Quoted name and bio filters got a proper fix too, including the newer way X renders quoted names. The quoted author gets checked against their own details; the person quoting them keeps their own rules.</span>
+                            <strong>A new design, everywhere</strong>
+                            <span>Settings, popup, blocking, badges, account cards, Share and notifications now share one compact light/dark design. Clearer counts, quieter badges and consistent highlights.</span>
                         </div>
                     </div>
                     <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+                        <span class="feature-icon" data-settings-icon="shield" aria-hidden="true"></span>
                         <div class="feature-info">
-                            <strong>Open it, read it</strong>
-                            <span>When you open a post directly and X provides its own timestamp link, a matching main post stays readable with a highlight. Replies and quoted posts still follow your filters. And <strong>Highlight blocked tweets</strong> now keeps location-warning matches visible too — highlighting should mean you can still read it.</span>
+                            <strong>Filters, without the clutter</strong>
+                            <span>A clear <strong>Add filter</strong> flow, searchable saved rules, and dedicated <strong>Always Show</strong> and <strong>Behavior</strong> tabs. Your settings stay intact. An optional browser shortcut switches Hide and Highlight.</span>
                         </div>
                     </div>
                     <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg></span>
+                        <span class="feature-icon" data-settings-icon="share" aria-hidden="true"></span>
                         <div class="feature-info">
-                            <strong>Always Show, right there</strong>
-                            <span>Found an account you want to keep around, whatever your filters say? Open its account card and add it to <strong>Always Show</strong> right there. Remove it the same way. No copying handles into Settings, and a failed save tells you it failed instead of pretending the job is done.</span>
+                            <strong>A whole website, or one exact URL</strong>
+                            <span>Match a domain and its subdomains, or just the exact URL you provide. Check profile websites and bio links, with optional matching in self-written profile location text.</span>
                         </div>
                     </div>
                     <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.2 12.4 2.6 2.6 5-5.4"/></svg></span>
+                        <span class="feature-icon" data-settings-icon="chart" aria-hidden="true"></span>
                         <div class="feature-info">
-                            <strong>Grey checkmarks join the filters</strong>
-                            <span>Government and multilateral accounts with X’s grey checkmark now have their own option under <strong>Blocking → Tags → Account label</strong>, in Settings and the sidebar. It’s off by default and reads the actual badge — no guessing from someone’s name or bio, no extra lookups. Accounts without that grey checkmark are left alone by this filter.</span>
-                        </div>
-                    </div>
-                    <div class="whats-new-feature">
-                        <span class="feature-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.3 3.9 5.3 3.9 8.5s-1.4 6.2-3.9 8.5c-2.5-2.3-3.9-5.3-3.9-8.5s1.4-6.2 3.9-8.5z"/></svg></span>
-                        <div class="feature-info">
-                            <strong>And a good pile of fixes</strong>
-                            <span>Côte d’Ivoire, Syria and Laos now match X’s alternative country names, Bonaire is on the list, and Asia, Central Asia and Oceania join the region labels. Expired cache entries get retired when they should, and a slow lookup can no longer put back a filter you just cleared. Less chasing the same settings twice.</span>
+                            <strong>See what your filters catch</strong>
+                            <span>Local totals for unique, identifiable matching posts, location/device breakdowns, and world maps for Filtering and Cached accounts. Filtering counts start as you browse. No extra X or cloud requests.</span>
                         </div>
                     </div>
                 </div>
+                <p class="whats-new-fixes"><strong>Plus a good pile of fixes:</strong> steadier account names, better quote captures and keyboard controls, safer settings saves across tabs, and less repeated work while you scroll. Your own posts stay exempt from language filters too.</p>
+                <div class="whats-new-actions">
+                    <a href="#panel-blocking" class="btn btn-primary whats-new-open" data-target="panel-blocking">Manage filters</a>
+                    <a href="#panel-stats" class="btn whats-new-open" data-target="panel-stats">Explore statistics</a>
+                    <a href="https://github.com/xaitax/x-account-location-device/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer" class="whats-new-changelog">Full changelog</a>
+                </div>
+                <section class="whats-new-cta" aria-labelledby="whats-new-support-title">
+                    <h3 id="whats-new-support-title" class="whats-new-support-title">
+                        <span class="settings-icon" data-settings-icon="heart" aria-hidden="true"></span>
+                        Made possible by you
+                    </h3>
+                    <p><strong>A huge thank you to everyone who has donated.</strong> Your generosity helps keep X-Posed free and the community cache of over four million accounts running. September's server bill is <strong>US$273.32</strong>. There is absolutely no need to donate, but it helps tremendously.</p>
+                    <p><strong>You asked for crypto, so it's here:</strong> Bitcoin, Ethereum and USDC on Ethereum are now available alongside Ko-fi. Thank you for the support, bug reports and ideas that made this release possible.</p>
+                    <div class="whats-new-support-actions">
+                        <a href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener noreferrer" class="btn whats-new-support-action">
+                            <span class="settings-icon" data-settings-icon="coffee" aria-hidden="true"></span>
+                            Buy me a coffee
+                        </a>
+                        <a href="#panel-about" class="btn whats-new-support-action whats-new-open" data-target="panel-about">
+                            Crypto donation options
+                            <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span>
+                        </a>
+                    </div>
+                </section>
             </div>
         </div>
 
-        <!-- Header -->
         <header class="options-header">
             <div class="header-content">
-                <img src="../icons/icon48.png" alt="X-Posed" class="header-icon">
+                <img src="../icons/icon48.png" alt="" class="header-icon" width="36" height="36">
                 <div>
-                    <h1>X-Posed Options</h1>
-                    <span class="subtitle">Account Location & Device Info</span>
+                    <span class="header-brand">X-Posed</span>
+                    <h1 tabindex="-1">Settings</h1>
                 </div>
             </div>
+            <p class="header-autosave">Changes save automatically</p>
         </header>
 
         <!-- Rate Limit Status Banner -->
@@ -90,226 +96,169 @@
 
         <!-- Main Content -->
         <div class="options-layout">
-        <aside class="xp-nav" id="xp-nav">
+        <nav class="xp-nav" id="xp-nav" aria-label="Settings sections">
             <button class="xp-nav-item active" data-target="panel-general" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/>
-                </svg>
+                <span class="settings-icon" data-settings-icon="settings" aria-hidden="true"></span>
                 <span>General</span>
             </button>
             <button class="xp-nav-item" data-target="panel-display" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                </svg>
+                <span class="settings-icon" data-settings-icon="eye" aria-hidden="true"></span>
                 <span>Display</span>
             </button>
             <button class="xp-nav-item" data-target="panel-blocking" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78z"/>
-                </svg>
+                <span class="settings-icon" data-settings-icon="shield" aria-hidden="true"></span>
                 <span>Blocking</span>
             </button>
-            <button class="xp-nav-item" data-target="panel-allowlist" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg>
-                <span>Always-Show</span>
-            </button>
             <button class="xp-nav-item" data-target="panel-stats" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
-                </svg>
+                <span class="settings-icon" data-settings-icon="chart" aria-hidden="true"></span>
                 <span>Statistics</span>
             </button>
             <button class="xp-nav-item" data-target="panel-cloud" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h.71C7.37 7.69 9.48 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3s-1.34 3-3 3z"/>
-                </svg>
+                <span class="settings-icon" data-settings-icon="cloud" aria-hidden="true"></span>
                 <span>Cloud Cache</span>
             </button>
             <button class="xp-nav-item" data-target="panel-cache" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M21 7v12.4A2.6 2.6 0 0 1 18.4 22H5.6A2.6 2.6 0 0 1 3 19.4V4.6A2.6 2.6 0 0 1 5.6 2h9.6L21 7zm-2 1.4L15.6 4H5.6a.6.6 0 0 0-.6.6v14.8a.6.6 0 0 0 .6.6h12.8a.6.6 0 0 0 .6-.6V8.4z"/>
-                </svg>
+                <span class="settings-icon" data-settings-icon="database" aria-hidden="true"></span>
                 <span>Data &amp; Cache</span>
             </button>
             <button class="xp-nav-item" data-target="panel-about" type="button">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
-                </svg>
+                <span class="settings-icon" data-settings-icon="infoCircle" aria-hidden="true"></span>
                 <span>About</span>
             </button>
-            <a href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener" class="xp-nav-support" aria-label="Support development — buy me a coffee on Ko-fi">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path fill="currentColor" d="M20 3H4v10a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1h1a3 3 0 0 0 0-6h-1V3zm0 4h1a1 1 0 0 1 0 2h-1V7zM4 20h14v2H4z"/>
-                </svg>
-                <span>Buy me a coffee</span>
+            <a href="#panel-about" class="xp-nav-support" data-target="panel-about" aria-label="Support X-Posed: Ko-fi and crypto donations">
+                <span class="settings-icon" data-settings-icon="heart" aria-hidden="true"></span>
+                <span>Support X-Posed</span>
             </a>
-        </aside>
+        </nav>
         <main class="options-content">
-            <!-- General Settings -->
             <div class="xp-panel active" id="panel-general">
-            <section class="options-section">
-                <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="currentColor" d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/>
-                    </svg>
-                    General Settings
-                </h2>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Enable Extension</span>
-                        <span class="option-description">Turn the extension on or off globally</span>
+                <section class="options-section">
+                    <h2 class="section-title"><span class="settings-icon" data-settings-icon="settings" aria-hidden="true"></span>General</h2>
+                    <p class="section-description">The essentials for running X-Posed.</p>
+                    <div class="settings-group">
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Enable Extension</span>
+                                <span class="option-description">Turn the extension on or off globally</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-enabled" aria-label="Enable Extension" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Open Changelog on Update</span>
+                                <span class="option-description">Open the "What's New" page in a new tab after the extension updates</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-changelog-on-update" aria-label="Open Changelog on Update" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-enabled" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Debug Mode</span>
-                        <span class="option-description">Show detailed logs in the console</span>
+                    <h3 class="settings-subtitle">Troubleshooting</h3>
+                    <p class="section-hint">Enable detailed logs when you need to investigate a problem.</p>
+                    <div class="settings-group">
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Debug Mode</span>
+                                <span class="option-description">Show detailed logs in the console</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-debug" aria-label="Debug Mode">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-debug">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Open Changelog on Update</span>
-                        <span class="option-description">Open the "What's New" page in a new tab after the extension updates</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-changelog-on-update" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-            </section>
+                </section>
             </div>
 
-            <!-- Display Settings -->
             <div class="xp-panel" id="panel-display">
-            <section class="options-section">
-                <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                    </svg>
-                    Display Settings
-                </h2>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Show Country Flags</span>
-                        <span class="option-description">Display flag emoji next to usernames</span>
+                <section class="options-section">
+                    <h2 class="section-title"><span class="settings-icon" data-settings-icon="eye" aria-hidden="true"></span>Display</h2>
+                    <p class="section-description">Choose what appears beside an account and how you open its details.</p>
+                    <h3 class="settings-subtitle">Badges</h3>
+                    <div class="settings-group">
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Show Country Flags</span>
+                                <span class="option-description">Display country flags next to usernames</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-flags" aria-label="Show Country Flags" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Show Device Icons</span>
+                                <span class="option-description">Display device type icons (Apple, Android, Web)</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-devices" aria-label="Show Device Icons" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Show VPN/Proxy Indicator</span>
+                                <span class="option-description">Show a lock icon when location may not be accurate</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-vpn" aria-label="Show VPN/Proxy Indicator" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Show Info Icon</span>
+                                <span class="option-description">Show the circled-i at the end of each badge. Turn it off to free horizontal space on narrow screens, where X truncates long names and handles. Account details still open from the badge itself.</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-info-icon" aria-label="Show Info Icon" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-flags" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Flag from Device</span>
-                        <span class="option-description">Use the device's country for the flag instead of the account location (falls back to location for web/unknown). Country &amp; region blocking then follow the device's country too.</span>
+                    <h3 class="settings-subtitle">Account details</h3>
+                    <div class="settings-group">
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Share Button</span>
+                                <span class="option-description">Show a Share button on badges to quote, reply, or post accounts to X</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-capture-button" aria-label="Share Button" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Open Account Details on Click</span>
+                                <span class="option-description">Click a badge to open its details instead of opening them on hover. Touch devices always use tap.</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-click-details" aria-label="Open Account Details on Click">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-flag-device">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Show Device Icons</span>
-                        <span class="option-description">Display device type icons (Apple, Android, Web)</span>
+                    <h3 class="settings-subtitle">Navigation</h3>
+                    <div class="settings-group">
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Show Blocking in X’s sidebar</span>
+                                <span class="option-description">Open your filters from the Blocking link in X’s sidebar</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-sidebar-link" aria-label="Show Blocking in X’s sidebar" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-devices" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Show VPN/Proxy Indicator</span>
-                        <span class="option-description">Show a lock icon when location may not be accurate</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-vpn" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Share Button</span>
-                        <span class="option-description">Show a Share button on badges to quote, reply, or post accounts to X</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-capture-button" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Show Accounts with Location Warnings</span>
-                        <span class="option-description">When off, accounts X marks with uncertain locations follow your hide or highlight mode. A location warning does not prove VPN or proxy use.</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-show-vpn-users" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Read Profile Details from X</span>
-                        <span class="option-description">Use the bio, account label and follower counts X already sends with your timeline, instead of requesting them. Costs no extra lookups and never leaves your device. Required for bio and account-label blocking, and for the counts in the account dossier.</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-profile-enrichment" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Show Info Icon</span>
-                        <span class="option-description">Show the circled-i at the end of each badge. Turn it off to free horizontal space on narrow screens, where X truncates long names and handles. Account details still open from the badge itself.</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-info-icon" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Open Account Details on Click</span>
-                        <span class="option-description">Click a badge to open its details instead of opening them on hover. Touch devices always use tap.</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-click-details">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="option-row">
-                    <div class="option-info">
-                        <span class="option-label">Show Sidebar "Block Locations" Link</span>
-                        <span class="option-description">Display the Block Locations link in X's sidebar navigation</span>
-                    </div>
-                    <label class="toggle">
-                        <input type="checkbox" id="opt-sidebar-link" checked>
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-            </section>
+                    <p class="settings-related-note">Country source, location warnings and profile-data preferences are in <strong>Blocking → Behavior</strong>.</p>
+                </section>
             </div>
 
             <!-- Statistics (rendered dynamically into #stats-panel-body) -->
@@ -317,279 +266,21 @@
                 <div id="stats-panel-body"></div>
             </div>
 
-            <!-- Blocked Locations (Countries & Regions with Tabs) -->
             <div class="xp-panel" id="panel-blocking">
-            <section class="options-section">
-                <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="currentColor" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83V6.31l6-2.12 6 2.12v4.78z"/>
-                    </svg>
-                    Blocking
-                </h2>
-
-                <p class="section-description">
-                    Manage which locations are blocked. Click countries or regions to toggle blocking.
-                </p>
-
-                <!-- Blocking Mode Options -->
-                <div class="blocking-mode-options">
-                    <div class="option-row">
-                        <div class="option-info">
-                            <span class="option-label">Hide blocked tweets</span>
-                            <span class="option-description">Completely hide tweets from blocked locations</span>
-                        </div>
-                        <label class="toggle">
-                            <input type="checkbox" id="opt-hide-blocked" checked>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="option-row">
-                        <div class="option-info">
-                            <span class="option-label">Highlight blocked tweets</span>
-                            <span class="option-description">Keep all matching posts visible with an amber highlight, including accounts with location warnings</span>
-                        </div>
-                        <label class="toggle">
-                            <input type="checkbox" id="opt-highlight-blocked">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Tab Bar -->
-                <div class="blocked-tabs">
-                    <button class="blocked-tab active" id="tab-countries">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.3 3.9 5.3 3.9 8.5s-1.4 6.2-3.9 8.5c-2.5-2.3-3.9-5.3-3.9-8.5S9.5 5.8 12 3.5z"/></svg>Countries
-                        <span class="blocked-count" id="blocked-count">0</span>
-                    </button>
-                    <button class="blocked-tab" id="tab-regions">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4z"/><path d="M9 4v14M15 6v14"/></svg>Regions
-                        <span class="blocked-count" id="blocked-regions-count">0</span>
-                    </button>
-                    <button class="blocked-tab" id="tab-tags">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4.5a1.5 1.5 0 0 1 1.5-1.5H12a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.6z"/><path d="M7.5 7.5h.01"/></svg>Tags
-                        <span class="blocked-count" id="blocked-tags-count">0</span>
-                    </button>
-                    <button class="blocked-tab" id="tab-affiliations">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M3 21V8l6-4 6 4v13"/><path d="M15 21V11l6 4v6"/><path d="M7 12h.01M7 16h.01M11 12h.01M11 16h.01"/></svg>Affiliations
-                        <span class="blocked-count" id="blocked-affiliations-count">0</span>
-                    </button>
-                    <button class="blocked-tab" id="tab-languages">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>Languages
-                        <span class="blocked-count" id="blocked-languages-count">0</span>
-                    </button>
-                </div>
-
-                <!-- Countries Panel -->
-                <div class="blocked-panel" id="panel-countries">
-                    <!-- Currently blocked countries -->
-                    <div class="blocked-list" id="blocked-list">
-                        <p class="empty-state">No countries blocked</p>
-                    </div>
-
-                    <!-- Country search and selection -->
-                    <div class="country-selector">
-                        <input type="text" class="country-search" id="country-search" placeholder="Search countries to block...">
-                        <div class="country-grid" id="country-grid">
-                            <!-- Countries will be rendered here by JS -->
-                        </div>
-                    </div>
-
-                    <div class="blocked-actions">
-                        <button class="btn btn-secondary btn-small" id="btn-clear-blocked">
-                            Clear All Countries
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Regions Panel -->
-                <div class="blocked-panel" id="panel-regions" style="display: none;">
-                    <p class="section-hint">
-                        Match the exact regional label X reports, such as "South Asia" or "Europe".
-                        Selecting "Africa" does not also select countries such as Kenya; choose those in Countries.
-                    </p>
-
-                    <!-- Currently blocked regions -->
-                    <div class="blocked-list" id="blocked-regions-list">
-                        <p class="empty-state">No regions blocked</p>
-                    </div>
-
-                    <!-- Region search and selection -->
-                    <div class="country-selector">
-                        <input type="text" class="country-search" id="region-search" placeholder="Search regions to block...">
-                        <div class="country-grid region-grid" id="region-grid">
-                            <!-- Regions will be rendered here by JS -->
-                        </div>
-                    </div>
-
-                    <div class="blocked-actions">
-                        <button class="btn btn-secondary btn-small" id="btn-clear-blocked-regions">
-                            Clear All Regions
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Tags Panel -->
-                <div class="blocked-panel" id="panel-tags" style="display: none;">
-                    <p class="section-hint">
-                        Filter accounts by what they say about themselves &mdash; the name they display, the text of
-                        their bio, or the account label X gives them. Each is matched against a different part of the
-                        account, so they get their own list.
-                    </p>
-
-                    <!-- Display name -->
-                    <div class="tag-group-heading">
-                        <span class="tag-group-heading-label">Display name contains</span>
-                        <span class="tag-group-heading-hint">Matched anywhere inside the name shown on a post</span>
-                    </div>
-                    <div class="country-selector">
-                        <div class="tag-input-row">
-                            <input type="text" class="country-search" id="tag-input" placeholder="Enter emoji or text (e.g., ⭐, 🤖, [BOT])...">
-                            <button class="btn btn-primary btn-small" id="btn-add-tag">+ Add</button>
-                        </div>
-                        <p class="tag-risk-note" id="tag-risk-note" hidden></p>
-                    </div>
-                    <div class="blocked-list" id="blocked-tags-list">
-                        <p class="empty-state">No display-name tags blocked</p>
-                    </div>
-
-                    <!-- Bio -->
-                    <div class="tag-group-heading">
-                        <span class="tag-group-heading-label">Bio contains</span>
-                        <span class="tag-group-heading-hint">Matched anywhere inside the account's bio</span>
-                    </div>
-                    <div class="country-selector">
-                        <div class="tag-input-row">
-                            <input type="text" class="country-search" id="bio-tag-input" placeholder="Enter a word or phrase from a bio...">
-                            <button class="btn btn-primary btn-small" id="btn-add-bio-tag">+ Add</button>
-                        </div>
-                        <p class="tag-risk-note" id="bio-tag-risk-note" hidden></p>
-                    </div>
-                    <div class="blocked-list" id="blocked-bio-tags-list">
-                        <p class="empty-state">No bio terms blocked</p>
-                    </div>
-
-                    <!-- Account label (closed set, so pills rather than free text) -->
-                    <div class="tag-group-heading">
-                        <span class="tag-group-heading-label">Account label</span>
-                        <span class="tag-group-heading-hint">X's own label or grey checkmark &mdash; not inferred from names or bios</span>
-                    </div>
-                    <div class="tag-pill-group">
-                        <div class="tag-pill-row" id="pcf-label-pills"></div>
-                    </div>
-                    <p class="section-hint">Government / multilateral matches X's rendered grey checkmark, even with profile enrichment off. Unknown or unbadged accounts are not inferred.</p>
-
-                    <div class="blocked-actions">
-                        <button class="btn btn-secondary btn-small" id="btn-clear-blocked-tags">
-                            Clear All
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Affiliations Panel -->
-                <div class="blocked-panel" id="panel-affiliations" style="display: none;">
-                    <p class="section-hint">
-                        Block every account affiliated with an organisation. X shows the parent company on affiliated accounts as a small badge next to the name, so blocking one organisation hides all of its staff accounts at once.
-                        <br><strong>Type the organisation's name as plain text</strong>, not the badge icon. Part of the name is enough and it isn't case sensitive. Hover an account's info button to see the name to use.
-                        <br>If an account slips past, hover its info button once. That reads its affiliation and it stays known from then on.
-                    </p>
-
-                    <!-- Currently blocked affiliations -->
-                    <div class="blocked-list" id="blocked-affiliations-list">
-                        <p class="empty-state">No affiliations blocked</p>
-                    </div>
-
-                    <!-- Affiliation input -->
-                    <div class="country-selector">
-                        <div class="tag-input-row">
-                            <input type="text" class="country-search" id="affiliation-input" placeholder="Type an organisation name" maxlength="100">
-                            <button class="btn btn-primary btn-small" id="btn-add-affiliation">+ Add</button>
-                        </div>
-                    </div>
-
-                    <div class="blocked-actions">
-                        <button class="btn btn-secondary btn-small" id="btn-clear-blocked-affiliations">
-                            Clear All Affiliations
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Languages Panel -->
-                <div class="blocked-panel" id="panel-languages" style="display: none;">
-                    <p class="section-hint">
-                        Block posts by their language. X detects each post's language automatically, so tweets written in these languages are hidden from your feed.
-                    </p>
-
-                    <!-- Currently blocked languages -->
-                    <div class="blocked-list" id="blocked-languages-list">
-                        <p class="empty-state">No languages blocked</p>
-                    </div>
-
-                    <!-- Language search and selection -->
-                    <div class="country-selector">
-                        <input type="text" class="country-search" id="language-search" placeholder="Search languages to block...">
-                        <div class="country-grid language-grid" id="language-grid">
-                            <!-- Languages will be rendered here by JS -->
-                        </div>
-                    </div>
-
-                    <div class="blocked-actions">
-                        <button class="btn btn-secondary btn-small" id="btn-clear-blocked-languages">
-                            Clear All Languages
-                        </button>
-                    </div>
-                </div>
-            </section>
-            </div>
-
-            <!-- Always-Show Accounts (allowlist / issue #26) -->
-            <div class="xp-panel" id="panel-allowlist">
-            <section class="options-section allowlist-section">
-                <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg>
-                    Always-Show Accounts
-                    <span class="blocked-count allowlist-count" id="allowed-users-count">0</span>
-                </h2>
-
-                <p class="section-description">
-                    Accounts on this list are <strong>never</strong> hidden or highlighted by any filter. That covers country, region, tag, language, and VPN filters, on the timeline and on their profile. Great for the people you follow from a blocked country.
-                </p>
-
-                <div class="allowlist-input-row">
-                    <div class="allowlist-input-wrap">
-                        <span class="allowlist-at" aria-hidden="true">@</span>
-                        <input type="text" class="country-search allowlist-input" id="allowed-user-input" placeholder="xaitax" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16">
-                    </div>
-                    <button class="btn btn-primary btn-small" id="btn-add-allowed-user">+ Add</button>
-                </div>
-
-                <div class="allowlist-chips" id="allowed-users-list">
-                    <p class="empty-state">No always-show accounts yet</p>
-                </div>
-
-                <div class="blocked-actions">
-                    <button class="btn btn-secondary btn-small" id="btn-clear-allowed-users">
-                        Clear All
-                    </button>
-                </div>
-            </section>
+                <div id="blocking-editor"></div>
             </div>
 
             <!-- Community Cloud Cache -->
             <div class="xp-panel" id="panel-cloud">
             <section class="options-section cloud-section">
                 <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h.71C7.37 7.69 9.48 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3s-1.34 3-3 3z"/>
-                    </svg>
+                    <span class="settings-icon" data-settings-icon="cloud" aria-hidden="true"></span>
                     Community Cloud Cache
                     <span class="beta-badge">ON BY DEFAULT</span>
                 </h2>
 
                 <div class="cloud-warning">
-                    <svg viewBox="0 0 24 24" width="18" height="18">
-                        <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
-                    </svg>
+                    <span class="settings-icon" data-settings-icon="warn" aria-hidden="true"></span>
                     <div>
                         <strong>Privacy Notice:</strong> This is on unless you turn it off, so that flags still work when X rate-limits your lookups.
                         While it is on, public profile facts are shared with a community server, keyed by username: the country and device X reports,
@@ -605,7 +296,7 @@
                         <span class="option-description">Share and receive location data with other users</span>
                     </div>
                     <label class="toggle">
-                        <input type="checkbox" id="opt-cloud-cache">
+                        <input type="checkbox" id="opt-cloud-cache" aria-label="Enable Community Cache">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
@@ -638,9 +329,7 @@
 
                 <div class="cloud-actions" id="cloud-actions" style="display: none;">
                     <button class="btn btn-secondary btn-cloud-sync" id="btn-sync-to-cloud">
-                        <svg viewBox="0 0 24 24" width="16" height="16">
-                            <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46C10.21 6.23 11.08 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 18.16 24 16.68 24 15c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z"/>
-                        </svg>
+                        <span class="settings-icon" data-settings-icon="cloud" aria-hidden="true"></span>
                         Sync Local Cache to Cloud
                     </button>
                     <span class="sync-status" id="sync-status"></span>
@@ -656,11 +345,11 @@
             <div class="xp-panel" id="panel-cache">
             <section class="options-section">
                 <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="currentColor" d="M21 7v12.4A2.6 2.6 0 0 1 18.4 22H5.6A2.6 2.6 0 0 1 3 19.4V4.6A2.6 2.6 0 0 1 5.6 2h9.6L21 7zm-2 1.4L15.6 4H5.6a.6.6 0 0 0-.6.6v14.8a.6.6 0 0 0 .6.6h12.8a.6.6 0 0 0 .6-.6V8.4z"/>
-                    </svg>
-                    Local Cache
+                    <span class="settings-icon" data-settings-icon="database" aria-hidden="true"></span>
+                    Data &amp; Cache
                 </h2>
+
+                <p class="section-description">Manage locally cached account details and back up your settings and filters.</p>
 
                 <div class="cache-info">
                     <div class="cache-stat">
@@ -668,11 +357,12 @@
                         <span class="cache-label">Cached Users</span>
                     </div>
                     <div class="cache-stat">
-                        <span class="cache-value" id="cache-expiry">2 weeks</span>
+                        <span class="cache-value" id="cache-expiry">-</span>
                         <span class="cache-label">Cache Duration</span>
                     </div>
                 </div>
 
+                <p class="section-hint">Export Data includes your settings, saved filters, Always Show accounts and local cache. Import a previous export to restore them.</p>
                 <div class="btn-group">
                     <button class="btn btn-secondary" id="btn-clear-cache">
                         Clear Cache
@@ -694,34 +384,51 @@
             <!-- Support Development -->
             <section class="options-section support-section">
                 <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                    </svg>
-                    Support Development
+                    <span class="settings-icon" data-settings-icon="heart" aria-hidden="true"></span>
+                    Keep X-Posed going
                 </h2>
                 
                 <div class="support-content">
-                    <p>X-Posed is free &amp; open source — if it's useful, you can buy me a coffee.</p>
+                    <p>X-Posed is free and open source. A coffee or a crypto donation helps cover the community cache and ongoing development. Completely optional, always appreciated.</p>
                     <a href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener" class="btn btn-primary support-button">
-                        <svg viewBox="0 0 24 24" width="18" height="18" style="margin-right: 8px;">
-                            <path fill="currentColor" d="M2.3 15.3l5.7 5.7c.4.4 1 .4 1.4 0L21.7 8.7c.4-.4.4-1 0-1.4l-5.7-5.7c-.4-.4-1-.4-1.4 0L2.3 13.9c-.4.4-.4 1 0 1.4zM19 19h-8v2h8c1.1 0 2-.9 2-2v-2h-2v2z"/>
-                        </svg>
+                        <span class="settings-icon" data-settings-icon="coffee" aria-hidden="true"></span>
                         Buy me a coffee on Ko-fi
                     </a>
                 </div>
+
+                <h3 class="settings-subtitle">Prefer crypto?</h3>
+                <p class="section-hint">Choose a network below. ETH and USDC share the same receiving address on Ethereum.</p>
+                <div class="donation-wallets">
+                    <article class="donation-card" aria-labelledby="donation-btc-title">
+                        <div class="donation-heading">
+                            <h4 id="donation-btc-title">Bitcoin</h4>
+                            <span class="donation-assets">BTC</span>
+                        </div>
+                        <p class="donation-network">Network: <strong>Bitcoin</strong></p>
+                        <code class="donation-address" id="donation-btc-address" aria-label="Bitcoin receiving address">35r5XS95AuvNcLqw13ULwH8XifQD9WxddX</code>
+                        <button type="button" class="btn btn-secondary donation-copy" data-copy-address="donation-btc-address" data-copy-label="Bitcoin" aria-label="Copy Bitcoin address">Copy address</button>
+                    </article>
+                    <article class="donation-card" aria-labelledby="donation-eth-title">
+                        <div class="donation-heading">
+                            <h4 id="donation-eth-title">Ethereum</h4>
+                            <span class="donation-assets">ETH / USDC</span>
+                        </div>
+                        <p class="donation-network">Network: <strong>Ethereum</strong> <span>(USDC: ERC-20)</span></p>
+                        <code class="donation-address" id="donation-eth-address" aria-label="ETH and USDC receiving address on Ethereum">0xDeB8e90373C121EcCB9693f8Ff2D4f39ea55f5c0</code>
+                        <button type="button" class="btn btn-secondary donation-copy" data-copy-address="donation-eth-address" data-copy-label="Ethereum" aria-label="Copy ETH and USDC address on Ethereum">Copy address</button>
+                    </article>
+                </div>
+                <p class="donation-network-note"><span class="settings-icon" data-settings-icon="shield" aria-hidden="true"></span><span><strong>Check the network before sending.</strong> Send BTC on Bitcoin, and ETH or USDC on Ethereum only.</span></p>
             </section>
 
             <!-- About -->
             <section class="options-section">
-                <h2 class="section-title">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="currentColor" d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
-                    </svg>
+                <h2 class="section-title"><span class="settings-icon" data-settings-icon="infoCircle" aria-hidden="true"></span>
                     About
                 </h2>
 
                 <div class="about-info">
-                    <p><strong>X-Posed</strong> v<span id="version">3.3.0</span></p>
+                    <p><strong>X-Posed</strong> v<span id="version">4.0.0</span></p>
                     <p class="text-muted">See where X users are located and what devices they use.</p>
                     
                     <div class="about-links">
@@ -732,24 +439,15 @@
                             GitHub
                         </a>
                         <a href="https://github.com/xaitax/x-account-location-device/blob/main/PRIVACY.md" target="_blank" rel="noopener">
-                            <svg viewBox="0 0 24 24" width="16" height="16">
-                                <path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
-                            </svg>
+                            <span class="settings-icon" data-settings-icon="shield" aria-hidden="true"></span>
                             Privacy Policy
                         </a>
                         <a href="https://github.com/xaitax/x-account-location-device/issues" target="_blank" rel="noopener">
-                            <svg viewBox="0 0 24 24" width="16" height="16">
-                                <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-                            </svg>
+                            <span class="settings-icon" data-settings-icon="infoCircle" aria-hidden="true"></span>
                             Report Issue
                         </a>
                     </div>
 
-                    <p class="support-note">
-                        If X-Posed is useful to you, consider
-                        <a href="https://ko-fi.com/xaitax" target="_blank" rel="noopener">buying me a coffee</a>
-                        to help cover server costs. Thank you!
-                    </p>
                 </div>
             </section>
             </div>
@@ -757,7 +455,7 @@
         </div>
 
         <!-- Save Status -->
-        <div class="save-status" id="save-status">
+        <div class="save-status" id="save-status" role="status" aria-live="polite">
             <svg viewBox="0 0 24 24" width="16" height="16">
                 <path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
             </svg>

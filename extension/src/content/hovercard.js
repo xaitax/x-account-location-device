@@ -11,7 +11,8 @@
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, Z_INDEX } from '../shared/constants.js';
 import { LRUCache } from '../shared/lru-cache.js';
-import { deviceIcon, glyph, flagImage } from './icons.js';
+import { deviceIcon, flagImage } from './icons.js';
+import { dialogIcon } from './dialog-icons.js';
 import { getProfile } from './profile-cache.js';
 
 /**
@@ -25,6 +26,22 @@ function formatCount(value) {
         return value.toLocaleString();
     } catch {
         return String(value);
+    }
+}
+
+let compactCountFormatter;
+
+/** Keep large statistics on one line while their exact totals remain accessible. */
+function formatCompactCount(value) {
+    if (!Number.isInteger(value) || value < 0) return null;
+    if (value < 1000000) return formatCount(value);
+    try {
+        compactCountFormatter ||= new Intl.NumberFormat(undefined, {
+            notation: 'compact', maximumFractionDigits: 1
+        });
+        return compactCountFormatter.format(value);
+    } catch {
+        return formatCount(value);
     }
 }
 
@@ -88,22 +105,23 @@ function createEl(tag, className, text = null) {
 function createTag({ label, tone = 'neutral', title = '' }) {
     const tag = createEl('span', `x-posed-tag x-posed-tag-${tone}`);
     if (title) tag.title = safeText(title, 200);
-    tag.textContent = safeText(label, 24);
+    tag.append(dialogIcon(tone === 'neutral' ? 'shield' : 'verified', 13), document.createTextNode(safeText(label, 24)));
     return tag;
 }
 
-function createRow({ icon, label, value, primary = false, alert = false }) {
+function createRow({ icon, label, value, primary = false }) {
     let cls = 'x-posed-row';
     if (primary) cls += ' x-posed-row--primary';
-    if (alert) cls += ' x-posed-alert';
     const row = createEl('div', cls);
 
     const left = createEl('div', 'x-posed-row-left');
-    const iconEl = createEl('span', 'x-posed-row-icon');
-    if (icon instanceof Node) iconEl.appendChild(icon);
-    else if (icon) iconEl.textContent = icon;
+    if (icon) {
+        const iconEl = createEl('span', 'x-posed-row-icon');
+        if (icon instanceof Node) iconEl.appendChild(icon);
+        else iconEl.textContent = icon;
+        left.appendChild(iconEl);
+    }
     const labelEl = createEl('span', 'x-posed-row-label', label);
-    left.appendChild(iconEl);
     left.appendChild(labelEl);
 
     const right = createEl('div', 'x-posed-row-right');
@@ -124,6 +142,7 @@ function ensureCard() {
 
     card = createEl('div', 'x-posed-hovercard');
     card.id = CARD_ID;
+    card.setAttribute('role', 'dialog');
     card.style.zIndex = String((Z_INDEX?.TOAST || 1000001) + 5);
 
     // Prevent the card from interfering with tweet clicks.
@@ -136,6 +155,14 @@ function ensureCard() {
 }
 
 function positionCard(card, anchorEl) {
+    // The no-hover layout is a bottom sheet. Leave its placement to CSS rather
+    // than retaining desktop inline coordinates after a viewport change.
+    if (window.matchMedia?.('(hover: none)').matches) {
+        card.style.removeProperty('left');
+        card.style.removeProperty('top');
+        card.style.removeProperty('max-width');
+        return;
+    }
     const rect = anchorEl.getBoundingClientRect();
 
     // Desired placement: right of badge if possible; otherwise above/below.
@@ -192,9 +219,9 @@ function describeHovercardError(response) {
         case 'UNAUTHORIZED':
             return 'Couldn’t authenticate to X. If you use Firefox containers, open X in your default container (or reload x.com).';
         case 'NO_HEADERS':
-            return 'Waiting to capture your X session — scroll or reload x.com once, then hover again.';
+            return 'Waiting to capture your X session. Scroll or reload x.com once, then hover again.';
         case 'RATE_LIMITED':
-            return 'X rate limit reached — try again in a moment.';
+            return 'X rate limit reached. Try again in a moment.';
         case 'NOT_FOUND':
             return 'Account not found.';
         default:
@@ -202,20 +229,29 @@ function describeHovercardError(response) {
     }
 }
 
-function buildCardContent({ screenName, info, loading = false, errorText = '', allowlistControl = null }) {
+function buildCardContent({ screenName, displayName = '', fallbackName = '', info, loading = false, errorText = '', allowlistControl = null, onClose }) {
     const card = ensureCard();
+    const focusedElement = card.contains(document.activeElement) ? document.activeElement : null;
+    const focusedClose = focusedElement?.classList.contains('x-posed-card-close');
+    const focusedLink = focusedElement?.classList.contains('x-posed-link');
+    const focusedBody = focusedElement?.classList.contains('x-posed-card-body');
+    const accountKey = String(screenName || '').toLowerCase();
+    const scrollTop = card.dataset.xScreenName === accountKey
+        ? card.querySelector('.x-posed-card-body')?.scrollTop || 0 : 0;
+    card.dataset.xScreenName = accountKey;
     card.replaceChildren();
+    card.setAttribute('aria-label', `Account details for @${safeText(screenName, 20)}`);
 
     const meta = info?.meta || {};
 
     // Header
     const header = createEl('div', 'x-posed-card-header');
 
-    // Avatar intentionally omitted — the cached profile image is often stale/blurry
-    // and adds no forensic value; the dossier leads with the name + signals.
+    // The cached profile image can be stale or blurry. Lead with the name and
+    // account signals without adding another image request.
     const titleWrap = createEl('div', 'x-posed-title');
     const nameLine = createEl('div', 'x-posed-name-line');
-    const name = safeText(meta.name || screenName, 60);
+    const name = safeText(displayName || meta.name || fallbackName || screenName, 60);
     const nameEl = createEl('span', 'x-posed-name', name);
     const handleEl = createEl('span', 'x-posed-handle', `@${safeText(screenName, 20)}`);
     nameLine.appendChild(nameEl);
@@ -224,107 +260,119 @@ function buildCardContent({ screenName, info, loading = false, errorText = '', a
     const tags = createEl('div', 'x-posed-tags');
 
     if (meta.blueVerified) {
-        tags.appendChild(createTag({ label: 'Blue', tone: 'blue', title: 'X Premium / Blue verified' }));
+        tags.appendChild(createTag({ label: 'Blue verification', tone: 'blue', title: 'X Premium / Blue verified' }));
     }
     if (meta.verified) {
-        tags.appendChild(createTag({ label: 'Verified', tone: 'gold', title: 'Legacy verified' }));
+        tags.appendChild(createTag({ label: 'Legacy verified', tone: 'gold', title: 'Legacy verified' }));
     }
     if (meta.identityVerified) {
-        tags.appendChild(createTag({ label: 'ID', tone: 'green', title: 'Identity verified' }));
+        tags.appendChild(createTag({ label: 'Identity verified', tone: 'green', title: 'Identity verified' }));
     }
     if (meta.protected) {
         tags.appendChild(createTag({ label: 'Protected', tone: 'neutral', title: 'Protected account' }));
     }
 
-    // Affiliate badge
     const aff = meta.affiliate;
-    if (aff?.name) {
-        tags.appendChild(createTag({ label: aff.name, tone: 'purple', title: 'Affiliation / business label' }));
-    }
 
     titleWrap.appendChild(nameLine);
     titleWrap.appendChild(handleEl);
     if (tags.childNodes.length > 0) titleWrap.appendChild(tags);
 
     header.appendChild(titleWrap);
+    const closeButton = createEl('button', 'x-posed-card-close');
+    closeButton.type = 'button';
+    closeButton.setAttribute('aria-label', 'Close account details');
+    closeButton.title = 'Close account details';
+    closeButton.appendChild(dialogIcon('close', 16));
+    closeButton.addEventListener('click', onClose);
+    header.appendChild(closeButton);
 
     // Body
     const body = createEl('div', 'x-posed-card-body');
+    body.tabIndex = 0;
+    body.setAttribute('role', 'region');
+    body.setAttribute('aria-label', 'Account information');
 
-    // Primary signals first — Location (with flag), Device (platform icon), VPN.
+    // Keep known location and connection details visible even when richer
+    // account metadata is unavailable.
+    const signals = createEl('div', 'x-posed-card-signals');
     if (info?.location) {
         const locVal = createEl('span', 'x-posed-loc');
         const fimg = flagImage(info.location);
         if (fimg) locVal.appendChild(fimg);
         locVal.appendChild(document.createTextNode(safeText(info.location, 80)));
-        body.appendChild(createRow({ icon: glyph('location', 16), label: 'Location', value: locVal, primary: true }));
+        signals.appendChild(createRow({ icon: dialogIcon('globe', 14), label: 'Location', value: locVal, primary: true }));
     }
 
     if (info?.device) {
-        body.appendChild(createRow({ icon: deviceIcon(info.device, 16), label: 'Device', value: safeText(info.device, 80), primary: true }));
+        signals.appendChild(createRow({ icon: deviceIcon(info.device, 14), label: 'Connected via', value: safeText(info.device, 80), primary: true }));
     }
+    if (signals.childNodes.length) body.appendChild(signals);
 
     if (info?.locationAccurate === false) {
-        body.appendChild(createRow({ icon: glyph('vpn', 16), label: 'Signal', value: 'VPN / Proxy suspected', primary: true, alert: true }));
+        const warning = createEl('div', 'x-posed-card-warning');
+        warning.title = 'X reports that this account’s location may not be accurate.';
+        const copy = createEl('span', 'x-posed-warning-copy', 'Location may be inaccurate.');
+        copy.setAttribute('aria-hidden', 'true');
+        warning.append(dialogIcon('warn', 15), copy,
+            createEl('span', 'x-posed-sr-only', warning.title));
+        body.appendChild(warning);
     }
 
     // Follower / following / post counts, harvested from the profile data X already ships
-    // with its own timeline responses — no lookup was spent to show these, and they are
+    // with its own timeline responses. No lookup was spent to show these, and they are
     // simply absent for an account we have not seen in a response yet.
     const profile = getProfile(screenName);
     if (profile) {
-        const followers = formatCount(profile.followers);
-        const following = formatCount(profile.following);
-        const posts = formatCount(profile.tweets);
-        const media = formatCount(profile.media);
-
-        if (followers) {
-            body.appendChild(createRow({ icon: glyph('followers', 16), label: 'Followers', value: followers }));
+        const stats = createEl('div', 'x-posed-card-stats');
+        const values = [
+            { label: 'Followers', value: profile.followers },
+            { label: 'Following', value: profile.following },
+            { label: 'Posts', value: profile.tweets }
+        ];
+        for (const { label, value } of values) {
+            const exactCount = formatCount(value);
+            if (exactCount === null) continue;
+            const stat = createEl('div', 'x-posed-stat');
+            stat.title = `${exactCount} ${label}`;
+            stat.setAttribute('role', 'group');
+            stat.setAttribute('aria-label', stat.title);
+            const number = createEl('span', 'x-posed-stat-value', formatCompactCount(value));
+            number.title = exactCount;
+            number.setAttribute('aria-label', exactCount);
+            stat.append(number, createEl('span', 'x-posed-stat-label', label));
+            stats.appendChild(stat);
         }
-        if (following) {
-            body.appendChild(createRow({ icon: glyph('followers', 16), label: 'Following', value: following }));
-        }
-        if (posts) {
-            body.appendChild(createRow({
-                icon: glyph('posts', 16),
-                label: 'Posts',
-                value: media ? `${posts} · ${media} media` : posts
-            }));
-        }
+        if (stats.childNodes.length) body.appendChild(stats);
     }
 
-    // Verification summary row (if any signal exists)
-    const verificationBits = [];
-    if (meta.blueVerified) verificationBits.push('Blue');
-    if (meta.verified) verificationBits.push('Legacy');
-    if (meta.identityVerified) verificationBits.push('ID');
-    if (meta.protected) verificationBits.push('Protected');
-    if (verificationBits.length > 0) {
-        body.appendChild(createRow({ icon: glyph('verified', 16), label: 'Verification', value: verificationBits.join(' · ') }));
+    const metadata = createEl('div', 'x-posed-card-metadata');
+    const media = formatCount(profile?.media);
+    if (media !== null) {
+        metadata.appendChild(createRow({ label: 'Media', value: media }));
     }
-
     const createdAt = parseCreatedAt(meta.createdAt);
     const ageYears = yearsSince(createdAt);
     if (createdAt) {
         const ageSuffix = typeof ageYears === 'number' ? ` (${ageYears}y)` : '';
-        body.appendChild(createRow({ icon: glyph('created', 16), label: 'Created', value: `${formatShortDate(createdAt)}${ageSuffix}` }));
+        metadata.appendChild(createRow({ label: 'Created', value: `${formatShortDate(createdAt)}${ageSuffix}` }));
     }
 
     // Verified since
     if (typeof meta.verifiedSinceMsec === 'number' && meta.verifiedSinceMsec > 0) {
         const d = new Date(meta.verifiedSinceMsec);
         if (!Number.isNaN(d.getTime())) {
-            body.appendChild(createRow({ icon: glyph('clock', 16), label: 'Verified since', value: formatShortDate(d) }));
+            metadata.appendChild(createRow({ label: 'Verified since', value: formatShortDate(d) }));
         }
     }
 
     if (typeof meta.usernameChanges === 'number') {
-        body.appendChild(createRow({ icon: glyph('swap', 16), label: 'Handle changes', value: String(meta.usernameChanges) }));
+        metadata.appendChild(createRow({ label: 'Handle changes', value: String(meta.usernameChanges) }));
     }
 
     // X internal stable user identifier (useful for tracking across handle changes)
     if (meta.restId) {
-        body.appendChild(createRow({ icon: glyph('id', 16), label: 'User ID', value: safeText(meta.restId, 40) }));
+        metadata.appendChild(createRow({ label: 'User ID', value: safeText(meta.restId, 40) }));
     }
 
     if (aff?.name || meta.affiliateUsername) {
@@ -355,16 +403,21 @@ function buildCardContent({ screenName, info, loading = false, errorText = '', a
             content.appendChild(document.createTextNode(label));
         }
 
-        body.appendChild(createRow({ icon: glyph('affiliation', 16), label: 'Affiliation', value: content }));
+        metadata.appendChild(createRow({ label: 'Affiliation', value: content }));
     }
+    if (metadata.childNodes.length) body.appendChild(metadata);
 
     // Intentionally omit `profileImageShape` ("Avatar") and `learnMoreUrl` rows:
     // they add noise without providing actionable signal.
 
     if (errorText) {
-        body.appendChild(createRow({ icon: glyph('warn', 16), label: 'Error', value: safeText(errorText, 120) }));
+        const error = createEl('div', 'x-posed-card-status x-posed-card-status--error', safeText(errorText, 240));
+        error.setAttribute('role', 'status');
+        body.appendChild(error);
     } else if (loading) {
-        body.appendChild(createRow({ icon: glyph('hourglass', 16), label: 'Loading', value: 'Fetching account details…' }));
+        const status = createEl('div', 'x-posed-card-status', 'Fetching account details…');
+        status.setAttribute('role', 'status');
+        body.appendChild(status);
     }
 
     // Empty states
@@ -372,10 +425,16 @@ function buildCardContent({ screenName, info, loading = false, errorText = '', a
         body.appendChild(createEl('div', 'x-posed-empty', 'No extra account metadata available.'));
     }
 
-    card.appendChild(createEl('span', 'x-posed-scanline'));
     card.appendChild(header);
     card.appendChild(body);
     if (allowlistControl) card.appendChild(allowlistControl);
+    body.scrollTop = scrollTop;
+    // Refreshing metadata must not drop keyboard focus while someone is reading
+    // the card or using its account exception control.
+    if (focusedElement?.isConnected) focusedElement.focus({ preventScroll: true });
+    else if (focusedClose) closeButton.focus({ preventScroll: true });
+    else if (focusedBody) body.focus({ preventScroll: true });
+    else if (focusedLink) (card.querySelector('.x-posed-link') || closeButton).focus({ preventScroll: true });
     return card;
 }
 
@@ -391,8 +450,10 @@ class HovercardController {
         this.currentAnchor = null;
         this.currentScreenName = '';
         this.viewId = 0;
+        this.generation = 0;
         this.allowlistState = null;
         this.allowlistWrites = new Map();
+        this._clickMode = false;
 
         // Per-session cache to avoid repeated API hits while you hover around.
         // Bounded LRU so a long browsing session can't grow it without limit
@@ -408,6 +469,9 @@ class HovercardController {
         this._handleCardLeave = this._handleCardLeave.bind(this);
         this._handleScroll = this._handleScroll.bind(this);
         this._handleOutsideTap = this._handleOutsideTap.bind(this);
+        this._handleKeyDown = this._handleKeyDown.bind(this);
+        this._handleClose = this._handleClose.bind(this);
+        this._handleFocusOut = this._handleFocusOut.bind(this);
     }
 
     /**
@@ -416,38 +480,50 @@ class HovercardController {
      * @param {boolean} [opts.clickToOpen] - open on click instead of hover (issue #38).
      *   Touch devices always use click regardless, since they have no hover at all.
      */
-    attach(badgeEl, { screenName, info, csrfToken = null, clickToOpen = false }) {
+    attach(badgeEl, { screenName, displayName = '', info, csrfToken = null, clickToOpen = false }) {
         if (!badgeEl || badgeEl.dataset.xPosedHovercardAttached === 'true') return;
         badgeEl.dataset.xPosedHovercardAttached = 'true';
+        const detailsButton = badgeEl.querySelector('.x-badge-details');
+        detailsButton?.setAttribute('aria-haspopup', 'dialog');
+        detailsButton?.setAttribute('aria-controls', CARD_ID);
+        detailsButton?.setAttribute('aria-expanded', 'false');
 
         const useClick = TOUCH || clickToOpen;
 
-        if (useClick) {
-            // Tap/click the badge to toggle the dossier. Stop the event from
-            // bubbling/navigating to the profile or triggering X's own handlers.
-            badgeEl.addEventListener('click', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                const open = this.currentAnchor === badgeEl &&
-                    this.card?.classList.contains('x-posed-hovercard-visible');
-                if (open) this.hide();
-                else this.show(badgeEl, { screenName, info, csrfToken, clickToOpen: true });
-            });
-        } else {
-            const onEnter = () => this.show(badgeEl, { screenName, info, csrfToken });
+        // The details control, optional info hint and pill gaps all open the
+        // card. Share has its own action and must never toggle account details.
+        badgeEl.addEventListener('click', e => {
+            if (e.target.closest('.x-capture-btn')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const open = this.currentAnchor === badgeEl &&
+                this.card?.classList.contains('x-posed-hovercard-visible');
+            if (open && this._clickMode) this.hide();
+            else {
+                this.show(badgeEl, { screenName, displayName, info, csrfToken, clickToOpen: true });
+                if (e.detail === 0) this.card?.querySelector('.x-posed-card-close')?.focus({ preventScroll: true });
+            }
+        });
+        if (!useClick) {
+            const onEnter = () => {
+                if (this._clickMode && this.card?.classList.contains('x-posed-hovercard-visible')) return;
+                this.show(badgeEl, { screenName, displayName, info, csrfToken });
+            };
             const onLeave = () => this.hideSoon();
             badgeEl.addEventListener('mouseenter', onEnter);
             badgeEl.addEventListener('mouseleave', onLeave);
         }
+        badgeEl.addEventListener('focusin', this._handleCardEnter);
+        badgeEl.addEventListener('focusout', this._handleFocusOut);
 
         // Mark for cleanup by content-script cleanup routines.
         badgeEl.classList.add('x-posed-has-hovercard');
     }
 
-    show(anchorEl, { screenName, info, csrfToken = null, clickToOpen = false }) {
+    show(anchorEl, { screenName, displayName = '', info, csrfToken = null, clickToOpen = false }) {
         if (!anchorEl || !anchorEl.isConnected) return;
 
-        // Click-opened cards must not close on mouseleave — the reader deliberately
+        // Click-opened cards must not close on mouseleave. The reader deliberately
         // opened this one and expects it to stay until they dismiss it.
         const useClick = TOUCH || clickToOpen;
 
@@ -456,26 +532,40 @@ class HovercardController {
             this.hideTimeout = null;
         }
 
+        if (this.currentAnchor === anchorEl && this.card?.classList.contains('x-posed-hovercard-visible') &&
+            !useClick) return;
+        this.currentAnchor?.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'false');
         this.currentAnchor = anchorEl;
+        this._clickMode = useClick;
+        anchorEl.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'true');
         this.currentScreenName = String(screenName || '').toLowerCase();
         const viewId = ++this.viewId;
         this.allowlistState = this._createAllowlistState(this.currentScreenName, viewId);
+        // Seed the header from the name already visible on X. Keep this local to
+        // the card view so enrichment cannot replace it with a handle or a stale
+        // cached name, and never write observed DOM text into the account cache.
+        const headerName = safeText(displayName, 60);
 
         // Show immediate card (using whatever we currently know)
         this.card = buildCardContent({
-            screenName, info, loading: true, allowlistControl: this.allowlistState?.element
+            screenName, displayName: headerName, info, loading: true,
+            allowlistControl: this.allowlistState?.element, onClose: this._handleClose
         });
         this.card.classList.add('x-posed-hovercard-visible');
         positionCard(this.card, anchorEl);
         if (this.allowlistState) this._loadAllowlist(this.allowlistState);
 
-        // Fetch rich metadata ONLY on hover (forces API), with short TTL caching.
+        // Request rich metadata only when the card opens, with short TTL caching.
         // Pass the badge's known info so an error card can still show it (issue #14).
-        this._fetchAndUpdate(anchorEl, screenName, csrfToken, info, viewId).catch(() => {});
+        this._fetchAndUpdate(anchorEl, screenName, csrfToken, info, viewId, headerName).catch(() => {});
 
-        // Keep visible if hovering card (hover mode only — see _clickMode above)
+        // Keep visible if hovering card in hover mode.
         this.card.removeEventListener('mouseenter', this._handleCardEnter);
         this.card.removeEventListener('mouseleave', this._handleCardLeave);
+        this.card.removeEventListener('focusin', this._handleCardEnter);
+        this.card.removeEventListener('focusout', this._handleFocusOut);
+        this.card.addEventListener('focusin', this._handleCardEnter);
+        this.card.addEventListener('focusout', this._handleFocusOut);
         if (!useClick) {
             this.card.addEventListener('mouseenter', this._handleCardEnter);
             this.card.addEventListener('mouseleave', this._handleCardLeave);
@@ -484,13 +574,16 @@ class HovercardController {
         // Reposition on scroll/resize while visible
         window.addEventListener('scroll', this._handleScroll, true);
         window.addEventListener('resize', this._handleScroll, true);
+        document.addEventListener('keydown', this._handleKeyDown, true);
 
-        // Click/touch mode: there is no mouseleave to dismiss it, so close on a
-        // press outside the card or its anchor.
-        if (useClick) document.addEventListener('pointerdown', this._handleOutsideTap, true);
+        // Outside presses dismiss both pinned and hover-opened cards, including
+        // a hover card kept open while one of its controls has keyboard focus.
+        document.addEventListener('pointerdown', this._handleOutsideTap, true);
     }
 
     hideSoon(delayMs = 120) {
+        if (this._clickMode || this.card?.contains(document.activeElement) ||
+            this.currentAnchor?.contains(document.activeElement)) return;
         if (this.hideTimeout) clearTimeout(this.hideTimeout);
         this.hideTimeout = setTimeout(() => this.hide(), delayMs);
     }
@@ -511,13 +604,35 @@ class HovercardController {
             this.card.replaceChildren();
         }
 
+        this.currentAnchor?.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'false');
         this.currentAnchor = null;
+        this._clickMode = false;
         this.currentScreenName = '';
         this.allowlistState = null;
         this.viewId++;
         window.removeEventListener('scroll', this._handleScroll, true);
         window.removeEventListener('resize', this._handleScroll, true);
         document.removeEventListener('pointerdown', this._handleOutsideTap, true);
+        document.removeEventListener('keydown', this._handleKeyDown, true);
+    }
+
+    _handleClose() {
+        const detailsButton = this.currentAnchor?.querySelector('.x-badge-details');
+        const returnFocus = this.card?.contains(document.activeElement);
+        this.hide();
+        if (returnFocus && detailsButton?.isConnected) detailsButton.focus({ preventScroll: true });
+    }
+
+    _handleKeyDown(event) {
+        if (event.key !== 'Escape' || !this.card?.classList.contains('x-posed-hovercard-visible')) return;
+        // A pointer-opened card must not consume Escape intended for an X
+        // input or another dialog. Keyboard interaction inside our own card or
+        // badge still closes it and restores focus without dismissing X too.
+        if (this.card.contains(document.activeElement) || this.currentAnchor?.contains(document.activeElement)) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        this._handleClose();
     }
 
     _handleCardEnter() {
@@ -529,6 +644,19 @@ class HovercardController {
 
     _handleCardLeave() {
         this.hideSoon(120);
+    }
+
+    _handleFocusOut() {
+        // Metadata refreshes temporarily detach focused controls. Let the
+        // rebuild restore focus before deciding that the reader left the card.
+        const generation = this.generation;
+        const viewId = this.viewId;
+        queueMicrotask(() => {
+            if (this.generation !== generation || this.viewId !== viewId) return;
+            if (!this.card?.classList.contains('x-posed-hovercard-visible')) return;
+            if (!this.card.contains(document.activeElement) &&
+                !this.currentAnchor?.contains(document.activeElement)) this.hideSoon();
+        });
     }
 
     _handleOutsideTap(e) {
@@ -546,7 +674,7 @@ class HovercardController {
     }
 
     _isCurrentAllowlist(state) {
-        return this.allowlistState === state &&
+        return state.generation === this.generation && this.allowlistState === state &&
             this._isCurrentView(this.currentAnchor, state.handle, state.viewId) &&
             this.card.contains(state.element);
     }
@@ -559,7 +687,8 @@ class HovercardController {
         const status = createEl('div', 'x-posed-allowlist-status');
         status.setAttribute('aria-live', 'polite');
         element.append(button, status);
-        const state = { handle, viewId, element, button, status, allowed: null, pending: true, error: '', message: '' };
+        const state = { handle, viewId, generation: this.generation, element, button, status,
+            allowed: null, pending: true, error: '', message: '' };
         this._renderAllowlist(state);
         button.addEventListener('click', event => {
             event.preventDefault();
@@ -576,9 +705,10 @@ class HovercardController {
         button.disabled = pending;
         button.setAttribute('aria-busy', String(pending));
         button.setAttribute('aria-pressed', String(allowed === true));
-        button.textContent = pending && allowed !== null ? 'Saving…'
+        const label = pending && allowed !== null ? 'Saving…'
             : state.error && allowed === null ? 'Retry Always Show'
                 : allowed ? `Stop always showing @${handle}` : `Always show @${handle}`;
+        button.replaceChildren(dialogIcon('shield', 15), createEl('span', null, label));
         button.title = allowed ? 'Apply your filters to this account again.' : 'Exempt this account from your filters.';
         status.textContent = state.error || state.message || (pending && allowed === null ? 'Checking Always Show…' : '');
         status.hidden = !status.textContent;
@@ -632,7 +762,9 @@ class HovercardController {
             });
             this.allowlistWrites.set(state.handle, write);
             const response = await write.finally(() => {
-                if (this.allowlistWrites.get(state.handle) === write) this.allowlistWrites.delete(state.handle);
+                if (state.generation === this.generation && this.allowlistWrites.get(state.handle) === write) {
+                    this.allowlistWrites.delete(state.handle);
+                }
             });
             if (!this._isCurrentAllowlist(state)) return;
             if (!response?.success || !Array.isArray(response.data)) throw new Error('Allowlist update failed');
@@ -651,15 +783,19 @@ class HovercardController {
         }
     }
 
-    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}, viewId = this.viewId) {
+    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}, viewId = this.viewId, displayName = '') {
+        const generation = this.generation;
         const key = String(screenName || '').toLowerCase();
         if (!key) return;
+        const fallbackName = safeText(initialInfo?.meta?.name, 60);
 
         const cached = this.hoverCache.get(key);
         if (cached && Date.now() - cached.fetchedAt < this.cacheTtlMs) {
             if (this._isCurrentView(anchorEl, screenName, viewId)) {
                 this.card = buildCardContent({
-                    screenName, info: cached.data, loading: false, allowlistControl: this.allowlistState?.element
+                    screenName, displayName, fallbackName, info: cached.data, loading: false,
+                    allowlistControl: this.allowlistState?.element,
+                    onClose: this._handleClose
                 });
                 this.card.classList.add('x-posed-hovercard-visible');
                 positionCard(this.card, anchorEl);
@@ -673,19 +809,25 @@ class HovercardController {
                     type: MESSAGE_TYPES.FETCH_HOVERCARD_INFO,
                     payload: { screenName, csrfToken }
                 })
+                .catch(() => ({ success: false, error: 'Couldn’t load account details. Try opening them again.' }))
                 .finally(() => {
-                    this.inFlight.delete(key);
+                    if (this.generation === generation && this.inFlight.get(key) === p) this.inFlight.delete(key);
                 });
             this.inFlight.set(key, p);
         }
 
         const response = await this.inFlight.get(key);
+        // Requests cannot be cancelled through runtime messaging. Ignore every
+        // local effect when a pagehide/teardown has ended their owning session.
+        if (this.generation !== generation) return;
 
         if (!response?.success || !response.data) {
             const msg = describeHovercardError(response);
             if (this._isCurrentView(anchorEl, screenName, viewId)) {
                 this.card = buildCardContent({
-                    screenName, info: initialInfo, loading: false, errorText: msg, allowlistControl: this.allowlistState?.element
+                    screenName, displayName, info: initialInfo, loading: false, errorText: msg,
+                    allowlistControl: this.allowlistState?.element,
+                    onClose: this._handleClose
                 });
                 this.card.classList.add('x-posed-hovercard-visible');
                 positionCard(this.card, anchorEl);
@@ -711,7 +853,9 @@ class HovercardController {
 
         if (this._isCurrentView(anchorEl, screenName, viewId)) {
             this.card = buildCardContent({
-                screenName, info: response.data, loading: false, allowlistControl: this.allowlistState?.element
+                screenName, displayName, fallbackName, info: response.data, loading: false,
+                allowlistControl: this.allowlistState?.element,
+                onClose: this._handleClose
             });
             this.card.classList.add('x-posed-hovercard-visible');
             positionCard(this.card, anchorEl);
@@ -738,6 +882,7 @@ class HovercardController {
      * don't leak the hovercard's global scroll/resize listeners or its cache.
      */
     teardown() {
+        this.generation++;
         this.hide();
         this.hoverCache.clear();
         this.inFlight.clear();

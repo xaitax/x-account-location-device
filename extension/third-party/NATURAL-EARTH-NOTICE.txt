@@ -1,0 +1,19 @@
+Made with Natural Earth
+
+The Statistics maps use a derived, rounded version of Natural Earth's
+1:110m admin 0 map units. Natural Earth vector and raster map data is
+in the public domain. Permission and attribution are not required.
+
+Source: https://github.com/nvkelso/natural-earth-vector
+Pinned commit: 9380cca83db5f9aef52d5e762765100745f84b27
+File: geojson/ne_110m_admin_0_map_units.geojson
+Terms: https://www.naturalearthdata.com/about/terms-of-use/
+
+Modifications: projected to a compact plate carree SVG view, coordinates
+rounded to one decimal place, adjacent duplicate coordinates removed,
+map units grouped by ISO_A2_EH, Antarctica omitted. No runtime mapping
+library or remote map service is included.
+
+This low-resolution map is illustrative. Small territories may not have
+a visible shape. The location list remains authoritative for the counts.
+Boundaries do not imply a position on sovereignty or disputed areas.

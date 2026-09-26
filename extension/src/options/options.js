@@ -1,236 +1,452 @@
 /**
- * Options Page Script
- * Full settings interface for the extension
+ * Full settings page. Blocking shares the same Graphite editor as the on-X dialog.
+ * All writes use the existing background API and revisioned snapshots.
  */
-
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, VERSION, COUNTRY_FLAGS, COUNTRY_LIST, REGION_LIST, REGION_FLAGS, REGION_NAMES, LANGUAGE_LIST, LANGUAGE_NAMES, ACCOUNT_LABELS, STORAGE_KEYS, TIMING, canonicalCountry } from '../shared/constants.js';
-import { getFlagEmoji, formatCountryName, debounce, describeTagRisk } from '../shared/utils.js';
-import { deviceIcon, glyph } from '../content/icons.js';
+import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, CACHE_CONFIG } from '../shared/constants.js';
+import { dialogIcon } from '../content/dialog-icons.js';
+import { mountStatistics } from './statistics.js';
+import { mountBlockingSettings } from '../content/graphite-dialog.js';
+import { createSnapshotTracker } from '../shared/state-sync.js';
+import { FILTER_SOURCES } from '../shared/filter-registry.js';
 
-// Region storage uses lowercase keys, but we display proper names
+const TOGGLES = [
+    ['opt-enabled', 'enabled', true],
+    ['opt-debug', 'debugMode', false],
+    ['opt-flags', 'showFlags', true],
+    ['opt-devices', 'showDevices', true],
+    ['opt-vpn', 'showVpnIndicator', true],
+    ['opt-capture-button', 'showCaptureButton', true],
+    ['opt-info-icon', 'showInfoIcon', true],
+    ['opt-click-details', 'hovercardTrigger', 'hover'],
+    ['opt-sidebar-link', 'showSidebarBlockerLink', true],
+    ['opt-changelog-on-update', 'openChangelogOnUpdate', true]
+];
 
-// DOM Elements
-const elements = {
-    // General
-    optEnabled: document.getElementById('opt-enabled'),
-    optDebug: document.getElementById('opt-debug'),
-    // Display
-    optFlags: document.getElementById('opt-flags'),
-    optFlagDevice: document.getElementById('opt-flag-device'),
-    optDevices: document.getElementById('opt-devices'),
-    optVpn: document.getElementById('opt-vpn'),
-    optCaptureButton: document.getElementById('opt-capture-button'),
-    optProfileEnrichment: document.getElementById('opt-profile-enrichment'),
-    optInfoIcon: document.getElementById('opt-info-icon'),
-    optClickDetails: document.getElementById('opt-click-details'),
-    optShowVpnUsers: document.getElementById('opt-show-vpn-users'),
-    optSidebarLink: document.getElementById('opt-sidebar-link'),
-    optChangelogOnUpdate: document.getElementById('opt-changelog-on-update'),
-    // Blocking Mode
-    optHideBlocked: document.getElementById('opt-hide-blocked'),
-    optHighlightBlocked: document.getElementById('opt-highlight-blocked'),
-    // Blocked Countries
-    blockedList: document.getElementById('blocked-list'),
-    blockedCount: document.getElementById('blocked-count'),
-    countrySearch: document.getElementById('country-search'),
-    countryGrid: document.getElementById('country-grid'),
-    btnClearBlocked: document.getElementById('btn-clear-blocked'),
-    // Blocked Regions
-    blockedRegionsList: document.getElementById('blocked-regions-list'),
-    blockedRegionsCount: document.getElementById('blocked-regions-count'),
-    regionSearch: document.getElementById('region-search'),
-    regionGrid: document.getElementById('region-grid'),
-    btnClearBlockedRegions: document.getElementById('btn-clear-blocked-regions'),
-    // Tabs
-    tabCountries: document.getElementById('tab-countries'),
-    tabRegions: document.getElementById('tab-regions'),
-    tabTags: document.getElementById('tab-tags'),
-    tabAffiliations: document.getElementById('tab-affiliations'),
-    tabLanguages: document.getElementById('tab-languages'),
-    panelCountries: document.getElementById('panel-countries'),
-    panelRegions: document.getElementById('panel-regions'),
-    panelTags: document.getElementById('panel-tags'),
-    panelAffiliations: document.getElementById('panel-affiliations'),
-    panelLanguages: document.getElementById('panel-languages'),
-    // Blocked Tags
-    blockedTagsList: document.getElementById('blocked-tags-list'),
-    blockedTagsCount: document.getElementById('blocked-tags-count'),
-    tagInput: document.getElementById('tag-input'),
-    btnAddTag: document.getElementById('btn-add-tag'),
-    tagRiskNote: document.getElementById('tag-risk-note'),
-    blockedBioTagsList: document.getElementById('blocked-bio-tags-list'),
-    bioTagInput: document.getElementById('bio-tag-input'),
-    btnAddBioTag: document.getElementById('btn-add-bio-tag'),
-    bioTagRiskNote: document.getElementById('bio-tag-risk-note'),
-    pcfLabelPills: document.getElementById('pcf-label-pills'),
-    blockedAffiliationsList: document.getElementById('blocked-affiliations-list'),
-    blockedAffiliationsCount: document.getElementById('blocked-affiliations-count'),
-    affiliationInput: document.getElementById('affiliation-input'),
-    btnAddAffiliation: document.getElementById('btn-add-affiliation'),
-    btnClearBlockedAffiliations: document.getElementById('btn-clear-blocked-affiliations'),
-    btnClearBlockedTags: document.getElementById('btn-clear-blocked-tags'),
-    // Blocked Languages
-    blockedLanguagesList: document.getElementById('blocked-languages-list'),
-    blockedLanguagesCount: document.getElementById('blocked-languages-count'),
-    languageSearch: document.getElementById('language-search'),
-    languageGrid: document.getElementById('language-grid'),
-    btnClearBlockedLanguages: document.getElementById('btn-clear-blocked-languages'),
-    // Always-Show Accounts (allowlist)
-    allowedUsersList: document.getElementById('allowed-users-list'),
-    allowedUsersCount: document.getElementById('allowed-users-count'),
-    allowedUserInput: document.getElementById('allowed-user-input'),
-    btnAddAllowedUser: document.getElementById('btn-add-allowed-user'),
-    btnClearAllowedUsers: document.getElementById('btn-clear-allowed-users'),
-    // Cloud cache
-    optCloudCache: document.getElementById('opt-cloud-cache'),
-    cloudStatus: document.getElementById('cloud-status'),
-    cloudStatusIndicator: document.getElementById('cloud-status-indicator'),
-    cloudStatusText: document.getElementById('cloud-status-text'),
-    cloudStats: document.getElementById('cloud-stats'),
-    cloudTotalEntries: document.getElementById('cloud-total-entries'),
-    cloudLookups: document.getElementById('cloud-lookups'),
-    cloudHits: document.getElementById('cloud-hits'),
-    cloudContributions: document.getElementById('cloud-contributions'),
-    cloudUnconfigured: document.getElementById('cloud-unconfigured'),
-    cloudActions: document.getElementById('cloud-actions'),
-    btnSyncToCloud: document.getElementById('btn-sync-to-cloud'),
-    syncStatus: document.getElementById('sync-status'),
-    // Rate limit
-    rateLimitBanner: document.getElementById('rate-limit-banner'),
-    rateLimitTime: document.getElementById('rate-limit-time'),
-    // Cache
-    cacheSize: document.getElementById('cache-size'),
-    btnClearCache: document.getElementById('btn-clear-cache'),
-    btnExportCache: document.getElementById('btn-export-cache'),
-    btnImportData: document.getElementById('btn-import-data'),
-    importFileInput: document.getElementById('import-file-input'),
-    importStatus: document.getElementById('import-status'),
-    // About
-    version: document.getElementById('version'),
-    // Status
-    saveStatus: document.getElementById('save-status')
-};
+// Presentation order and copy stay local; storage and messaging identifiers are shared.
+const LISTS = Object.entries({
+    countries: 'country filters', regions: 'region filters', tags: 'display-name filters',
+    bioTags: 'bio-text filters', links: 'domain and URL filters', pcf: 'account-label filters',
+    languages: 'post-language filters', affiliations: 'organization filters', allowedUsers: 'always-show accounts'
+}).map(([kind, label]) => ({ ...FILTER_SOURCES.find(source => source.kind === kind), label }));
+
+const elements = Object.fromEntries(Object.entries({
+    optCloudCache: 'opt-cloud-cache',
+    cloudStatusIndicator: 'cloud-status-indicator',
+    cloudStatusText: 'cloud-status-text',
+    cloudStats: 'cloud-stats',
+    cloudTotalEntries: 'cloud-total-entries',
+    cloudLookups: 'cloud-lookups',
+    cloudHits: 'cloud-hits',
+    cloudContributions: 'cloud-contributions',
+    cloudUnconfigured: 'cloud-unconfigured',
+    cloudActions: 'cloud-actions',
+    btnSyncToCloud: 'btn-sync-to-cloud',
+    syncStatus: 'sync-status',
+    rateLimitBanner: 'rate-limit-banner',
+    rateLimitTime: 'rate-limit-time',
+    cacheSize: 'cache-size',
+    btnClearCache: 'btn-clear-cache',
+    btnExportCache: 'btn-export-cache',
+    btnImportData: 'btn-import-data',
+    importFileInput: 'import-file-input',
+    importStatus: 'import-status',
+    version: 'version',
+    saveStatus: 'save-status'
+}).map(([key, id]) => [key, document.getElementById(id)]));
 
 let currentSettings = {};
-let blockedCountries = [];
-let blockedRegions = [];
-let blockedTags = [];
-let blockedBioTags = [];
-let blockedPcf = [];
-let blockedAffiliations = [];
-let blockedLanguages = [];
-let allowedUsers = [];
+let settingsLoaded = false;
+let blockingEditor = null;
+let statisticsView = null;
+let cloudEnabled = false;
+let saveStatusTimeout = null;
 let rateLimitMonitorInterval = null;
+const listState = Object.fromEntries(LISTS.map(source => [source.field, []]));
+const snapshots = createSnapshotTracker();
 
-/**
- * Initialize options page
- */
 async function initialize() {
-    // Load and apply theme first
-    await loadTheme();
-
-    // Keep cloud total updated even if the initial /stats call is slow.
-    // Background writes cached stats to storage (stale-while-revalidate).
-    try {
-        const onChanged = (changes, areaName) => {
-            if (areaName !== 'local') return;
-            const change = changes?.[STORAGE_KEYS.CLOUD_SERVER_STATS];
-            if (!change?.newValue) return;
-
-            const total = change.newValue?.data?.totalEntries;
-            if (typeof total === 'number' && elements.cloudTotalEntries) {
-                elements.cloudTotalEntries.textContent = total.toLocaleString();
-            }
-        };
-
-        browserAPI.storage.onChanged.addListener(onChanged);
-        window.addEventListener('beforeunload', () => {
-            try {
-                browserAPI.storage.onChanged.removeListener(onChanged);
-            } catch {
-                // ignore
-            }
-        });
-
-        // Also show whatever we already have cached immediately (no network wait).
-        const initial = await browserAPI.storage.local.get(STORAGE_KEYS.CLOUD_SERVER_STATS);
-        const initialTotal = initial?.[STORAGE_KEYS.CLOUD_SERVER_STATS]?.data?.totalEntries;
-        if (typeof initialTotal === 'number' && elements.cloudTotalEntries) {
-            elements.cloudTotalEntries.textContent = initialTotal.toLocaleString();
-        }
-    } catch {
-        // ignore
+    for (const slot of document.querySelectorAll('[data-settings-icon]')) {
+        slot.replaceChildren(dialogIcon(slot.dataset.settingsIcon, 20));
     }
-    
-    // Set version
-    if (elements.version) {
-        elements.version.textContent = VERSION;
-    }
-
-    // Check for "What's New" parameter or flag
-    await checkWhatsNew();
-
-    // Load current settings
-    await loadSettings();
-    await loadBlockedCountries();
-    await loadBlockedRegions();
-    await loadBlockedTags();
-    await loadBlockedAffiliations();
-    await loadBlockedLanguages();
-    await loadAllowedUsers();
-    await loadCacheStats();
-    await loadStatistics();
-    await loadCloudCacheStatus();
-    await loadRateLimitStatus();
-
-    // Setup event listeners
-    setupEventListeners();
-
-    // Wire up the left sidebar navigation (top-level section switching)
+    elements.version.textContent = VERSION;
+    for (const label of document.querySelectorAll('[data-release-version]')) label.textContent = VERSION;
+    const cacheDays = Math.round(CACHE_CONFIG.EXPIRY_MS / (24 * 60 * 60 * 1000));
+    document.getElementById('cache-expiry').textContent = `Up to ${cacheDays} days`;
+    for (const [id] of TOGGLES) document.getElementById(id).disabled = true;
+    elements.optCloudCache.disabled = true;
     setupNav();
+    setupEventListeners();
+    browserAPI.runtime.onMessage.addListener(handleMessage);
+    window.addEventListener('beforeunload', () => {
+        browserAPI.runtime.onMessage.removeListener(handleMessage);
+        blockingEditor?.destroy();
+        statisticsView?.destroy();
+        clearTimeout(saveStatusTimeout);
+    });
 
-    // Start rate limit monitor
+    // The page is usable before slow status requests finish.
+    void loadTheme();
+    void checkWhatsNew();
+    void watchCloudStats();
+    void loadCacheStats();
+    window.addEventListener('focus', () => {
+        if (document.getElementById('panel-stats')?.classList.contains('active')) void loadStatistics();
+    });
+    void loadCloudCacheStatus();
+    void loadRateLimitStatus();
     startRateLimitMonitor();
+    await loadConfiguration();
 }
 
-/**
- * Setup left sidebar navigation.
- * Each nav item (.xp-nav-item[data-target]) shows the matching .xp-panel
- * and marks itself active. The first panel stays visible by default.
- */
 function setupNav() {
-    const nav = document.getElementById('xp-nav');
-    if (!nav) return;
-
-    const navItems = Array.from(nav.querySelectorAll('.xp-nav-item'));
-    const panels = Array.from(document.querySelectorAll('.xp-panel'));
-    if (navItems.length === 0 || panels.length === 0) return;
-
-    const showPanel = targetId => {
-        panels.forEach(panel => {
-            panel.classList.toggle('active', panel.id === targetId);
-        });
-        navItems.forEach(item => {
-            item.classList.toggle('active', item.dataset.target === targetId);
-        });
-        // Scroll the content area back to the top when switching sections
-        window.scrollTo({ top: 0, behavior: 'auto' });
+    const items = [...document.querySelectorAll('.xp-nav-item[data-target]')];
+    const panels = [...document.querySelectorAll('.xp-panel')];
+    const showPanel = target => {
+        for (const panel of panels) {
+            const active = panel.id === target;
+            panel.classList.toggle('active', active);
+            panel.hidden = !active;
+        }
+        for (const item of items) {
+            const active = item.dataset.target === target;
+            item.classList.toggle('active', active);
+            if (active) item.setAttribute('aria-current', 'page');
+            else item.removeAttribute('aria-current');
+            item.setAttribute('aria-controls', item.dataset.target);
+        }
+        if (target === 'panel-stats') void loadStatistics();
     };
-
-    navItems.forEach(item => {
-        item.addEventListener('click', () => {
-            const targetId = item.dataset.target;
-            if (targetId) {
-                showPanel(targetId);
+    // Toolbar shortcuts open the existing section, never a separate editor.
+    const showHashPanel = () => {
+        const target = window.location.hash.slice(1);
+        showPanel(items.some(item => item.dataset.target === target) ? target : 'panel-general');
+    };
+    showHashPanel();
+    window.addEventListener('hashchange', showHashPanel);
+    const shortcuts = [...document.querySelectorAll('.xp-nav-support[data-target], .whats-new-open[data-target]')];
+    for (const item of [...items, ...shortcuts]) {
+        item.addEventListener('click', event => {
+            event.preventDefault();
+            if (item.classList.contains('whats-new-open')) document.getElementById('whats-new-close')?.click();
+            showPanel(item.dataset.target);
+            const url = new URL(window.location.href);
+            url.hash = item.dataset.target;
+            window.history.replaceState({}, document.title, url);
+            window.scrollTo({ top: 0, behavior: 'auto' });
+            if (item.classList.contains('whats-new-open')) {
+                const heading = document.getElementById(item.dataset.target)?.querySelector('.section-title, .xp-g-title');
+                if (heading) {
+                    heading.tabIndex = -1;
+                    heading.focus({ preventScroll: true });
+                }
             }
         });
+    }
+}
+
+function applySettingsToInputs() {
+    for (const [id, key, fallback] of TOGGLES) {
+        const input = document.getElementById(id);
+        input.checked = key === 'hovercardTrigger'
+            ? currentSettings[key] === 'click'
+            : (currentSettings[key] ?? fallback) === true;
+    }
+    blockingEditor?.updateSettings(currentSettings, snapshots.snapshot()[MESSAGE_TYPES.SETTINGS_UPDATED]);
+}
+
+function acceptSettings(data, revision) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    if (!snapshots.accept(MESSAGE_TYPES.SETTINGS_UPDATED, revision)) return;
+    currentSettings = data;
+    settingsLoaded = true;
+    applySettingsToInputs();
+}
+
+function acceptList(source, data, revision) {
+    if (!Array.isArray(data) || !snapshots.accept(source.update, revision)) return;
+    listState[source.field] = data;
+    blockingEditor?.updateList(source.kind, data, revision);
+}
+
+function handleMessage(message) {
+    if (message?.type === MESSAGE_TYPES.SETTINGS_UPDATED) {
+        acceptSettings(message.payload, message.revision);
+    } else if (message?.type === MESSAGE_TYPES.THEME_UPDATED && typeof message.payload === 'string') {
+        applyTheme(message.payload);
+    } else {
+        const source = LISTS.find(item => item.update === message?.type);
+        if (source) acceptList(source, message.payload, message.revision);
+    }
+}
+
+async function loadConfiguration() {
+    const host = document.getElementById('blocking-editor');
+    if (!blockingEditor) {
+        host.textContent = 'Loading your filters...';
+        host.setAttribute('aria-busy', 'true');
+    }
+    try {
+        const requests = [
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_SETTINGS }).then(response => {
+                if (!response?.success || !response.data || typeof response.data !== 'object' || Array.isArray(response.data)) {
+                    throw new Error('Could not read settings');
+                }
+                acceptSettings(response.data, response.revision);
+            }),
+            ...LISTS.map(async source => {
+                const response = await browserAPI.runtime.sendMessage({ type: source.get });
+                if (!response?.success || !Array.isArray(response.data)) throw new Error(`Could not read ${source.label}`);
+                acceptList(source, response.data, response.revision);
+            })
+        ];
+        // Wait for all reads before offering a retry or creating an editable surface.
+        const results = await Promise.allSettled(requests);
+        if (results.some(result => result.status === 'rejected')) throw new Error('Incomplete settings snapshot');
+        if (!blockingEditor) {
+            host.replaceChildren();
+            const callbacks = Object.fromEntries(LISTS.map(source => [
+                source.callback, (action, value) => mutateList(source, action, value)
+            ]));
+            blockingEditor = mountBlockingSettings(host, {
+                ...listState, settings: currentSettings, stateRevisions: snapshots.snapshot(),
+                ...callbacks, onSettingsChange: saveSettings
+            });
+        }
+        return true;
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+        if (!blockingEditor) {
+            const message = document.createElement('p');
+            message.textContent = 'Your filters could not be loaded. Nothing has been changed.';
+            const retry = document.createElement('button');
+            retry.type = 'button';
+            retry.className = 'btn btn-secondary';
+            retry.textContent = 'Try again';
+            retry.addEventListener('click', () => { void loadConfiguration(); });
+            host.replaceChildren(message, retry);
+        }
+        showSaveStatus('Could not load all settings. Please try again.', true);
+        return false;
+    } finally {
+        host.removeAttribute('aria-busy');
+        for (const [id] of TOGGLES) document.getElementById(id).disabled = !settingsLoaded;
+    }
+}
+
+async function mutateList(source, action, value) {
+    const response = await browserAPI.runtime.sendMessage({
+        type: source.set, payload: { action, [source.valueKey]: value }
+    });
+    if (!response?.success || !Array.isArray(response.data)) return { success: false };
+    acceptList(source, response.data, response.revision);
+    return { success: true, data: listState[source.field], revision: snapshots.snapshot()[source.update] };
+}
+
+async function saveSettings(newSettings) {
+    try {
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_SETTINGS, payload: newSettings });
+        if (!response?.success || !response.data || typeof response.data !== 'object' || Array.isArray(response.data)) {
+            throw new Error('Save failed');
+        }
+        acceptSettings(response.data, response.revision);
+        showSaveStatus();
+        return { success: true, data: currentSettings, revision: snapshots.snapshot()[MESSAGE_TYPES.SETTINGS_UPDATED] };
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        applySettingsToInputs();
+        showSaveStatus('Could not save settings. Please try again.', true);
+        return { success: false };
+    }
+}
+
+function showSaveStatus(message = 'Settings saved', error = false) {
+    const status = elements.saveStatus;
+    clearTimeout(saveStatusTimeout);
+    status.textContent = message;
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.classList.toggle('save-error', error);
+    status.classList.add('visible');
+    saveStatusTimeout = setTimeout(() => status.classList.remove('visible'), error ? 6000 : 2000);
+}
+
+async function watchCloudStats() {
+    const showTotal = value => {
+        const total = value?.data?.totalEntries;
+        if (typeof total === 'number') elements.cloudTotalEntries.textContent = total.toLocaleString();
+    };
+    const onChanged = (changes, area) => {
+        if (area === 'local') showTotal(changes?.[STORAGE_KEYS.CLOUD_SERVER_STATS]?.newValue);
+    };
+    try {
+        browserAPI.storage.onChanged.addListener(onChanged);
+        window.addEventListener('beforeunload', () => browserAPI.storage.onChanged.removeListener(onChanged));
+        const initial = await browserAPI.storage.local.get(STORAGE_KEYS.CLOUD_SERVER_STATS);
+        showTotal(initial?.[STORAGE_KEYS.CLOUD_SERVER_STATS]);
+    } catch (error) {
+        console.debug('Could not read cached cloud statistics:', error);
+    }
+}
+
+function setupEventListeners() {
+    for (const button of document.querySelectorAll('[data-copy-address]')) {
+        button.addEventListener('click', async () => {
+            if (button.disabled) return;
+            const address = document.getElementById(button.dataset.copyAddress);
+            if (!address) return;
+            button.disabled = true;
+            try {
+                // Keep the write in the click gesture. No wallet connection or request.
+                await navigator.clipboard.writeText(address.textContent.trim());
+                showSaveStatus(`${button.dataset.copyLabel} address copied. Check the network before sending.`);
+            } catch {
+                // The full address remains selectable when clipboard access is unavailable.
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(address);
+                selection?.removeAllRanges();
+                selection?.addRange(range);
+                showSaveStatus('Could not copy automatically. Select the address and copy it manually.', true);
+            } finally {
+                button.disabled = false;
+            }
+        });
+    }
+
+    for (const [id, key] of TOGGLES) {
+        const input = document.getElementById(id);
+        input.addEventListener('change', async () => {
+            input.disabled = true;
+            const value = key === 'hovercardTrigger' ? (input.checked ? 'click' : 'hover') : input.checked;
+            await saveSettings({ [key]: value });
+            input.disabled = false;
+        });
+    }
+
+    elements.optCloudCache.addEventListener('change', async () => {
+        const enabled = elements.optCloudCache.checked;
+        elements.optCloudCache.disabled = true;
+        try {
+            const response = await browserAPI.runtime.sendMessage({
+                type: MESSAGE_TYPES.SET_CLOUD_CACHE_ENABLED, payload: { enabled }
+            });
+            if (!response?.success) throw new Error(response?.error || 'Save failed');
+            cloudEnabled = enabled;
+            showSaveStatus('Cloud preference saved');
+            await loadCloudCacheStatus();
+        } catch (error) {
+            elements.optCloudCache.checked = cloudEnabled;
+            showSaveStatus('Could not save the cloud preference. Please try again.', true);
+        } finally {
+            elements.optCloudCache.disabled = false;
+        }
+    });
+
+    elements.btnClearCache.addEventListener('click', async () => {
+        if (!confirm('Clear the local account cache? Your settings and filters will be kept. Account details will be fetched again as needed.')) return;
+        elements.btnClearCache.disabled = true;
+        try {
+            const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_CACHE, payload: { action: 'clear' } });
+            if (!response?.success) throw new Error('Clear failed');
+            await Promise.all([loadCacheStats(), loadStatistics()]);
+            showSaveStatus('Local cache cleared');
+        } catch (error) {
+            showSaveStatus('Could not clear the local cache. Please try again.', true);
+        } finally {
+            elements.btnClearCache.disabled = false;
+        }
+    });
+    elements.btnSyncToCloud.addEventListener('click', handleSyncToCloud);
+    elements.btnExportCache.addEventListener('click', exportBackup);
+    elements.btnImportData.addEventListener('click', () => elements.importFileInput.click());
+    elements.importFileInput.addEventListener('change', async event => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        elements.btnImportData.disabled = true;
+        try { await handleImportFile(file); }
+        finally {
+            elements.importFileInput.value = '';
+            elements.btnImportData.disabled = false;
+        }
     });
 }
 
-/**
- * Check if we should show the "What's New" banner
- */
+async function exportBackup() {
+    elements.btnExportCache.disabled = true;
+    try {
+        // Read every committed store. A failed read must never create an incomplete backup.
+        const sources = [
+            ['settings', MESSAGE_TYPES.GET_SETTINGS],
+            ...LISTS.map(source => [source.field, source.get]),
+            ['cache', MESSAGE_TYPES.GET_CACHE]
+        ];
+        const responses = await Promise.all(sources.map(([, type]) => browserAPI.runtime.sendMessage({ type, payload: {} })));
+        const data = { exportedAt: new Date().toISOString(), version: VERSION, exportFormat: '2.3' };
+        for (const [index, [key]] of sources.entries()) {
+            const response = responses[index];
+            const valid = key === 'settings'
+                ? response?.data && typeof response.data === 'object' && !Array.isArray(response.data)
+                : Array.isArray(response?.data);
+            if (!response?.success || !valid) throw new Error(`Could not read ${key} for export`);
+            data[key] = response.data;
+        }
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `x-posed-backup-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showSaveStatus('Backup exported');
+    } catch (error) {
+        console.error('Failed to export data:', error);
+        showSaveStatus('Could not export a complete backup. Please try again.', true);
+    } finally {
+        elements.btnExportCache.disabled = false;
+    }
+}
+
+async function handleImportFile(file) {
+    const status = elements.importStatus;
+    const showStatus = (text, error = false) => {
+        status.textContent = text;
+        status.className = `import-status ${error ? 'error' : 'success'}`;
+        status.style.display = 'block';
+    };
+    try {
+        let data;
+        try { data = JSON.parse(await file.text()); }
+        catch { showStatus('Invalid JSON file. Please select an X-Posed backup.', true); return; }
+        if (!data || typeof data !== 'object' || Array.isArray(data) || (!data.version && !data.exportFormat)) {
+            showStatus('This does not appear to be an X-Posed backup file.', true);
+            return;
+        }
+        const entries = LISTS.filter(source => Array.isArray(data[source.field]))
+            .map(source => `${data[source.field].length} ${source.label}`);
+        if (data.settings && typeof data.settings === 'object') entries.unshift('Settings');
+        if (Array.isArray(data.cache)) entries.push(`${data.cache.length} cached accounts`);
+        if (!confirm([
+            `Import backup from ${data.version ? `v${data.version}` : 'X-Posed'}?`,
+            ...entries,
+            'Included settings and filter lists will replace their current values. Fields missing from this backup will be kept. Cached accounts will be merged.',
+            'Continue?'
+        ].join('\n\n'))) return;
+        const payload = Object.fromEntries(
+            ['settings', ...LISTS.map(source => source.field), 'cache']
+                .filter(key => Object.hasOwn(data, key)).map(key => [key, data[key]])
+        );
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.IMPORT_DATA, payload });
+        if (!response?.success) throw new Error(response?.error || 'Import failed');
+        const loaded = await loadConfiguration();
+        await Promise.all([loadCacheStats(), loadStatistics()]);
+        showStatus(loaded ? 'Backup imported. Your settings and filters are up to date.'
+            : 'Backup imported, but this page could not reload every setting. Please reload the page.', !loaded);
+    } catch (error) {
+        showStatus(`Import failed: ${error.message}`, true);
+    }
+}
+
 async function checkWhatsNew() {
     const banner = document.getElementById('whats-new-banner');
     const closeBtn = document.getElementById('whats-new-close');
@@ -260,6 +476,7 @@ async function checkWhatsNew() {
         if (closeBtn) {
             closeBtn.addEventListener('click', async () => {
                 banner.style.display = 'none';
+                document.querySelector('.options-header h1')?.focus({ preventScroll: true });
                 
                 // Mark as seen
                 try {
@@ -272,7 +489,8 @@ async function checkWhatsNew() {
                 
                 // Remove URL parameter if present
                 if (showWhatsNew) {
-                    const newUrl = window.location.pathname;
+                    const newUrl = new URL(window.location.href);
+                    newUrl.searchParams.delete('whats-new');
                     window.history.replaceState({}, document.title, newUrl);
                 }
             });
@@ -280,1147 +498,6 @@ async function checkWhatsNew() {
     }
 }
 
-/**
- * Load settings from background
- */
-async function loadSettings() {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_SETTINGS
-        });
-
-        if (response?.success && response.data) {
-            currentSettings = response.data;
-            
-            elements.optEnabled.checked = currentSettings.enabled !== false;
-            elements.optDebug.checked = currentSettings.debugMode === true;
-            elements.optFlags.checked = currentSettings.showFlags !== false;
-            if (elements.optFlagDevice) {
-                elements.optFlagDevice.checked = currentSettings.flagFromDevice === true;
-            }
-            elements.optDevices.checked = currentSettings.showDevices !== false;
-            elements.optVpn.checked = currentSettings.showVpnIndicator !== false;
-            if (elements.optCaptureButton) {
-                elements.optCaptureButton.checked = currentSettings.showCaptureButton !== false;
-            }
-            if (elements.optProfileEnrichment) {
-                elements.optProfileEnrichment.checked = currentSettings.profileEnrichment !== false;
-            }
-            if (elements.optInfoIcon) {
-                elements.optInfoIcon.checked = currentSettings.showInfoIcon !== false;
-            }
-            if (elements.optClickDetails) {
-                elements.optClickDetails.checked = currentSettings.hovercardTrigger === 'click';
-            }
-            if (elements.optSidebarLink) {
-                elements.optSidebarLink.checked = currentSettings.showSidebarBlockerLink !== false;
-            }
-            if (elements.optChangelogOnUpdate) {
-                elements.optChangelogOnUpdate.checked = currentSettings.openChangelogOnUpdate !== false;
-            }
-            if (elements.optShowVpnUsers) {
-                elements.optShowVpnUsers.checked = currentSettings.showVpnUsers !== false;
-            }
-            
-            // Blocking mode toggles - mutually exclusive
-            const highlightMode = currentSettings.highlightBlockedTweets === true;
-            if (elements.optHideBlocked) {
-                elements.optHideBlocked.checked = !highlightMode;
-            }
-            if (elements.optHighlightBlocked) {
-                elements.optHighlightBlocked.checked = highlightMode;
-            }
-        }
-    } catch (error) {
-        console.error('Failed to load settings:', error);
-    }
-}
-
-/**
- * Load blocked countries
- */
-async function loadBlockedCountries() {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES
-        });
-
-        if (response?.success) {
-            blockedCountries = response.data || [];
-            renderBlockedCountries();
-            renderCountryGrid();
-            updateBlockedCount();
-        }
-    } catch (error) {
-        console.error('Failed to load blocked countries:', error);
-    }
-}
-
-/**
- * Load blocked regions
- */
-async function loadBlockedRegions() {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_BLOCKED_REGIONS
-        });
-
-        if (response?.success) {
-            blockedRegions = response.data || [];
-            renderBlockedRegions();
-            renderRegionGrid();
-            updateBlockedRegionsCount();
-        }
-    } catch (error) {
-        console.error('Failed to load blocked regions:', error);
-    }
-}
-
-/**
- * Update blocked count badge
- */
-function updateBlockedCount() {
-    if (elements.blockedCount) {
-        elements.blockedCount.textContent = blockedCountries.length;
-        elements.blockedCount.style.display = blockedCountries.length > 0 ? 'inline-flex' : 'none';
-    }
-}
-
-/**
- * Update blocked regions count badge
- */
-function updateBlockedRegionsCount() {
-    if (elements.blockedRegionsCount) {
-        elements.blockedRegionsCount.textContent = blockedRegions.length;
-        elements.blockedRegionsCount.style.display = blockedRegions.length > 0 ? 'inline-flex' : 'none';
-    }
-}
-
-/**
- * The Tags panel holds three lists, each matched against a different part of an account:
- * the display name, the bio, and X's own account label or grey badge. They are rendered
- * separately because presenting them as one list is what makes an over-matching term read
- * as a bug in the extension.
- */
-
-async function loadBlockedTags() {
-    try {
-        const [tagsResponse, bioResponse, pcfResponse] = await Promise.all([
-            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_TAGS }),
-            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_BIO_TAGS }),
-            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_PCF })
-        ]);
-
-        if (tagsResponse?.success) blockedTags = tagsResponse.data || [];
-        if (bioResponse?.success) blockedBioTags = bioResponse.data || [];
-        if (pcfResponse?.success) blockedPcf = pcfResponse.data || [];
-
-        renderAllTagLists();
-    } catch (error) {
-        console.error('Failed to load blocked tags:', error);
-    }
-}
-
-function renderAllTagLists() {
-    renderBlockedTags();
-    renderBlockedBioTags();
-    renderPcfLabels();
-    updateBlockedTagsCount();
-}
-
-/**
- * The tab badge counts every kind of "who they are" tag, so the number matches what the
- * panel actually contains.
- */
-function updateBlockedTagsCount() {
-    if (!elements.blockedTagsCount) return;
-    const total = blockedTags.length + blockedBioTags.length + blockedPcf.length;
-    elements.blockedTagsCount.textContent = total;
-    elements.blockedTagsCount.style.display = total > 0 ? 'inline-flex' : 'none';
-}
-
-/**
- * Show (or clear) the over-matching caution for a term that was just added.
- * Non-blocking by design — over-matching is sometimes intended.
- * @param {HTMLElement|null} note
- * @param {string|null} tag
- */
-function showTagRisk(note, tag) {
-    if (!note) return;
-    const message = tag ? describeTagRisk(tag) : null;
-    note.textContent = message || '';
-    note.hidden = !message;
-}
-
-/**
- * Render one blocked-term list.
- * @param {HTMLElement|null} list
- * @param {string[]} values
- * @param {string} emptyText
- * @param {(value: string) => void} onRemove
- */
-function renderTermList(list, values, emptyText, onRemove) {
-    if (!list) return;
-    list.replaceChildren();
-
-    if (values.length === 0) {
-        const emptyState = document.createElement('p');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = emptyText;
-        list.appendChild(emptyState);
-        return;
-    }
-
-    for (const value of [...values].sort()) {
-        const item = document.createElement('div');
-        item.className = 'blocked-item';
-
-        const itemInfo = document.createElement('div');
-        itemInfo.className = 'blocked-item-info';
-        const label = document.createElement('span');
-        label.className = 'blocked-tag-text';
-        label.textContent = value;
-        itemInfo.appendChild(label);
-        item.appendChild(itemInfo);
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'blocked-remove';
-        removeBtn.setAttribute('aria-label', `Remove ${value}`);
-
-        const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        removeSvg.setAttribute('viewBox', '0 0 24 24');
-        removeSvg.setAttribute('width', '16');
-        removeSvg.setAttribute('height', '16');
-        const removePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        removePath.setAttribute('fill', 'currentColor');
-        removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
-        removeSvg.appendChild(removePath);
-        removeBtn.appendChild(removeSvg);
-        removeBtn.addEventListener('click', () => onRemove(value));
-
-        item.appendChild(removeBtn);
-        list.appendChild(item);
-    }
-}
-
-function renderBlockedTags() {
-    renderTermList(
-        elements.blockedTagsList,
-        blockedTags,
-        'No display-name tags blocked',
-        value => removeTagFrom(MESSAGE_TYPES.SET_BLOCKED_TAGS, 'tag', value)
-    );
-}
-
-function renderBlockedBioTags() {
-    renderTermList(
-        elements.blockedBioTagsList,
-        blockedBioTags,
-        'No bio terms blocked',
-        value => removeTagFrom(MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, 'tag', value)
-    );
-}
-
-/** X's account labels are a closed set, so they are pills rather than a free-text list. */
-function renderPcfLabels() {
-    const container = elements.pcfLabelPills;
-    if (!container) return;
-
-    container.replaceChildren();
-    for (const label of ACCOUNT_LABELS) {
-        const isBlocked = blockedPcf.includes(label.value);
-        const pill = document.createElement('button');
-        pill.type = 'button';
-        pill.className = `tag-pill${isBlocked ? ' blocked' : ''}`;
-        pill.textContent = label.name;
-        pill.title = isBlocked ? `Click to unblock ${label.name}` : `Click to block ${label.name}`;
-        pill.setAttribute('aria-pressed', isBlocked ? 'true' : 'false');
-        pill.addEventListener('click', () => togglePcfLabel(label.value));
-        container.appendChild(pill);
-    }
-}
-
-/**
- * Generic add for the two free-text term lists.
- * @param {string} messageType
- * @param {string} key - payload key the background expects
- * @param {string} value
- * @param {HTMLElement|null} riskNote
- */
-async function addTagTo(messageType, key, value, riskNote) {
-    const trimmed = (value || '').trim();
-    if (!trimmed) return;
-
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: messageType,
-            payload: { action: 'add', [key]: trimmed }
-        });
-        if (response?.success) {
-            applyTagResponse(messageType, response.data || []);
-            renderAllTagLists();
-            showTagRisk(riskNote, trimmed);
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to add blocked term:', error);
-    }
-}
-
-async function removeTagFrom(messageType, key, value) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: messageType,
-            payload: { action: 'remove', [key]: value }
-        });
-        if (response?.success) {
-            applyTagResponse(messageType, response.data || []);
-            renderAllTagLists();
-            showTagRisk(elements.tagRiskNote, null);
-            showTagRisk(elements.bioTagRiskNote, null);
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to remove blocked term:', error);
-    }
-}
-
-async function togglePcfLabel(value) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_PCF,
-            payload: { action: 'toggle', label: value }
-        });
-        if (response?.success) {
-            blockedPcf = response.data || [];
-            renderAllTagLists();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to toggle account label:', error);
-    }
-}
-
-/** Route a blocked-set response back to the right local array. */
-function applyTagResponse(messageType, data) {
-    if (messageType === MESSAGE_TYPES.SET_BLOCKED_TAGS) blockedTags = data;
-    else if (messageType === MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS) blockedBioTags = data;
-    else if (messageType === MESSAGE_TYPES.SET_BLOCKED_PCF) blockedPcf = data;
-}
-
-/**
- * Clear every list in the panel. Clearing only one while the button says "Clear All" is
- * the kind of half-action that reads as a bug.
- */
-async function clearAllBlockedTags() {
-    const total = blockedTags.length + blockedBioTags.length + blockedPcf.length;
-    if (total === 0) return;
-    if (!confirm('Are you sure you want to clear all display-name tags, bio terms and account labels?')) return;
-
-    try {
-        await Promise.all([
-            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_TAGS, payload: { action: 'clear' } }),
-            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, payload: { action: 'clear' } }),
-            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_BLOCKED_PCF, payload: { action: 'clear' } })
-        ]);
-        blockedTags = [];
-        blockedBioTags = [];
-        blockedPcf = [];
-        renderAllTagLists();
-        showTagRisk(elements.tagRiskNote, null);
-        showTagRisk(elements.bioTagRiskNote, null);
-        showSaveStatus();
-    } catch (error) {
-        console.error('Failed to clear blocked tags:', error);
-    }
-}
-
-/**
- * Load blocked affiliations (organisations whose affiliated accounts are hidden)
- */
-async function loadBlockedAffiliations() {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS
-        });
-
-        if (response?.success) {
-            blockedAffiliations = response.data || [];
-            renderBlockedAffiliations();
-            updateBlockedAffiliationsCount();
-        }
-    } catch (error) {
-        console.error('Failed to load blocked affiliations:', error);
-    }
-}
-
-/**
- * Update blocked affiliations count badge
- */
-function updateBlockedAffiliationsCount() {
-    if (elements.blockedAffiliationsCount) {
-        elements.blockedAffiliationsCount.textContent = blockedAffiliations.length;
-        elements.blockedAffiliationsCount.style.display = blockedAffiliations.length > 0 ? 'inline-flex' : 'none';
-    }
-}
-
-/**
- * Render the blocked affiliations list
- */
-function renderBlockedAffiliations() {
-    const list = elements.blockedAffiliationsList;
-    if (!list) return;
-
-    list.replaceChildren();
-
-    if (blockedAffiliations.length === 0) {
-        const emptyState = document.createElement('p');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = 'No affiliations blocked';
-        list.appendChild(emptyState);
-        return;
-    }
-
-    for (const affiliation of [...blockedAffiliations].sort()) {
-        const item = document.createElement('div');
-        item.className = 'blocked-item';
-
-        const itemInfo = document.createElement('div');
-        itemInfo.className = 'blocked-item-info';
-
-        const label = document.createElement('span');
-        label.className = 'blocked-tag-text';
-        label.textContent = affiliation;
-        itemInfo.appendChild(label);
-        item.appendChild(itemInfo);
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'blocked-remove';
-        removeBtn.setAttribute('aria-label', `Remove ${affiliation}`);
-
-        const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        removeSvg.setAttribute('viewBox', '0 0 24 24');
-        removeSvg.setAttribute('width', '16');
-        removeSvg.setAttribute('height', '16');
-        const removePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        removePath.setAttribute('fill', 'currentColor');
-        removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
-        removeSvg.appendChild(removePath);
-        removeBtn.appendChild(removeSvg);
-
-        removeBtn.addEventListener('click', async () => {
-            await removeBlockedAffiliation(affiliation);
-        });
-
-        item.appendChild(removeBtn);
-        list.appendChild(item);
-    }
-}
-
-/**
- * Add a blocked affiliation
- */
-async function addBlockedAffiliation(affiliation) {
-    if (!affiliation || affiliation.trim() === '') return;
-
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
-            payload: { action: 'add', affiliation: affiliation.trim() }
-        });
-
-        if (response?.success) {
-            blockedAffiliations = response.data || [];
-            renderBlockedAffiliations();
-            updateBlockedAffiliationsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to add blocked affiliation:', error);
-    }
-}
-
-/**
- * Remove a blocked affiliation
- */
-async function removeBlockedAffiliation(affiliation) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
-            payload: { action: 'remove', affiliation }
-        });
-
-        if (response?.success) {
-            blockedAffiliations = response.data || [];
-            renderBlockedAffiliations();
-            updateBlockedAffiliationsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to remove blocked affiliation:', error);
-    }
-}
-
-/**
- * Clear all blocked affiliations
- */
-async function clearAllBlockedAffiliations() {
-    if (blockedAffiliations.length === 0) return;
-    if (!confirm('Are you sure you want to unblock all affiliations?')) return;
-
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
-            payload: { action: 'clear' }
-        });
-
-        if (response?.success) {
-            blockedAffiliations = [];
-            renderBlockedAffiliations();
-            updateBlockedAffiliationsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to clear blocked affiliations:', error);
-    }
-}
-
-/**
- * Load blocked languages (issue #25)
- */
-async function loadBlockedLanguages() {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_BLOCKED_LANGUAGES
-        });
-
-        if (response?.success) {
-            blockedLanguages = response.data || [];
-            renderBlockedLanguages();
-            renderLanguageGrid(elements.languageSearch?.value || '');
-            updateBlockedLanguagesCount();
-        }
-    } catch (error) {
-        console.error('Failed to load blocked languages:', error);
-    }
-}
-
-/**
- * Update blocked languages count badge
- */
-function updateBlockedLanguagesCount() {
-    if (elements.blockedLanguagesCount) {
-        elements.blockedLanguagesCount.textContent = blockedLanguages.length;
-        elements.blockedLanguagesCount.style.display = blockedLanguages.length > 0 ? 'inline-flex' : 'none';
-    }
-}
-
-/**
- * Render blocked languages list
- */
-function renderBlockedLanguages() {
-    const list = elements.blockedLanguagesList;
-    if (!list) return;
-
-    list.replaceChildren();
-
-    if (blockedLanguages.length === 0) {
-        const emptyState = document.createElement('p');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = 'No languages blocked';
-        list.appendChild(emptyState);
-        return;
-    }
-
-    // Sort by display name for a stable, readable list
-    const sorted = [...blockedLanguages].sort((a, b) =>
-        (LANGUAGE_NAMES[a] || a).localeCompare(LANGUAGE_NAMES[b] || b)
-    );
-
-    for (const code of sorted) {
-        const item = document.createElement('div');
-        item.className = 'blocked-item';
-
-        const itemInfo = document.createElement('div');
-        itemInfo.className = 'blocked-item-info';
-
-        // Code chip (renders on every OS, unlike per-language flags)
-        const codeSpan = document.createElement('span');
-        codeSpan.className = 'blocked-flag language-code';
-        codeSpan.textContent = code.toUpperCase();
-        itemInfo.appendChild(codeSpan);
-
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'blocked-name';
-        nameSpan.textContent = LANGUAGE_NAMES[code] || code;
-        itemInfo.appendChild(nameSpan);
-
-        item.appendChild(itemInfo);
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'blocked-remove';
-        removeBtn.dataset.language = code;
-        removeBtn.setAttribute('aria-label', `Remove ${LANGUAGE_NAMES[code] || code}`);
-
-        const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        removeSvg.setAttribute('viewBox', '0 0 24 24');
-        removeSvg.setAttribute('width', '16');
-        removeSvg.setAttribute('height', '16');
-        const removePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        removePath.setAttribute('fill', 'currentColor');
-        removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
-        removeSvg.appendChild(removePath);
-        removeBtn.appendChild(removeSvg);
-
-        removeBtn.addEventListener('click', async () => {
-            await removeBlockedLanguage(code);
-        });
-
-        item.appendChild(removeBtn);
-        list.appendChild(item);
-    }
-}
-
-/**
- * Render the language grid for selection
- */
-function renderLanguageGrid(filter = '') {
-    if (!elements.languageGrid) return;
-
-    const filterLower = filter.toLowerCase();
-    const filteredLanguages = LANGUAGE_LIST.filter(language =>
-        language.name.toLowerCase().includes(filterLower) ||
-        language.native.toLowerCase().includes(filterLower) ||
-        language.code.toLowerCase().includes(filterLower)
-    );
-
-    elements.languageGrid.replaceChildren();
-
-    if (filteredLanguages.length === 0) {
-        const emptyState = document.createElement('div');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = 'No languages match your search';
-        elements.languageGrid.appendChild(emptyState);
-        return;
-    }
-
-    for (const language of filteredLanguages) {
-        const isBlocked = blockedLanguages.includes(language.code);
-        const item = document.createElement('div');
-        item.className = `country-item language-item${isBlocked ? ' blocked' : ''}`;
-        item.dataset.language = language.code;
-
-        // Code chip
-        const codeSpan = document.createElement('span');
-        codeSpan.className = 'country-item-flag language-code';
-        codeSpan.textContent = language.code.toUpperCase();
-
-        // Name (English) + endonym
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'country-item-name';
-        nameSpan.textContent = language.name;
-        if (language.native && language.native !== language.name) {
-            const nativeSpan = document.createElement('span');
-            nativeSpan.className = 'language-native';
-            nativeSpan.textContent = ` · ${language.native}`;
-            nameSpan.appendChild(nativeSpan);
-        }
-
-        item.appendChild(codeSpan);
-        item.appendChild(nameSpan);
-
-        if (isBlocked) {
-            const blockedSpan = document.createElement('span');
-            blockedSpan.className = 'country-item-blocked';
-            blockedSpan.textContent = 'BLOCKED';
-            item.appendChild(blockedSpan);
-        }
-
-        item.addEventListener('click', () => toggleLanguage(language.code));
-        elements.languageGrid.appendChild(item);
-    }
-}
-
-/**
- * Toggle a language's blocked status
- */
-async function toggleLanguage(language) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
-            payload: { action: 'toggle', language }
-        });
-
-        if (response?.success) {
-            blockedLanguages = response.data || [];
-            renderBlockedLanguages();
-            renderLanguageGrid(elements.languageSearch?.value || '');
-            updateBlockedLanguagesCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to toggle language:', error);
-    }
-}
-
-/**
- * Remove a blocked language
- */
-async function removeBlockedLanguage(language) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
-            payload: { action: 'remove', language }
-        });
-
-        if (response?.success) {
-            blockedLanguages = response.data || [];
-            renderBlockedLanguages();
-            renderLanguageGrid(elements.languageSearch?.value || '');
-            updateBlockedLanguagesCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to remove blocked language:', error);
-    }
-}
-
-/**
- * Clear all blocked languages
- */
-async function clearAllBlockedLanguages() {
-    if (blockedLanguages.length === 0) return;
-
-    if (!confirm('Are you sure you want to unblock all languages?')) return;
-
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
-            payload: { action: 'clear' }
-        });
-
-        if (response?.success) {
-            blockedLanguages = [];
-            renderBlockedLanguages();
-            renderLanguageGrid(elements.languageSearch?.value || '');
-            updateBlockedLanguagesCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to clear blocked languages:', error);
-    }
-}
-
-/**
- * Normalize a handle typed into the allowlist input: drop a leading "@",
- * lowercase, and enforce X's 1-15 char alphanumeric/underscore rule. Returns ''
- * for anything invalid (mirrors the storage-layer normalizer).
- */
-function normalizeHandleInput(raw) {
-    const handle = (raw || '').trim().replace(/^@+/, '').toLowerCase();
-    return /^[a-z0-9_]{1,15}$/.test(handle) ? handle : '';
-}
-
-/**
- * Load allowlisted ("always show") accounts (issue #26)
- */
-async function loadAllowedUsers() {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_ALLOWED_USERS
-        });
-
-        if (response?.success) {
-            allowedUsers = response.data || [];
-            renderAllowedUsers();
-            updateAllowedUsersCount();
-        }
-    } catch (error) {
-        console.error('Failed to load always-show accounts:', error);
-    }
-}
-
-/**
- * Update the always-show count badge
- */
-function updateAllowedUsersCount() {
-    if (elements.allowedUsersCount) {
-        elements.allowedUsersCount.textContent = allowedUsers.length;
-        elements.allowedUsersCount.style.display = allowedUsers.length > 0 ? 'inline-flex' : 'none';
-    }
-}
-
-/**
- * Render the allowlist as account chips (avatar-free, links to each profile)
- */
-function renderAllowedUsers() {
-    const list = elements.allowedUsersList;
-    if (!list) return;
-
-    list.replaceChildren();
-
-    if (allowedUsers.length === 0) {
-        const empty = document.createElement('p');
-        empty.className = 'empty-state';
-        empty.textContent = 'No always-show accounts yet';
-        list.appendChild(empty);
-        return;
-    }
-
-    for (const handle of [...allowedUsers].sort()) {
-        const chip = document.createElement('div');
-        chip.className = 'allowlist-chip';
-
-        // User glyph (drawn, currentColor)
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('width', '14');
-        svg.setAttribute('height', '14');
-        svg.setAttribute('fill', 'none');
-        svg.setAttribute('stroke', 'currentColor');
-        svg.setAttribute('stroke-width', '1.8');
-        svg.setAttribute('stroke-linecap', 'round');
-        svg.setAttribute('stroke-linejoin', 'round');
-        svg.setAttribute('class', 'allowlist-chip-icon');
-        const body = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        body.setAttribute('d', 'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2');
-        const head = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        head.setAttribute('cx', '12');
-        head.setAttribute('cy', '7');
-        head.setAttribute('r', '4');
-        svg.appendChild(body);
-        svg.appendChild(head);
-        chip.appendChild(svg);
-
-        // @handle → links to the profile
-        const link = document.createElement('a');
-        link.className = 'allowlist-chip-handle';
-        link.href = `https://x.com/${handle}`;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = `@${handle}`;
-        chip.appendChild(link);
-
-        // Remove
-        const remove = document.createElement('button');
-        remove.className = 'allowlist-chip-remove';
-        remove.type = 'button';
-        remove.textContent = '×';
-        remove.title = `Remove @${handle}`;
-        remove.setAttribute('aria-label', `Remove @${handle}`);
-        remove.addEventListener('click', () => removeAllowedUser(handle));
-        chip.appendChild(remove);
-
-        list.appendChild(chip);
-    }
-}
-
-/**
- * Add an account to the allowlist
- */
-async function addAllowedUser(raw) {
-    const handle = normalizeHandleInput(raw);
-    if (!handle) {
-        // Brief invalid-input cue, then bail
-        if (elements.allowedUserInput) {
-            elements.allowedUserInput.classList.add('invalid');
-            setTimeout(() => elements.allowedUserInput.classList.remove('invalid'), 700);
-        }
-        return;
-    }
-
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_ALLOWED_USERS,
-            payload: { action: 'add', username: handle }
-        });
-
-        if (response?.success) {
-            allowedUsers = response.data || [];
-            renderAllowedUsers();
-            updateAllowedUsersCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to add always-show account:', error);
-    }
-}
-
-/**
- * Remove an account from the allowlist
- */
-async function removeAllowedUser(handle) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_ALLOWED_USERS,
-            payload: { action: 'remove', username: handle }
-        });
-
-        if (response?.success) {
-            allowedUsers = response.data || [];
-            renderAllowedUsers();
-            updateAllowedUsersCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to remove always-show account:', error);
-    }
-}
-
-/**
- * Clear the whole allowlist
- */
-async function clearAllAllowedUsers() {
-    if (allowedUsers.length === 0) return;
-
-    if (!confirm('Are you sure you want to clear all always-show accounts?')) return;
-
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_ALLOWED_USERS,
-            payload: { action: 'clear' }
-        });
-
-        if (response?.success) {
-            allowedUsers = [];
-            renderAllowedUsers();
-            updateAllowedUsersCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to clear always-show accounts:', error);
-    }
-}
-
-/**
- * Render the country grid for selection
- */
-function renderCountryGrid(filter = '') {
-    if (!elements.countryGrid) return;
-    
-    const filterLower = filter.toLowerCase();
-    const filteredCountries = COUNTRY_LIST.filter(country =>
-        country.toLowerCase().includes(filterLower)
-    );
-    
-    // Clear container safely
-    elements.countryGrid.replaceChildren();
-    
-    // Show empty result message
-    if (filteredCountries.length === 0) {
-        const emptyState = document.createElement('div');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = 'No countries match your search';
-        elements.countryGrid.appendChild(emptyState);
-        return;
-    }
-    
-    for (const country of filteredCountries) {
-        const isBlocked = blockedCountries.includes(country);
-        const item = document.createElement('div');
-        item.className = `country-item${isBlocked ? ' blocked' : ''}`;
-        item.dataset.country = country;
-        
-        // Build flag span safely
-        const flagSpan = document.createElement('span');
-        flagSpan.className = 'country-item-flag';
-        const flag = getFlagEmoji(country);
-        if (typeof flag === 'string' && flag.startsWith('<img')) {
-            // Parse Twemoji img tag safely - only allow trusted CDN
-            const srcMatch = flag.match(/src="(https:\/\/abs-0\.twimg\.com\/emoji\/v2\/svg\/[^"]+\.svg)"/);
-            if (srcMatch && srcMatch[1]) {
-                const imgEl = document.createElement('img');
-                imgEl.src = srcMatch[1];
-                imgEl.className = 'x-flag-emoji';
-                imgEl.alt = country;
-                imgEl.style.cssText = 'height: 1.2em; vertical-align: -0.2em;';
-                flagSpan.appendChild(imgEl);
-            } else {
-                flagSpan.textContent = '🌍';
-            }
-        } else {
-            flagSpan.textContent = flag || '🌍';
-        }
-        
-        // Build name span
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'country-item-name';
-        nameSpan.textContent = formatCountryName(country);
-        
-        // Assemble item
-        item.appendChild(flagSpan);
-        item.appendChild(nameSpan);
-        
-        // Add blocked indicator if needed
-        if (isBlocked) {
-            const blockedSpan = document.createElement('span');
-            blockedSpan.className = 'country-item-blocked';
-            blockedSpan.textContent = 'BLOCKED';
-            item.appendChild(blockedSpan);
-        }
-        
-        item.addEventListener('click', () => toggleCountry(country));
-        elements.countryGrid.appendChild(item);
-    }
-}
-
-/**
- * Render the region grid for selection
- * REGION_LIST is now array of {name, key, flag} objects
- */
-function renderRegionGrid(filter = '') {
-    if (!elements.regionGrid) return;
-    
-    const filterLower = filter.toLowerCase();
-    const filteredRegions = REGION_LIST.filter(region =>
-        region.name.toLowerCase().includes(filterLower) ||
-        region.key.toLowerCase().includes(filterLower)
-    );
-    
-    // Clear container safely
-    elements.regionGrid.replaceChildren();
-    
-    // Show empty result message
-    if (filteredRegions.length === 0) {
-        const emptyState = document.createElement('div');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = 'No regions match your search';
-        elements.regionGrid.appendChild(emptyState);
-        return;
-    }
-    
-    for (const region of filteredRegions) {
-        const isBlocked = blockedRegions.includes(region.key);
-        const item = document.createElement('div');
-        item.className = `country-item region-item${isBlocked ? ' blocked' : ''}`;
-        item.dataset.region = region.key;
-        
-        // Build flag span
-        const flagSpan = document.createElement('span');
-        flagSpan.className = 'country-item-flag region-item-flag';
-        flagSpan.textContent = region.flag;
-        
-        // Build name span - use proper display name
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'country-item-name';
-        nameSpan.textContent = region.name;
-        
-        // Assemble item
-        item.appendChild(flagSpan);
-        item.appendChild(nameSpan);
-        
-        // Add blocked indicator if needed
-        if (isBlocked) {
-            const blockedSpan = document.createElement('span');
-            blockedSpan.className = 'country-item-blocked';
-            blockedSpan.textContent = 'BLOCKED';
-            item.appendChild(blockedSpan);
-        }
-        
-        item.addEventListener('click', () => toggleRegion(region.key));
-        elements.regionGrid.appendChild(item);
-    }
-}
-
-/**
- * Toggle a country's blocked status
- */
-async function toggleCountry(country) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_COUNTRIES,
-            payload: { action: 'toggle', country }
-        });
-
-        if (response?.success) {
-            blockedCountries = response.data || [];
-            renderBlockedCountries();
-            renderCountryGrid(elements.countrySearch?.value || '');
-            updateBlockedCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to toggle country:', error);
-    }
-}
-
-/**
- * Toggle a region's blocked status
- */
-async function toggleRegion(region) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_REGIONS,
-            payload: { action: 'toggle', region }
-        });
-
-        if (response?.success) {
-            blockedRegions = response.data || [];
-            renderBlockedRegions();
-            renderRegionGrid(elements.regionSearch?.value || '');
-            updateBlockedRegionsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to toggle region:', error);
-    }
-}
-
-/**
- * Clear all blocked countries
- */
-async function clearAllBlocked() {
-    if (blockedCountries.length === 0) return;
-    
-    if (!confirm('Are you sure you want to unblock all countries?')) return;
-    
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_COUNTRIES,
-            payload: { action: 'clear' }
-        });
-
-        if (response?.success) {
-            blockedCountries = [];
-            renderBlockedCountries();
-            renderCountryGrid(elements.countrySearch?.value || '');
-            updateBlockedCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to clear blocked countries:', error);
-    }
-}
-
-/**
- * Clear all blocked regions
- */
-async function clearAllBlockedRegions() {
-    if (blockedRegions.length === 0) return;
-    
-    if (!confirm('Are you sure you want to unblock all regions?')) return;
-    
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_REGIONS,
-            payload: { action: 'clear' }
-        });
-
-        if (response?.success) {
-            blockedRegions = [];
-            renderBlockedRegions();
-            renderRegionGrid(elements.regionSearch?.value || '');
-            updateBlockedRegionsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to clear blocked regions:', error);
-    }
-}
-
-/**
- * Load cache statistics
- */
 async function loadCacheStats() {
     try {
         const response = await browserAPI.runtime.sendMessage({
@@ -1445,7 +522,7 @@ async function loadTheme() {
         const response = await browserAPI.runtime.sendMessage({
             type: MESSAGE_TYPES.GET_THEME
         });
-        
+
         if (response?.theme) {
             applyTheme(response.theme);
         }
@@ -1466,38 +543,45 @@ function applyTheme(theme) {
  * Load statistics data
  */
 async function loadStatistics() {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_STATISTICS
-        });
-        
-        if (response?.success && response.data) {
-            renderStatistics(response.data);
-        }
-    } catch (error) {
-        console.error('Failed to load statistics:', error);
-    }
+    const host = document.getElementById('stats-panel-body');
+    if (!host) return;
+    statisticsView ||= mountStatistics(host);
+    await statisticsView.refresh();
 }
 
 /**
  * Load cloud cache status
  */
 async function loadCloudCacheStatus() {
+    const retry = document.getElementById('cloud-status-retry');
+    if (retry) retry.disabled = true;
     try {
         const response = await browserAPI.runtime.sendMessage({
             type: MESSAGE_TYPES.GET_CLOUD_CACHE_STATUS
         });
 
-        if (response?.success) {
-            updateCloudCacheUI(response.enabled, response.configured, response.stats);
-            
-            // If enabled and configured, also fetch server stats
-            if (response.enabled && response.configured) {
-                fetchCloudServerStats();
-            }
+        if (!response?.success) throw new Error('Could not read cloud status');
+        updateCloudCacheUI(response.enabled, response.configured, response.stats);
+        retry?.remove();
+
+        // Use the background's cached statistics. There is no cloud polling here.
+        if (response.enabled && response.configured) {
+            void fetchCloudServerStats();
         }
     } catch (error) {
         console.error('Failed to load cloud cache status:', error);
+        elements.cloudStatusText.textContent = 'Could not load cloud status';
+        elements.cloudStatusIndicator.className = 'status-indicator status-unconfigured';
+        if (retry) retry.disabled = false;
+        else {
+            const button = document.createElement('button');
+            button.id = 'cloud-status-retry';
+            button.type = 'button';
+            button.className = 'btn btn-secondary btn-small';
+            button.textContent = 'Try again';
+            button.addEventListener('click', () => { void loadCloudCacheStatus(); });
+            document.getElementById('cloud-status').append(button);
+        }
     }
 }
 
@@ -1531,28 +615,28 @@ async function fetchCloudServerStats() {
 async function handleSyncToCloud() {
     const btn = elements.btnSyncToCloud;
     const status = elements.syncStatus;
-    
+
     if (!btn || !status) return;
-    
+
     // Disable button during sync
     btn.disabled = true;
     btn.textContent = 'Syncing...';
     status.textContent = '';
     status.className = 'sync-status';
-    
+
     try {
         const response = await browserAPI.runtime.sendMessage({
             type: MESSAGE_TYPES.SYNC_LOCAL_TO_CLOUD
         });
-        
+
         if (response?.success && response.result) {
             const { synced, skipped, errors } = response.result;
             status.textContent = `✓ Synced ${synced} entries${skipped > 0 ? `, ${skipped} skipped` : ''}${errors > 0 ? `, ${errors} errors` : ''}`;
             status.className = 'sync-status success';
-            
+
             // Refresh cloud stats
             await loadCloudCacheStatus();
-            await fetchCloudServerStats();
+            // loadCloudCacheStatus also refreshes the server total.
         } else {
             status.textContent = '✗ ' + (response?.error || 'Sync failed');
             status.className = 'sync-status error';
@@ -1563,18 +647,7 @@ async function handleSyncToCloud() {
     } finally {
         // Re-enable button
         btn.disabled = false;
-        // Rebuild button content safely without innerHTML
-        btn.replaceChildren();
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('viewBox', '0 0 24 24');
-        svg.setAttribute('width', '16');
-        svg.setAttribute('height', '16');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('fill', 'currentColor');
-        path.setAttribute('d', 'M19.35 10.04C18.67 6.59 15.64 4 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46C10.21 6.23 11.08 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 18.16 24 16.68 24 15c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z');
-        svg.appendChild(path);
-        btn.appendChild(svg);
-        btn.appendChild(document.createTextNode(' Sync Local Cache to Cloud'));
+        btn.replaceChildren(dialogIcon('cloud', 16), document.createTextNode(' Sync Local Cache to Cloud'));
     }
 }
 
@@ -1582,10 +655,12 @@ async function handleSyncToCloud() {
  * Update cloud cache UI
  */
 function updateCloudCacheUI(enabled, configured, stats) {
+    cloudEnabled = enabled;
+    elements.optCloudCache.disabled = false;
     if (elements.optCloudCache) {
         elements.optCloudCache.checked = enabled;
     }
-    
+
     // Update status indicator
     if (elements.cloudStatusIndicator) {
         elements.cloudStatusIndicator.className = 'status-indicator';
@@ -1600,22 +675,22 @@ function updateCloudCacheUI(enabled, configured, stats) {
             elements.cloudStatusText.textContent = 'Disabled';
         }
     }
-    
+
     // Show/hide unconfigured warning
     if (elements.cloudUnconfigured) {
         elements.cloudUnconfigured.style.display = configured ? 'none' : 'block';
     }
-    
+
     // Show/hide stats
     if (elements.cloudStats) {
         elements.cloudStats.style.display = enabled && configured ? 'grid' : 'none';
     }
-    
+
     // Show/hide actions
     if (elements.cloudActions) {
         elements.cloudActions.style.display = enabled && configured ? 'flex' : 'none';
     }
-    
+
     // Reset cloud total if not enabled
     if (elements.cloudTotalEntries && (!enabled || !configured)) {
         elements.cloudTotalEntries.textContent = '-';
@@ -1629,926 +704,13 @@ function updateCloudCacheUI(enabled, configured, stats) {
     }
 }
 
-/**
- * Render statistics in the UI
- */
-function renderStatistics(stats) {
-    // Get or create statistics container
-    let statsSection = document.getElementById('stats-section');
-    if (!statsSection) {
-        // Preferred: render into the dedicated Statistics nav panel body.
-        const statsPanelBody = document.getElementById('stats-panel-body');
-        if (statsPanelBody) {
-            statsSection = document.createElement('section');
-            statsSection.id = 'stats-section';
-            statsSection.className = 'options-section';
-            statsPanelBody.appendChild(statsSection);
-        } else {
-            // Fallback: create statistics section before the cache section
-            const cacheSection = document.querySelector('.options-section:has(#cache-size)');
-            if (cacheSection) {
-                statsSection = document.createElement('section');
-                statsSection.id = 'stats-section';
-                statsSection.className = 'options-section';
-                cacheSection.parentNode.insertBefore(statsSection, cacheSection);
-            }
-        }
-    }
-    
-    if (!statsSection) return;
-    
-    // Clear existing content safely
-    statsSection.replaceChildren();
-    
-    const vpnPercentage = stats.totalUsers > 0 ? Math.round((stats.vpnCount / stats.totalUsers) * 100) : 0;
-    
-    // Build section title
-    const sectionTitle = document.createElement('h2');
-    sectionTitle.className = 'section-title';
-    
-    const titleSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    titleSvg.setAttribute('viewBox', '0 0 24 24');
-    titleSvg.setAttribute('width', '20');
-    titleSvg.setAttribute('height', '20');
-    const titlePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    titlePath.setAttribute('fill', 'currentColor');
-    titlePath.setAttribute('d', 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z');
-    titleSvg.appendChild(titlePath);
-    sectionTitle.appendChild(titleSvg);
-    sectionTitle.appendChild(document.createTextNode(' Statistics'));
-    statsSection.appendChild(sectionTitle);
-    
-    // Build stats overview
-    const statsOverview = document.createElement('div');
-    statsOverview.className = 'stats-overview';
-    
-    // Total Users item
-    const totalUsersItem = createStatsOverviewItem(String(stats.totalUsers), 'Total Users');
-    statsOverview.appendChild(totalUsersItem);
-    
-    // Countries item
-    const countriesItem = createStatsOverviewItem(String(Object.keys(stats.countryCounts).length), 'Countries');
-    statsOverview.appendChild(countriesItem);
-    
-    // VPN item
-    const vpnItem = createStatsOverviewItem(String(stats.vpnCount), `VPN/Proxy (${vpnPercentage}%)`);
-    statsOverview.appendChild(vpnItem);
-    
-    statsSection.appendChild(statsOverview);
-    
-    // Top Countries subsection
-    if (stats.topCountries.length > 0) {
-        const countriesSubsection = document.createElement('div');
-        countriesSubsection.className = 'stats-subsection';
-        
-        const countriesSubtitle = document.createElement('h3');
-        countriesSubtitle.className = 'stats-subtitle';
-        countriesSubtitle.textContent = 'Top Countries';
-        countriesSubsection.appendChild(countriesSubtitle);
-        
-        const statBars = document.createElement('div');
-        statBars.className = 'stat-bars';
-        
-        for (const c of stats.topCountries.slice(0, 5)) {
-            const barItem = document.createElement('div');
-            barItem.className = 'stat-bar-item';
-            
-            const barLabel = document.createElement('div');
-            barLabel.className = 'stat-bar-label';
-            
-            const countrySpan = document.createElement('span');
-            countrySpan.textContent = `${COUNTRY_FLAGS[canonicalCountry(c.country)] || '🌍'} ${formatCountryName(c.country)}`;
-            barLabel.appendChild(countrySpan);
-            
-            const countSpan = document.createElement('span');
-            countSpan.textContent = `${c.count} (${c.percentage}%)`;
-            barLabel.appendChild(countSpan);
-            
-            barItem.appendChild(barLabel);
-            
-            const bar = document.createElement('div');
-            bar.className = 'stat-bar';
-            const barFill = document.createElement('div');
-            barFill.className = 'stat-bar-fill';
-            barFill.style.width = `${c.percentage}%`;
-            bar.appendChild(barFill);
-            barItem.appendChild(bar);
-            
-            statBars.appendChild(barItem);
-        }
-        
-        countriesSubsection.appendChild(statBars);
-        statsSection.appendChild(countriesSubsection);
-    }
-    
-    // Device Distribution subsection
-    if (stats.topDevices.length > 0) {
-        const devicesSubsection = document.createElement('div');
-        devicesSubsection.className = 'stats-subsection';
-        
-        const devicesSubtitle = document.createElement('h3');
-        devicesSubtitle.className = 'stats-subtitle';
-        devicesSubtitle.textContent = 'Device Distribution';
-        devicesSubsection.appendChild(devicesSubtitle);
-        
-        const deviceStats = document.createElement('div');
-        deviceStats.className = 'device-stats';
-        
-        for (const d of stats.topDevices) {
-            const deviceStat = document.createElement('div');
-            deviceStat.className = 'device-stat';
-
-            const iconSpan = document.createElement('span');
-            iconSpan.className = 'device-icon';
-            // Render the real Apple/Android/Web SVG glyph from the shared icon set.
-            // deviceIcon() matches on device strings, so map our categories accordingly.
-            const iconKey = d.device === 'iOS' ? 'app store' : d.device === 'Android' ? 'android' : d.device === 'Web' ? 'web' : '';
-            iconSpan.appendChild(deviceIcon(iconKey, 18));
-            deviceStat.appendChild(iconSpan);
-            
-            const nameSpan = document.createElement('span');
-            nameSpan.className = 'device-name';
-            nameSpan.textContent = d.device;
-            deviceStat.appendChild(nameSpan);
-            
-            const countSpan = document.createElement('span');
-            countSpan.className = 'device-count';
-            countSpan.textContent = `${d.count} (${d.percentage}%)`;
-            deviceStat.appendChild(countSpan);
-            
-            deviceStats.appendChild(deviceStat);
-        }
-        
-        devicesSubsection.appendChild(deviceStats);
-        statsSection.appendChild(devicesSubsection);
-    }
-}
-
-/**
- * Helper to create stats overview item
- */
-function createStatsOverviewItem(value, label) {
-    const item = document.createElement('div');
-    item.className = 'stats-overview-item';
-    
-    const valueSpan = document.createElement('span');
-    valueSpan.className = 'stats-overview-value';
-    valueSpan.textContent = value;
-    item.appendChild(valueSpan);
-    
-    const labelSpan = document.createElement('span');
-    labelSpan.className = 'stats-overview-label';
-    labelSpan.textContent = label;
-    item.appendChild(labelSpan);
-    
-    return item;
-}
-
-/**
- * Render blocked countries list
- */
-function renderBlockedCountries() {
-    const list = elements.blockedList;
-    
-    // Clear list safely
-    list.replaceChildren();
-    
-    if (blockedCountries.length === 0) {
-        const emptyState = document.createElement('p');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = 'No countries blocked';
-        list.appendChild(emptyState);
-        return;
-    }
-    
-    for (const country of blockedCountries.sort()) {
-        const item = document.createElement('div');
-        item.className = 'blocked-item';
-        
-        // Build blocked-item-info
-        const itemInfo = document.createElement('div');
-        itemInfo.className = 'blocked-item-info';
-        
-        // Flag span
-        const flagSpan = document.createElement('span');
-        flagSpan.className = 'blocked-flag';
-        const flag = getFlagEmoji(country);
-        if (typeof flag === 'string' && flag.startsWith('<img')) {
-            // Parse Twemoji img tag safely
-            const srcMatch = flag.match(/src="(https:\/\/abs-0\.twimg\.com\/emoji\/v2\/svg\/[^"]+\.svg)"/);
-            if (srcMatch && srcMatch[1]) {
-                const imgEl = document.createElement('img');
-                imgEl.src = srcMatch[1];
-                imgEl.className = 'x-flag-emoji';
-                imgEl.alt = country;
-                imgEl.style.cssText = 'height: 1.2em; vertical-align: -0.2em;';
-                flagSpan.appendChild(imgEl);
-            } else {
-                flagSpan.textContent = '🌍';
-            }
-        } else {
-            flagSpan.textContent = flag || '🌍';
-        }
-        itemInfo.appendChild(flagSpan);
-        
-        // Name span
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'blocked-name';
-        nameSpan.textContent = formatCountryName(country);
-        itemInfo.appendChild(nameSpan);
-        
-        item.appendChild(itemInfo);
-        
-        // Remove button
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'blocked-remove';
-        removeBtn.dataset.country = country;
-        removeBtn.setAttribute('aria-label', `Remove ${formatCountryName(country)}`);
-        
-        const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        removeSvg.setAttribute('viewBox', '0 0 24 24');
-        removeSvg.setAttribute('width', '16');
-        removeSvg.setAttribute('height', '16');
-        const removePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        removePath.setAttribute('fill', 'currentColor');
-        removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
-        removeSvg.appendChild(removePath);
-        removeBtn.appendChild(removeSvg);
-        
-        // Add event handler directly
-        removeBtn.addEventListener('click', async () => {
-            await removeBlockedCountry(country);
-        });
-        
-        item.appendChild(removeBtn);
-        list.appendChild(item);
-    }
-}
-
-/**
- * Render blocked regions list
- */
-function renderBlockedRegions() {
-    const list = elements.blockedRegionsList;
-    if (!list) return;
-    
-    // Clear list safely
-    list.replaceChildren();
-    
-    if (blockedRegions.length === 0) {
-        const emptyState = document.createElement('p');
-        emptyState.className = 'empty-state';
-        emptyState.textContent = 'No regions blocked';
-        list.appendChild(emptyState);
-        return;
-    }
-    
-    for (const region of blockedRegions.sort()) {
-        const item = document.createElement('div');
-        item.className = 'blocked-item';
-        
-        // Build blocked-item-info
-        const itemInfo = document.createElement('div');
-        itemInfo.className = 'blocked-item-info';
-        
-        // Flag span
-        const flagSpan = document.createElement('span');
-        flagSpan.className = 'blocked-flag';
-        flagSpan.textContent = REGION_FLAGS[region] || '🌐';
-        itemInfo.appendChild(flagSpan);
-        
-        // Name span - use proper display name from REGION_NAMES
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'blocked-name';
-        nameSpan.textContent = REGION_NAMES[region] || region;
-        itemInfo.appendChild(nameSpan);
-        
-        item.appendChild(itemInfo);
-        
-        // Remove button
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'blocked-remove';
-        removeBtn.dataset.region = region;
-        removeBtn.setAttribute('aria-label', `Remove ${region}`);
-        
-        const removeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        removeSvg.setAttribute('viewBox', '0 0 24 24');
-        removeSvg.setAttribute('width', '16');
-        removeSvg.setAttribute('height', '16');
-        const removePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        removePath.setAttribute('fill', 'currentColor');
-        removePath.setAttribute('d', 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
-        removeSvg.appendChild(removePath);
-        removeBtn.appendChild(removeSvg);
-        
-        // Add event handler directly
-        removeBtn.addEventListener('click', async () => {
-            await removeBlockedRegion(region);
-        });
-        
-        item.appendChild(removeBtn);
-        list.appendChild(item);
-    }
-}
-
-/**
- * Remove a blocked country
- */
-async function removeBlockedCountry(country) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_COUNTRIES,
-            payload: { action: 'remove', country }
-        });
-
-        if (response?.success) {
-            blockedCountries = response.data || [];
-            renderBlockedCountries();
-            renderCountryGrid(elements.countrySearch?.value || '');
-            updateBlockedCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to remove blocked country:', error);
-    }
-}
-
-/**
- * Remove a blocked region
- */
-async function removeBlockedRegion(region) {
-    try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_REGIONS,
-            payload: { action: 'remove', region }
-        });
-
-        if (response?.success) {
-            blockedRegions = response.data || [];
-            renderBlockedRegions();
-            renderRegionGrid(elements.regionSearch?.value || '');
-            updateBlockedRegionsCount();
-            showSaveStatus();
-        }
-    } catch (error) {
-        console.error('Failed to remove blocked region:', error);
-    }
-}
-
-/**
- * Save settings
- */
-async function saveSettings(newSettings) {
-    try {
-        currentSettings = { ...currentSettings, ...newSettings };
-        
-        await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_SETTINGS,
-            payload: currentSettings
-        });
-
-        showSaveStatus();
-    } catch (error) {
-        console.error('Failed to save settings:', error);
-    }
-}
-
-/**
- * Show save status indicator
- */
-function showSaveStatus() {
-    const status = elements.saveStatus;
-    status.classList.add('visible');
-    
-    setTimeout(() => {
-        status.classList.remove('visible');
-    }, 2000);
-}
-
-/**
- * Setup event listeners
- */
-function setupEventListeners() {
-    // General settings
-    elements.optEnabled.addEventListener('change', e => {
-        saveSettings({ enabled: e.target.checked });
-    });
-
-    elements.optDebug.addEventListener('change', e => {
-        saveSettings({ debugMode: e.target.checked });
-    });
-
-    // Display settings
-    elements.optFlags.addEventListener('change', e => {
-        saveSettings({ showFlags: e.target.checked });
-    });
-
-    if (elements.optFlagDevice) {
-        elements.optFlagDevice.addEventListener('change', e => {
-            saveSettings({ flagFromDevice: e.target.checked });
-        });
-    }
-
-    elements.optDevices.addEventListener('change', e => {
-        saveSettings({ showDevices: e.target.checked });
-    });
-
-    elements.optVpn.addEventListener('change', e => {
-        saveSettings({ showVpnIndicator: e.target.checked });
-    });
-
-    // Capture button toggle
-    if (elements.optCaptureButton) {
-        elements.optCaptureButton.addEventListener('change', e => {
-            saveSettings({ showCaptureButton: e.target.checked });
-        });
-    }
-
-    // Profile enrichment kill switch
-    if (elements.optProfileEnrichment) {
-        elements.optProfileEnrichment.addEventListener('change', e => {
-            saveSettings({ profileEnrichment: e.target.checked });
-        });
-    }
-
-    // Info icon toggle (issue #38)
-    if (elements.optInfoIcon) {
-        elements.optInfoIcon.addEventListener('change', e => {
-            saveSettings({ showInfoIcon: e.target.checked });
-        });
-    }
-
-    // Hover vs click to open the account dossier (issue #38)
-    if (elements.optClickDetails) {
-        elements.optClickDetails.addEventListener('change', e => {
-            saveSettings({ hovercardTrigger: e.target.checked ? 'click' : 'hover' });
-        });
-    }
-
-    // Sidebar link toggle
-    if (elements.optSidebarLink) {
-        elements.optSidebarLink.addEventListener('change', e => {
-            saveSettings({ showSidebarBlockerLink: e.target.checked });
-        });
-    }
-
-    // Open changelog on update toggle
-    if (elements.optChangelogOnUpdate) {
-        elements.optChangelogOnUpdate.addEventListener('change', e => {
-            saveSettings({ openChangelogOnUpdate: e.target.checked });
-        });
-    }
-
-    // Show VPN users toggle
-    if (elements.optShowVpnUsers) {
-        elements.optShowVpnUsers.addEventListener('change', e => {
-            saveSettings({ showVpnUsers: e.target.checked });
-        });
-    }
-
-    // Blocking mode toggles - mutually exclusive
-    if (elements.optHideBlocked && elements.optHighlightBlocked) {
-        elements.optHideBlocked.addEventListener('change', e => {
-            if (e.target.checked) {
-                elements.optHighlightBlocked.checked = false;
-                saveSettings({ highlightBlockedTweets: false });
-            } else {
-                // At least one must be selected - turn on highlight
-                elements.optHighlightBlocked.checked = true;
-                saveSettings({ highlightBlockedTweets: true });
-            }
-        });
-
-        elements.optHighlightBlocked.addEventListener('change', e => {
-            if (e.target.checked) {
-                elements.optHideBlocked.checked = false;
-                saveSettings({ highlightBlockedTweets: true });
-            } else {
-                // At least one must be selected - turn on hide
-                elements.optHideBlocked.checked = true;
-                saveSettings({ highlightBlockedTweets: false });
-            }
-        });
-    }
-
-    // Country search with debouncing
-    if (elements.countrySearch) {
-        const debouncedSearch = debounce(value => {
-            renderCountryGrid(value);
-        }, TIMING.SEARCH_DEBOUNCE_MS);
-        
-        elements.countrySearch.addEventListener('input', e => {
-            debouncedSearch(e.target.value);
-        });
-    }
-
-    // Clear all blocked
-    if (elements.btnClearBlocked) {
-        elements.btnClearBlocked.addEventListener('click', clearAllBlocked);
-    }
-
-    // Clear all blocked regions
-    if (elements.btnClearBlockedRegions) {
-        elements.btnClearBlockedRegions.addEventListener('click', clearAllBlockedRegions);
-    }
-
-    // Region search with debouncing
-    if (elements.regionSearch) {
-        const debouncedRegionSearch = debounce(value => {
-            renderRegionGrid(value);
-        }, TIMING.SEARCH_DEBOUNCE_MS);
-
-        elements.regionSearch.addEventListener('input', e => {
-            debouncedRegionSearch(e.target.value);
-        });
-    }
-
-    // Language search with debouncing
-    if (elements.languageSearch) {
-        const debouncedLanguageSearch = debounce(value => {
-            renderLanguageGrid(value);
-        }, TIMING.SEARCH_DEBOUNCE_MS);
-
-        elements.languageSearch.addEventListener('input', e => {
-            debouncedLanguageSearch(e.target.value);
-        });
-    }
-
-    // Clear all blocked languages
-    if (elements.btnClearBlockedLanguages) {
-        elements.btnClearBlockedLanguages.addEventListener('click', clearAllBlockedLanguages);
-    }
-
-    // Always-Show Accounts: add (button + Enter) and clear
-    if (elements.btnAddAllowedUser && elements.allowedUserInput) {
-        const submitAllowed = () => {
-            const val = elements.allowedUserInput.value;
-            const valid = !!normalizeHandleInput(val);
-            addAllowedUser(val);
-            if (valid) elements.allowedUserInput.value = '';
-        };
-        elements.btnAddAllowedUser.addEventListener('click', submitAllowed);
-        elements.allowedUserInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitAllowed();
-            }
-        });
-    }
-    if (elements.btnClearAllowedUsers) {
-        elements.btnClearAllowedUsers.addEventListener('click', clearAllAllowedUsers);
-    }
-
-    // Tab switching for blocked locations (Countries, Regions, Tags, Languages)
-    if (elements.tabCountries && elements.tabRegions && elements.tabTags) {
-        const switchBlockedTab = tab => {
-            // Update tab active states
-            elements.tabCountries.classList.toggle('active', tab === 'countries');
-            elements.tabRegions.classList.toggle('active', tab === 'regions');
-            elements.tabTags.classList.toggle('active', tab === 'tags');
-            if (elements.tabAffiliations) {
-                elements.tabAffiliations.classList.toggle('active', tab === 'affiliations');
-            }
-            if (elements.tabLanguages) {
-                elements.tabLanguages.classList.toggle('active', tab === 'languages');
-            }
-
-            // Show/hide panels
-            if (elements.panelCountries) {
-                elements.panelCountries.style.display = tab === 'countries' ? 'block' : 'none';
-            }
-            if (elements.panelRegions) {
-                elements.panelRegions.style.display = tab === 'regions' ? 'block' : 'none';
-            }
-            if (elements.panelTags) {
-                elements.panelTags.style.display = tab === 'tags' ? 'block' : 'none';
-            }
-            if (elements.panelAffiliations) {
-                elements.panelAffiliations.style.display = tab === 'affiliations' ? 'block' : 'none';
-            }
-            if (elements.panelLanguages) {
-                elements.panelLanguages.style.display = tab === 'languages' ? 'block' : 'none';
-            }
-        };
-
-        elements.tabCountries.addEventListener('click', () => switchBlockedTab('countries'));
-        elements.tabRegions.addEventListener('click', () => switchBlockedTab('regions'));
-        elements.tabTags.addEventListener('click', () => switchBlockedTab('tags'));
-        if (elements.tabAffiliations) {
-            elements.tabAffiliations.addEventListener('click', () => switchBlockedTab('affiliations'));
-        }
-        if (elements.tabLanguages) {
-            elements.tabLanguages.addEventListener('click', () => switchBlockedTab('languages'));
-        }
-    }
-
-    // Affiliations: add / clear
-    if (elements.btnAddAffiliation && elements.affiliationInput) {
-        const submitAffiliation = () => {
-            const value = elements.affiliationInput.value.trim();
-            if (value) {
-                addBlockedAffiliation(value);
-                elements.affiliationInput.value = '';
-            }
-        };
-        elements.btnAddAffiliation.addEventListener('click', submitAffiliation);
-        elements.affiliationInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitAffiliation();
-            }
-        });
-    }
-    if (elements.btnClearBlockedAffiliations) {
-        elements.btnClearBlockedAffiliations.addEventListener('click', clearAllBlockedAffiliations);
-    }
-
-    // Tags: display-name and bio inputs (button + Enter on each)
-    const wireTagInput = (input, button, messageType, riskNote) => {
-        if (!input || !button) return;
-        const submit = () => {
-            const value = input.value.trim();
-            if (!value) return;
-            addTagTo(messageType, 'tag', value, riskNote);
-            input.value = '';
-        };
-        button.addEventListener('click', submit);
-        input.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submit();
-            }
-        });
-    };
-    wireTagInput(elements.tagInput, elements.btnAddTag, MESSAGE_TYPES.SET_BLOCKED_TAGS, elements.tagRiskNote);
-    wireTagInput(elements.bioTagInput, elements.btnAddBioTag, MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, elements.bioTagRiskNote);
-
-    // Clear all blocked tags
-    if (elements.btnClearBlockedTags) {
-        elements.btnClearBlockedTags.addEventListener('click', clearAllBlockedTags);
-    }
-
-    // Cloud cache toggle
-    if (elements.optCloudCache) {
-        elements.optCloudCache.addEventListener('change', async e => {
-            try {
-                const response = await browserAPI.runtime.sendMessage({
-                    type: MESSAGE_TYPES.SET_CLOUD_CACHE_ENABLED,
-                    payload: { enabled: e.target.checked }
-                });
-                
-                if (response?.success) {
-                    // Reload status to update UI
-                    await loadCloudCacheStatus();
-                    showSaveStatus();
-                }
-            } catch (error) {
-                console.error('Failed to toggle cloud cache:', error);
-                e.target.checked = !e.target.checked; // Revert on error
-            }
-        });
-    }
-
-    // Clear cache with confirmation
-    elements.btnClearCache.addEventListener('click', async () => {
-        // Get current cache size for confirmation
-        const cacheCount = elements.cacheSize.textContent;
-        
-        // Confirm before clearing
-        if (cacheCount !== '0' && cacheCount !== '-') {
-            const confirmed = confirm(`Are you sure you want to clear ${cacheCount} cached users?\n\nThis will require re-fetching data for all users.`);
-            if (!confirmed) return;
-        }
-        
-        try {
-            // The actual cache clear is handled by background
-            await browserAPI.runtime.sendMessage({
-                type: MESSAGE_TYPES.SET_CACHE,
-                payload: { action: 'clear' }
-            });
-            
-            elements.cacheSize.textContent = '0';
-            showSaveStatus();
-        } catch (error) {
-            console.error('Failed to clear cache:', error);
-        }
-    });
-
-    // Sync to cloud
-    if (elements.btnSyncToCloud) {
-        elements.btnSyncToCloud.addEventListener('click', async () => {
-            await handleSyncToCloud();
-        });
-    }
-
-    // Export data (enhanced with settings)
-    elements.btnExportCache.addEventListener('click', async () => {
-        try {
-            // Get cache
-            const cacheResponse = await browserAPI.runtime.sendMessage({
-                type: MESSAGE_TYPES.GET_CACHE,
-                payload: {}
-            });
-
-            // Get settings
-            const settingsResponse = await browserAPI.runtime.sendMessage({
-                type: MESSAGE_TYPES.GET_SETTINGS
-            });
-
-            const data = {
-                // Metadata
-                exportedAt: new Date().toISOString(),
-                version: VERSION,
-                exportFormat: '2.2',
-                
-                // Configuration
-                settings: settingsResponse?.data || currentSettings,
-                blockedCountries,
-                blockedRegions,
-                blockedTags,
-                blockedBioTags,
-                blockedPcf,
-                blockedLanguages,
-                blockedAffiliations,
-                allowedUsers,
-
-                // User data
-                cache: cacheResponse?.data || []
-            };
-
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `x-posed-backup-${new Date().toISOString().split('T')[0]}.json`;
-            a.click();
-            
-            URL.revokeObjectURL(url);
-            
-            showSaveStatus();
-        } catch (error) {
-            console.error('Failed to export data:', error);
-            alert('Failed to export data. Please try again.');
-        }
-    });
-
-    // Import data button click
-    if (elements.btnImportData && elements.importFileInput) {
-        elements.btnImportData.addEventListener('click', () => {
-            elements.importFileInput.click();
-        });
-
-        elements.importFileInput.addEventListener('change', async e => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-
-            try {
-                await handleImportFile(file);
-            } finally {
-                // Reset file input so same file can be selected again
-                elements.importFileInput.value = '';
-            }
-        });
-    }
-}
-
-/**
- * Handle importing data from a file
- */
-async function handleImportFile(file) {
-    const statusEl = elements.importStatus;
-    
-    const showStatus = (message, isError = false) => {
-        if (statusEl) {
-            statusEl.textContent = message;
-            statusEl.className = `import-status ${isError ? 'error' : 'success'}`;
-            statusEl.style.display = 'block';
-            
-            // Auto-hide after 5 seconds
-            setTimeout(() => {
-                statusEl.style.display = 'none';
-            }, 5000);
-        }
-    };
-
-    try {
-        // Read file
-        const text = await file.text();
-        let data;
-        
-        try {
-            data = JSON.parse(text);
-        } catch (parseError) {
-            showStatus('Invalid JSON file. Please select a valid X-Posed backup file.', true);
-            return;
-        }
-
-        // Validate structure
-        if (!data || typeof data !== 'object') {
-            showStatus('Invalid file format. Please select a valid X-Posed backup file.', true);
-            return;
-        }
-
-        // Check for required fields (at least version or exportFormat)
-        if (!data.version && !data.exportFormat) {
-            showStatus('This doesn\'t appear to be an X-Posed backup file.', true);
-            return;
-        }
-
-        // Confirm import
-        const cacheCount = Array.isArray(data.cache) ? data.cache.length : 0;
-        const blockedCount = Array.isArray(data.blockedCountries) ? data.blockedCountries.length : 0;
-        const blockedRegionsCount = Array.isArray(data.blockedRegions) ? data.blockedRegions.length : 0;
-        const blockedTagsCount = Array.isArray(data.blockedTags) ? data.blockedTags.length : 0;
-        const blockedLanguagesCount = Array.isArray(data.blockedLanguages) ? data.blockedLanguages.length : 0;
-        const blockedAffiliationsCount = Array.isArray(data.blockedAffiliations) ? data.blockedAffiliations.length : 0;
-        const allowedUsersCount = Array.isArray(data.allowedUsers) ? data.allowedUsers.length : 0;
-        const hasSettings = data.settings && typeof data.settings === 'object';
-
-        const confirmMessage = [
-            `Import data from ${data.version ? `v${data.version}` : 'X-Posed'}?`,
-            '',
-            'This will import:',
-            hasSettings ? '• Settings (display options, etc.)' : '',
-            blockedCount > 0 ? `• ${blockedCount} blocked countries` : '',
-            blockedRegionsCount > 0 ? `• ${blockedRegionsCount} blocked regions` : '',
-            blockedTagsCount > 0 ? `• ${blockedTagsCount} blocked tags` : '',
-            blockedLanguagesCount > 0 ? `• ${blockedLanguagesCount} blocked languages` : '',
-            blockedAffiliationsCount > 0 ? `• ${blockedAffiliationsCount} blocked affiliations` : '',
-            allowedUsersCount > 0 ? `• ${allowedUsersCount} always-show accounts` : '',
-            cacheCount > 0 ? `• ${cacheCount} cached users` : '',
-            '',
-            `Exported on: ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'Unknown'}`,
-            '',
-            'This will replace your current configuration. Continue?'
-        ].filter(Boolean).join('\n');
-
-        if (!confirm(confirmMessage)) {
-            return;
-        }
-
-        // Perform import
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.IMPORT_DATA,
-            payload: {
-                settings: data.settings,
-                blockedCountries: data.blockedCountries,
-                blockedRegions: data.blockedRegions,
-                blockedTags: data.blockedTags,
-                blockedBioTags: data.blockedBioTags,
-                blockedPcf: data.blockedPcf,
-                blockedLanguages: data.blockedLanguages,
-                blockedAffiliations: data.blockedAffiliations,
-                allowedUsers: data.allowedUsers,
-                cache: data.cache
-            }
-        });
-
-        if (response?.success) {
-            const results = [];
-            if (response.importedSettings) results.push('settings');
-            if (response.importedBlockedCountries) results.push(`${response.importedBlockedCountries} blocked countries`);
-            if (response.importedBlockedRegions) results.push(`${response.importedBlockedRegions} blocked regions`);
-            if (response.importedBlockedTags) results.push(`${response.importedBlockedTags} blocked tags`);
-            if (response.importedBlockedBioTags) results.push(`${response.importedBlockedBioTags} blocked bio terms`);
-            if (response.importedBlockedPcf) results.push(`${response.importedBlockedPcf} blocked account labels`);
-            if (response.importedBlockedLanguages) results.push(`${response.importedBlockedLanguages} blocked languages`);
-            if (response.importedBlockedAffiliations) results.push(`${response.importedBlockedAffiliations} blocked affiliations`);
-            if (response.importedAllowedUsers) results.push(`${response.importedAllowedUsers} always-show accounts`);
-            if (response.importedCache) results.push(`${response.importedCache} cached users`);
-
-            showStatus(`✓ Successfully imported: ${results.join(', ')}`);
-
-            // Reload the page data to reflect imported settings
-            await loadSettings();
-            await loadBlockedCountries();
-            await loadBlockedRegions();
-            await loadBlockedTags();
-            await loadBlockedLanguages();
-            await loadBlockedAffiliations();
-            await loadAllowedUsers();
-            await loadCacheStats();
-            await loadStatistics();
-        } else {
-            showStatus(`Import failed: ${response?.error || 'Unknown error'}`, true);
-        }
-    } catch (error) {
-        console.error('Import error:', error);
-        showStatus(`Import failed: ${error.message}`, true);
-    }
-}
-
-/**
- * Load rate limit status from background
- */
 async function loadRateLimitStatus() {
     try {
         const response = await browserAPI.runtime.sendMessage({
             type: MESSAGE_TYPES.GET_RATE_LIMIT_STATUS
         });
         
-        if (response) {
+        if (typeof response?.isRateLimited === 'boolean') {
             updateRateLimitBanner(response);
         }
     } catch (error) {
@@ -2568,9 +730,10 @@ function updateRateLimitBanner(status) {
     if (status.isRateLimited) {
         banner.style.display = 'flex';
         banner.className = 'rate-limit-banner rate-limited';
-        banner.querySelector('.rate-limit-icon').replaceChildren(glyph('warn', 18));
+        banner.querySelector('.rate-limit-icon').replaceChildren(dialogIcon('warn', 18));
         banner.querySelector('.rate-limit-title').textContent = 'Rate Limited';
         
+        if (timeEl) timeEl.textContent = 'Waiting for X to allow requests again';
         if (timeEl && status.resetTime) {
             const resetDate = new Date(status.resetTime);
             const now = new Date();
@@ -2587,7 +750,7 @@ function updateRateLimitBanner(status) {
         // Show OK status
         banner.style.display = 'flex';
         banner.className = 'rate-limit-banner rate-ok';
-        banner.querySelector('.rate-limit-icon').replaceChildren(glyph('check', 18));
+        banner.querySelector('.rate-limit-icon').replaceChildren(dialogIcon('check', 18));
         banner.querySelector('.rate-limit-title').textContent = 'API Status: OK';
         if (timeEl) {
             timeEl.textContent = 'No rate limits active';

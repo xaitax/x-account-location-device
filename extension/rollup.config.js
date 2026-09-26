@@ -70,10 +70,11 @@ const copyPlugin = copy({
         },
         // Icons
         { src: 'icons/*', dest: `${outputDir}/icons` },
+        // License for the vendored Graphite dialog icons
+        { src: 'third-party/LUCIDE-LICENSE.txt', dest: `${outputDir}/third-party` },
+        { src: 'third-party/NATURAL-EARTH-NOTICE.txt', dest: `${outputDir}/third-party` },
         // Styles
         { src: 'src/styles/*.css', dest: `${outputDir}/styles` },
-        // Bundled fonts (web-accessible)
-        { src: 'src/fonts/*', dest: `${outputDir}/fonts` },
         // Popup
         { src: 'src/popup/popup.html', dest: `${outputDir}/popup` },
         { src: 'src/popup/popup.css', dest: `${outputDir}/popup` },

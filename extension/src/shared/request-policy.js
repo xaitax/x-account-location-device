@@ -2,11 +2,19 @@
 export const LOOKUP_TIMEOUT_MS = 8000;
 export const RATE_LIMIT_STORAGE_KEY = 'x_api_rate_limit_reset';
 
-export class LookupTimeoutError extends Error {
+export class RequestTimeoutError extends Error {
     constructor() {
-        super('Account lookup timed out');
-        this.name = 'LookupTimeoutError';
+        super('Request timed out');
+        this.name = 'RequestTimeoutError';
         this.code = 'TIMEOUT';
+    }
+}
+
+export class LookupTimeoutError extends RequestTimeoutError {
+    constructor() {
+        super();
+        this.message = 'Account lookup timed out';
+        this.name = 'LookupTimeoutError';
     }
 }
 
@@ -27,8 +35,8 @@ export function readRateLimitReset(headers, now = Date.now()) {
     return deadlines.length ? Math.max(...deadlines) : now + 60000;
 }
 
-/** Bound the whole operation, including reading its response body. */
-export async function withLookupTimeout(operation, timeoutMs = LOOKUP_TIMEOUT_MS) {
+/** Bound the whole operation, including response decoding, and always clear its timer. */
+export async function withRequestTimeout(operation, timeoutMs, createTimeoutError = () => new RequestTimeoutError()) {
     const controller = new AbortController();
     let timer;
     try {
@@ -36,7 +44,7 @@ export async function withLookupTimeout(operation, timeoutMs = LOOKUP_TIMEOUT_MS
             Promise.resolve().then(() => operation(controller.signal)),
             new Promise((_, reject) => {
                 timer = setTimeout(() => {
-                    reject(new LookupTimeoutError());
+                    reject(createTimeoutError());
                     controller.abort();
                 }, timeoutMs);
             })
@@ -44,6 +52,11 @@ export async function withLookupTimeout(operation, timeoutMs = LOOKUP_TIMEOUT_MS
     } finally {
         clearTimeout(timer);
     }
+}
+
+/** Preserve the lookup-specific error contract for X's background and page queues. */
+export function withLookupTimeout(operation, timeoutMs = LOOKUP_TIMEOUT_MS) {
+    return withRequestTimeout(operation, timeoutMs, () => new LookupTimeoutError());
 }
 
 /** Page-session fallback queue. Waiting time counts against the request deadline. */

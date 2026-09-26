@@ -1,8 +1,8 @@
 /**
- * Icon set (monochrome SVG, currentColor) for the glass UI system.
+ * Device, flag and compact badge/Share artwork retained by the Graphite UI.
  * Built via createElementNS (never innerHTML) so it is XSS-safe and inherits
  * the surrounding text/accent color. Distinct device icons (Apple / Android /
- * Web / Unknown) plus the hovercard glyphs.
+ * Web / Unknown). General interface icons live in dialog-icons.js.
  */
 
 import { COUNTRY_FLAGS, canonicalCountry } from '../shared/constants.js';
@@ -62,7 +62,7 @@ function unknownDevice(size) {
     return s;
 }
 
-// ---- hovercard / badge glyphs ----
+// ---- live badge / Share glyphs ----
 const GLYPHS = {
     info(size) {
         const s = base(size, true);
@@ -76,164 +76,15 @@ const GLYPHS = {
         s.appendChild(el('path', { d: 'M9.5 12l1.8 1.8L15 9.8' }));
         return s;
     },
-    location(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10z' }));
-        s.appendChild(el('circle', { cx: '12', cy: '11', r: '2.2' }));
-        return s;
-    },
-    verified(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M12 3l2.2 1.6 2.7-.2 1 2.5 2.3 1.4-.6 2.6.6 2.6-2.3 1.4-1 2.5-2.7-.2L12 21l-2.2-1.6-2.7.2-1-2.5L3.8 15.7l.6-2.6-.6-2.6 2.3-1.4 1-2.5 2.7.2z' }));
-        s.appendChild(el('path', { d: 'M9.6 12l1.7 1.7 3.3-3.4' }));
-        return s;
-    },
-    created(size) {
-        const s = base(size, true);
-        s.appendChild(el('rect', { x: '4', y: '5', width: '16', height: '16', rx: '2.5' }));
-        s.appendChild(el('path', { d: 'M4 9h16M8 3v4M16 3v4' }));
-        return s;
-    },
-    id(size) {
-        // hashtag — reads instantly as a numeric identifier
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M9.5 4 7.5 20M16.5 4l-2 16M5 9.5h14.5M4.5 14.5H19' }));
-        return s;
-    },
-    affiliation(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M4 21V5l8-2 8 2v16' }));
-        s.appendChild(el('path', { d: 'M9 9h.01M9 13h.01M15 9h.01M15 13h.01M10 21v-4h4v4' }));
-        return s;
-    },
-    followers(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M16 20v-1.6a4 4 0 0 0-4-4H6.6a4 4 0 0 0-4 4V20' }));
-        s.appendChild(el('circle', { cx: '9.3', cy: '7.2', r: '3.4' }));
-        s.appendChild(el('path', { d: 'M21.5 20v-1.6a4 4 0 0 0-3-3.87M15.8 4.2a3.4 3.4 0 0 1 0 6.1' }));
-        return s;
-    },
-    posts(size) {
-        const s = base(size, true);
-        s.appendChild(el('rect', { x: '3.5', y: '4.5', width: '17', height: '15', rx: '2.5' }));
-        s.appendChild(el('path', { d: 'M7 9h6M7 12.5h10M7 16h8' }));
-        return s;
-    },
-    clock(size) {
-        const s = base(size, true);
-        s.appendChild(el('circle', { cx: '12', cy: '12', r: '8.5' }));
-        s.appendChild(el('path', { d: 'M12 7.5V12l3 1.8' }));
-        return s;
-    },
-    swap(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M7 7h11l-3-3M17 17H6l3 3' }));
-        return s;
-    },
-    camera(size) {
-        const s = base(size, false);
-        s.appendChild(el('path', { d: 'M12 9a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z' }));
-        s.appendChild(el('path', { d: 'M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12z' }));
-        return s;
-    },
     shield(size) {
         const s = base(size, true);
         s.appendChild(el('path', { d: 'M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z' }));
-        return s;
-    },
-    close(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M6 6 L18 18' }));
-        s.appendChild(el('path', { d: 'M18 6 L6 18' }));
-        return s;
-    },
-    warn(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M12 3.2 1.6 21h20.8z' }));
-        s.appendChild(el('path', { d: 'M12 9.5v5M12 17.8h.01' }));
-        return s;
-    },
-    globe(size) {
-        const s = base(size, true);
-        s.appendChild(el('circle', { cx: '12', cy: '12', r: '8.5' }));
-        s.appendChild(el('path', { d: 'M3.5 12h17M12 3.5c2.5 2.3 3.9 5.3 3.9 8.5s-1.4 6.2-3.9 8.5c-2.5-2.3-3.9-5.3-3.9-8.5S9.5 5.8 12 3.5z' }));
-        return s;
-    },
-    map(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4z' }));
-        s.appendChild(el('path', { d: 'M9 4v14M15 6v14' }));
-        return s;
-    },
-    tag(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4.5a1.5 1.5 0 0 1 1.5-1.5H12a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.6z' }));
-        s.appendChild(el('path', { d: 'M7.5 7.5h.01' }));
-        return s;
-    },
-    languages(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'm5 8 6 6' }));
-        s.appendChild(el('path', { d: 'm4 14 6-6 2-3' }));
-        s.appendChild(el('path', { d: 'M2 5h12' }));
-        s.appendChild(el('path', { d: 'M7 2h1' }));
-        s.appendChild(el('path', { d: 'm22 22-5-10-5 10' }));
-        s.appendChild(el('path', { d: 'M14 18h6' }));
-        return s;
-    },
-    cloud(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M7 18.5a4.2 4.2 0 0 1-.3-8.4 5.6 5.6 0 0 1 10.8-1.6A3.8 3.8 0 0 1 17.3 18.5z' }));
-        return s;
-    },
-    lock(size) {
-        const s = base(size, true);
-        s.appendChild(el('rect', { x: '4.8', y: '10.5', width: '14.4', height: '10', rx: '2' }));
-        s.appendChild(el('path', { d: 'M8 10.5V7.2a4 4 0 0 1 8 0v3.3M12 14.3v2.6' }));
-        return s;
-    },
-    hourglass(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M6.5 3h11M6.5 21h11' }));
-        s.appendChild(el('path', { d: 'M7.5 3c0 4.8 4.5 6 4.5 9s-4.5 4.2-4.5 9M16.5 3c0 4.8-4.5 6-4.5 9s4.5 4.2 4.5 9' }));
-        return s;
-    },
-    wrench(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M15.3 6.3a3.6 3.6 0 0 1-4.6 4.6l-6 6a1.8 1.8 0 1 1-2.6-2.6l6-6a3.6 3.6 0 0 1 4.6-4.6L10.4 6 11 7.4l1.4.6 2.9-1.7z' }));
-        return s;
-    },
-    sparkles(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M12 3.5l1.7 4.8L18.5 10l-4.8 1.7L12 16.5l-1.7-4.8L5.5 10l4.8-1.7z' }));
-        s.appendChild(el('path', { d: 'M18 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z' }));
         return s;
     },
     save(size) {
         const s = base(size, true);
         s.appendChild(el('path', { d: 'M5.5 3.5h11L20.5 7.5v12a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z' }));
         s.appendChild(el('path', { d: 'M7.5 3.5v5h7v-5M7.5 20.5v-6h9v6' }));
-        return s;
-    },
-    check(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M4.5 12.5l4.5 4.5 10.5-10.5' }));
-        return s;
-    },
-    heart(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M12 20.5S3.5 15 3.5 9.2C3.5 6.4 5.6 4.5 8.1 4.5c1.7 0 3.1.9 3.9 2.2.8-1.3 2.2-2.2 3.9-2.2 2.5 0 4.6 1.9 4.6 4.7 0 5.8-8.5 11.3-8.5 11.3z' }));
-        return s;
-    },
-    reply(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M9 17l-5-5 5-5' }));
-        s.appendChild(el('path', { d: 'M4 12h11a5 5 0 0 1 5 5v1' }));
-        return s;
-    },
-    plus(size) {
-        const s = base(size, true);
-        s.appendChild(el('path', { d: 'M12 5v14M5 12h14' }));
         return s;
     },
     copy(size) {
@@ -288,10 +139,8 @@ export function deviceIcon(deviceString, size = 15) {
 }
 
 /**
- * Return an SVG element for a named glyph (info, vpn, location, verified,
- * created, id, affiliation, clock, swap, camera, shield, close, warn, globe,
- * map, tag, languages, cloud, lock, hourglass, wrench, sparkles, save, check, heart,
- * reply, plus, copy, share, xLogo, zoom). Falls back to the info glyph.
+ * Return an SVG element for a badge or Share glyph (info, vpn, shield, save,
+ * copy, share, xLogo, zoom). Falls back to the info glyph.
  * @param {string} name
  * @param {number} size
  * @returns {SVGElement}

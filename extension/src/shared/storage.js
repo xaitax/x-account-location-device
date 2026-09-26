@@ -6,6 +6,16 @@
 import browserAPI from './browser-api.js';
 import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS, canonicalCountry, affiliationWasChecked } from './constants.js';
 import { LRUCache } from './lru-cache.js';
+import { normalizeLinkRule } from './domain-utils.js';
+import { FILTER_SOURCES } from './filter-registry.js';
+
+// One ordering counter per configuration store. Persisted alongside its state in
+// the same local-storage write, so delayed replies remain orderable after a
+// service-worker restart. This metadata is never included in exported settings.
+function nextStateRevision(revision) {
+    if (revision >= Number.MAX_SAFE_INTEGER) throw new RangeError('Configuration revision limit reached');
+    return revision + 1;
+}
 
 /**
  * User cache data storage with per-entry expiry tracking
@@ -182,7 +192,7 @@ class UserCacheStorage {
             // that still fails or the error was something else (e.g. a transient write).
             if (/quota/i.test(error?.message || '')) {
                 const evicted = this.evictOldest(0.25);
-                console.warn(`⚠️ User cache exceeded storage quota — evicted ${evicted} least-recently-used entries and retrying`);
+                console.warn(`⚠️ User cache exceeded storage quota. Evicted ${evicted} least-recently-used entries and retrying.`);
                 if (evicted > 0) {
                     return this.save(true);
                 }
@@ -329,16 +339,34 @@ class BlockedSetStorage {
         this.values = new Set();
         this.loaded = false;
         this.storageKey = storageKey;
+        this.revisionKey = `${storageKey}_revision`;
+        this.revision = 0;
         this.label = label;
         this.normalize = normalize;
         this.defaults = Array.isArray(defaults) ? defaults : [];
         this.mutationQueue = Promise.resolve();
+        this.loadPromise = null;
     }
 
     async load() {
+        if (this.loadPromise) return this.loadPromise;
+        if (this.loaded) return;
+        this.loadPromise = this.loadState();
         try {
-            const result = await browserAPI.storage.local.get(this.storageKey);
+            await this.loadPromise;
+        } finally {
+            this.loadPromise = null;
+        }
+    }
+
+    async loadState() {
+        try {
+            const result = await browserAPI.storage.local.get([this.storageKey, this.revisionKey]);
             const stored = result[this.storageKey];
+            const revision = result[this.revisionKey];
+            this.revision = Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
+            // The read succeeded, so a first-run seed can enter the mutation queue.
+            this.loaded = true;
 
             if (Array.isArray(stored)) {
                 // Aliases and normalizers can change between releases. Old saved
@@ -356,15 +384,17 @@ class BlockedSetStorage {
             this.loaded = true;
         } catch (error) {
             console.error(`Failed to load ${this.label}:`, error);
-            this.loaded = true;
+            this.loaded = false;
+            throw error;
         }
     }
 
-    async save(values = this.values) {
+    async save(values = this.values, revision = this.revision) {
         try {
             const array = Array.from(values);
             await browserAPI.storage.local.set({
-                [this.storageKey]: array
+                [this.storageKey]: array,
+                [this.revisionKey]: revision
             });
             console.log(`💾 Saved ${array.length} ${this.label}`);
         } catch (error) {
@@ -376,10 +406,13 @@ class BlockedSetStorage {
     /** Commit one mutation at a time; failed writes never change the visible Set. */
     commitMutation(change) {
         const operation = this.mutationQueue.then(async () => {
+            if (!this.loaded) throw new Error(`${this.label} must be loaded before editing`);
             const next = new Set(this.values);
             if (change(next) === false) return;
-            await this.save(next);
+            const revision = nextStateRevision(this.revision);
+            await this.save(next, revision);
             this.values = next;
+            this.revision = revision;
         });
         // Keep later operations usable after a failure, while returning the real
         // rejection to the caller so the message handler reports success:false.
@@ -467,6 +500,11 @@ class BlockedSetStorage {
         return Array.from(this.values);
     }
 
+    /** Capture data and ordering metadata without an asynchronous gap. */
+    snapshot() {
+        return { data: this.getAll(), revision: this.revision };
+    }
+
     has(value) {
         return this.isBlocked(value);
     }
@@ -507,14 +545,31 @@ class SettingsStorage {
         this.settings = { ...DEFAULT_SETTINGS };
         this.loaded = false;
         this.listeners = new Set();
+        this.mutationQueue = Promise.resolve();
+        this.revisionKey = `${STORAGE_KEYS.SETTINGS}_revision`;
+        this.revision = 0;
+        this.loadPromise = null;
     }
 
     async load() {
+        if (this.loadPromise) return this.loadPromise;
+        if (this.loaded) return;
+        this.loadPromise = this.loadState();
         try {
-            const result = await browserAPI.storage.local.get(STORAGE_KEYS.SETTINGS);
+            await this.loadPromise;
+        } finally {
+            this.loadPromise = null;
+        }
+    }
+
+    async loadState() {
+        try {
+            const result = await browserAPI.storage.local.get([STORAGE_KEYS.SETTINGS, this.revisionKey]);
             const stored = result[STORAGE_KEYS.SETTINGS];
+            const revision = result[this.revisionKey];
+            this.revision = Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
             
-            if (stored && typeof stored === 'object') {
+            if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
                 this.settings = { ...DEFAULT_SETTINGS, ...stored };
             }
             
@@ -522,19 +577,38 @@ class SettingsStorage {
             console.log('⚙️ Settings loaded:', this.settings);
         } catch (error) {
             console.error('Failed to load settings:', error);
-            this.loaded = true;
+            this.loaded = false;
+            throw error;
         }
     }
 
-    async save() {
+    async save(values = this.settings, revision = this.revision) {
         try {
             await browserAPI.storage.local.set({
-                [STORAGE_KEYS.SETTINGS]: this.settings
+                [STORAGE_KEYS.SETTINGS]: values,
+                [this.revisionKey]: revision
             });
-            this.notifyListeners();
         } catch (error) {
             console.error('Failed to save settings:', error);
+            throw error;
         }
+    }
+
+    /** Serialize partial updates and expose them only after persistence succeeds. */
+    commitMutation(change) {
+        const operation = this.mutationQueue.then(async () => {
+            if (!this.loaded) throw new Error('Settings must be loaded before editing');
+            const next = change({ ...this.settings });
+            if (!next) return this.get();
+            const revision = nextStateRevision(this.revision);
+            await this.save(next, revision);
+            this.settings = next;
+            this.revision = revision;
+            this.notifyListeners();
+            return this.get();
+        });
+        this.mutationQueue = operation.catch(() => {});
+        return operation;
     }
 
     get(key) {
@@ -544,22 +618,30 @@ class SettingsStorage {
         return { ...this.settings };
     }
 
+    /** Revision is transport metadata, never part of the exported settings. */
+    snapshot() {
+        return { data: this.get(), revision: this.revision };
+    }
+
     set(key, value) {
-        if (typeof key === 'object') {
-            // Bulk set
-            this.settings = { ...this.settings, ...key };
-        } else {
-            this.settings[key] = value;
+        if (!key || (typeof key !== 'string' &&
+            (typeof key !== 'object' || Array.isArray(key)))) {
+            return Promise.reject(new TypeError('Settings must be a partial settings object or a setting name'));
         }
-        return this.save();
+        const patch = typeof key === 'string' ? { [key]: value } : { ...key };
+        return this.commitMutation(next => {
+            const changed = Object.keys(patch).some(name => !Object.is(next[name], patch[name]));
+            if (!changed) return false;
+            return { ...next, ...patch };
+        });
     }
 
     toggle(key) {
-        if (typeof this.settings[key] === 'boolean') {
-            this.settings[key] = !this.settings[key];
-            return this.save();
-        }
-        return Promise.resolve();
+        return this.commitMutation(next => {
+            if (typeof next[key] !== 'boolean') return false;
+            next[key] = !next[key];
+            return next;
+        });
     }
 
     addListener(callback) {
@@ -570,7 +652,7 @@ class SettingsStorage {
     notifyListeners() {
         for (const listener of this.listeners) {
             try {
-                listener(this.settings);
+                listener(this.get());
             } catch (error) {
                 console.error('Settings listener error:', error);
             }
@@ -629,56 +711,31 @@ class HeadersStorage {
     }
 }
 
-// Export singleton instances
+// Storage-specific policy stays here. The pure registry owns only stable identifiers.
+// Existing display-name casing, lowercase bio terms and first-run defaults are unchanged.
+const FILTER_STORAGE_OPTIONS = {
+    countries: { label: 'blocked countries', normalize: normalizeCountry },
+    regions: { label: 'blocked regions', normalize: normalizeLower },
+    tags: { label: 'blocked tags', normalize: normalizeTag },
+    bioTags: { label: 'blocked bio tags', normalize: normalizeLower },
+    pcf: { label: 'blocked account labels', normalize: normalizeLower },
+    languages: { label: 'blocked languages', normalize: normalizeLanguage },
+    affiliations: { label: 'blocked affiliations', normalize: normalizeLower },
+    links: { label: 'blocked linked domains and URLs', normalize: normalizeLinkRule },
+    // First run only. Removing the default keeps it removed (issue #26).
+    allowedUsers: { label: 'always-show accounts', normalize: normalizeUsername, defaults: ['xaitax'] }
+};
+
+export const filterStores = Object.freeze(Object.fromEntries(FILTER_SOURCES.map(source => [
+    source.field, new BlockedSetStorage({ storageKey: source.storageKey, ...FILTER_STORAGE_OPTIONS[source.kind] })
+])));
+
+// Preserve the public singleton exports used by existing consumers.
+export const {
+    blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedPcf,
+    blockedLanguages, blockedAffiliations, blockedLinks, allowedUsers
+} = filterStores;
 export const userCache = new UserCacheStorage();
-export const blockedCountries = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.BLOCKED_COUNTRIES,
-    label: 'blocked countries',
-    normalize: normalizeCountry
-});
-export const blockedRegions = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.BLOCKED_REGIONS,
-    label: 'blocked regions',
-    normalize: normalizeLower
-});
-export const blockedTags = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.BLOCKED_TAGS,
-    label: 'blocked tags',
-    normalize: normalizeTag
-});
-// Bio tags are matched case-insensitively against the account's bio, so they are stored
-// lowercased — unlike display-name tags, which keep their case because emoji and bracketed
-// markers are compared literally.
-export const blockedBioTags = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.BLOCKED_BIO_TAGS,
-    label: 'blocked bio tags',
-    normalize: normalizeLower
-});
-// Account-label choices (PCF labels and the optional grey-checkmark filter). Keep
-// the existing storage key for backup and settings compatibility; none are seeded.
-export const blockedPcf = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.BLOCKED_PCF,
-    label: 'blocked account labels',
-    normalize: normalizeLower
-});
-export const blockedLanguages = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.BLOCKED_LANGUAGES,
-    label: 'blocked languages',
-    normalize: normalizeLanguage
-});
-export const blockedAffiliations = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.BLOCKED_AFFILIATIONS,
-    label: 'blocked affiliations',
-    normalize: normalizeLower
-});
-export const allowedUsers = new BlockedSetStorage({
-    storageKey: STORAGE_KEYS.ALLOWED_USERS,
-    label: 'always-show accounts',
-    normalize: normalizeUsername,
-    // Ship the extension author allowlisted by default (issue #26). First run only —
-    // remove it and it stays removed.
-    defaults: ['xaitax']
-});
 export const settings = new SettingsStorage();
 export const headersStorage = new HeadersStorage();
 
@@ -691,14 +748,7 @@ export { LRUCache, UserCacheStorage, BlockedSetStorage, SettingsStorage, Headers
 export async function initializeStorage() {
     await Promise.all([
         userCache.load(),
-        blockedCountries.load(),
-        blockedRegions.load(),
-        blockedTags.load(),
-        blockedBioTags.load(),
-        blockedPcf.load(),
-        blockedLanguages.load(),
-        blockedAffiliations.load(),
-        allowedUsers.load(),
+        ...FILTER_SOURCES.map(source => filterStores[source.field].load()),
         settings.load(),
         headersStorage.load()
     ]);

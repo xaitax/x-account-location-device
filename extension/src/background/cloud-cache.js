@@ -12,6 +12,7 @@ import { STORAGE_KEYS, CLOUD_CACHE_CONFIG, affiliationWasChecked } from '../shar
 import browserAPI from '../shared/browser-api.js';
 import { debounce } from '../shared/utils.js';
 import { UserCacheStorage } from '../shared/storage.js';
+import { withRequestTimeout } from '../shared/request-policy.js';
 
 // Twitter launched in 2006; anything earlier is bad data, not an old account.
 const MIN_CREATED_AT_SECONDS = 1136073600;
@@ -359,30 +360,24 @@ class CloudCacheClient {
 
         for (const batch of batches) {
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(
-                    () => controller.abort(),
-                    CLOUD_CACHE_CONFIG.LOOKUP_TIMEOUT_MS
-                );
-
-                const response = await fetch(
-                    `${this.apiUrl}/lookup?users=${batch.join(',')}`,
-                    {
-                        method: 'GET',
-                        signal: controller.signal,
-                        headers: {
-                            'Accept': 'application/json'
+                const data = await withRequestTimeout(async signal => {
+                    const response = await fetch(
+                        `${this.apiUrl}/lookup?users=${batch.join(',')}`,
+                        {
+                            method: 'GET',
+                            signal,
+                            headers: {
+                                'Accept': 'application/json'
+                            }
                         }
+                    );
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
                     }
-                );
 
-                clearTimeout(timeoutId);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-
-                const data = await response.json();
+                    return response.json();
+                }, CLOUD_CACHE_CONFIG.LOOKUP_TIMEOUT_MS);
                 hasSuccess = true;
 
                 // Process results with input validation
@@ -465,7 +460,7 @@ class CloudCacheClient {
 
             } catch (error) {
                 hasFailure = true;
-                if (error.name === 'AbortError') {
+                if (error.name === 'AbortError' || error.code === 'TIMEOUT') {
                     console.warn('☁️ Cloud lookup timed out');
                 } else {
                     console.error('☁️ Cloud lookup failed:', error.message);
@@ -481,7 +476,7 @@ class CloudCacheClient {
         const requestedSet = new Set(usernames);
         for (const returnedUser of results.keys()) {
             if (!requestedSet.has(returnedUser)) {
-                console.warn(`☁️ X-Posed: cloud /lookup returned an UNREQUESTED user "${returnedUser}" — possible server-side mapping bug (issue #23)`);
+                console.warn(`☁️ X-Posed: cloud /lookup returned an UNREQUESTED user "${returnedUser}". Possible server-side mapping bug (issue #23).`);
             }
         }
 
@@ -605,25 +600,19 @@ class CloudCacheClient {
         this.contributionQueue.clear();
 
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(
-                () => controller.abort(),
-                CLOUD_CACHE_CONFIG.CONTRIBUTE_TIMEOUT_MS
-            );
-
-            const response = await fetch(`${this.apiUrl}/contribute`, {
-                method: 'POST',
-                signal: controller.signal,
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ entries })
-            });
-
-            clearTimeout(timeoutId);
+            const { response, data } = await withRequestTimeout(async signal => {
+                const response = await fetch(`${this.apiUrl}/contribute`, {
+                    method: 'POST',
+                    signal,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ entries })
+                });
+                return { response, data: response.ok ? await response.json() : null };
+            }, CLOUD_CACHE_CONFIG.CONTRIBUTE_TIMEOUT_MS);
 
             if (response.ok) {
-                const data = await response.json();
                 this.stats.contributions += data.accepted || Object.keys(entries).length;
                 console.log(`☁️ Contributed ${Object.keys(entries).length} entries to cloud`);
                 this.recordSuccess();
@@ -641,7 +630,7 @@ class CloudCacheClient {
             }
 
         } catch (error) {
-            if (error.name === 'AbortError') {
+            if (error.name === 'AbortError' || error.code === 'TIMEOUT') {
                 console.warn('☁️ Contribution timed out, will retry');
             } else {
                 console.error('☁️ Contribution failed:', error.message);
@@ -756,29 +745,26 @@ class CloudCacheClient {
             }
 
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(
-                    () => controller.abort(),
-                    10000 // 10 second timeout for bulk sync
-                );
-
-                const response = await fetch(`${this.apiUrl}/contribute`, {
-                    method: 'POST',
-                    signal: controller.signal,
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ entries: batchEntries })
-                });
-
-                clearTimeout(timeoutId);
+                const { response, result, errText } = await withRequestTimeout(async signal => {
+                    const response = await fetch(`${this.apiUrl}/contribute`, {
+                        method: 'POST',
+                        signal,
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ entries: batchEntries })
+                    });
+                    return {
+                        response,
+                        result: response.ok ? await response.json() : null,
+                        errText: response.ok ? null : await response.text()
+                    };
+                }, 10000); // 10 second timeout for bulk sync, including the body
 
                 if (response.ok) {
-                    const result = await response.json();
                     synced += result.accepted || Object.keys(batchEntries).length;
                     console.log(`☁️ Batch synced: ${Object.keys(batchEntries).length} entries`);
                 } else {
-                    const errText = await response.text();
                     console.error(`☁️ Batch failed (${response.status}):`, errText);
                     errors += Object.keys(batchEntries).length;
                 }
@@ -853,24 +839,21 @@ class CloudCacheClient {
 
     async _fetchServerStatsFromNetwork(timeoutMs) {
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            const data = await withRequestTimeout(async signal => {
+                const response = await fetch(`${this.apiUrl}/stats`, {
+                    method: 'GET',
+                    signal,
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
 
-            const response = await fetch(`${this.apiUrl}/stats`, {
-                method: 'GET',
-                signal: controller.signal,
-                headers: {
-                    'Accept': 'application/json'
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
                 }
-            });
 
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const data = await response.json();
+                return response.json();
+            }, timeoutMs);
             return {
                 totalEntries: data.totalEntries || 0,
                 totalContributions: data.totalContributions || 0,

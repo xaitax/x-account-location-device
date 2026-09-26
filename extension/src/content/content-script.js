@@ -9,11 +9,11 @@ import { MESSAGE_TYPES, CSS_CLASSES, VERSION, affiliationWasChecked } from '../s
 
 // Import modules
 import {
-    injectStyles,
     detectAndApplyTheme,
     startThemeObserver,
     injectSidebarLink,
     removeSidebarLink,
+    syncSidebarSettings,
     cleanupUI,
     showToast
 } from './ui.js';
@@ -27,6 +27,8 @@ import {
     updateBlockedTweets,
     resetProcessedElements,
     setupQuoteReveal,
+    setFilterStatisticsReporter,
+    effectiveCountry,
     cleanupObservers,
     userInfoCache
 } from './observer.js';
@@ -34,27 +36,37 @@ import {
 import { hovercard } from './hovercard.js';
 import { glyph } from './icons.js';
 import { setProfile, clearProfiles, profileCount } from './profile-cache.js';
+import { PROFILE_LIMITS, profilePatchFromWire } from '../shared/profile-data.js';
+import { syncModalState, syncModalSettings, closeModal } from './modal.js';
+import { cleanupEvidenceCapture } from './evidence-capture.js';
+import { FILTER_SOURCES } from '../shared/filter-registry.js';
+import { createLifecycle } from '../shared/lifecycle.js';
+import { createSnapshotTracker } from '../shared/state-sync.js';
+import { createFilterStatisticsReporter } from './filter-statistics.js';
 
 // ============================================
 // STATE
 // ============================================
 
-let isEnabled = true;
-let blockedCountries = new Set();
-let blockedRegions = new Set();
-let blockedTags = new Set();
-let blockedBioTags = new Set();
-let blockedPcf = new Set();
-let blockedLanguages = new Set();
-let allowedUsers = new Set();
-let blockedAffiliations = new Set();
+// Do not start lookups until the persisted enabled preference is known.
+let isEnabled = false;
+const filterSets = Object.fromEntries(FILTER_SOURCES.map(source => [source.field, new Set()]));
 let settings = {};
+let settingsLoaded = false;
+const stateSnapshots = createSnapshotTracker();
+const STATE_MUTATION_UPDATES = {
+    [MESSAGE_TYPES.SET_SETTINGS]: MESSAGE_TYPES.SETTINGS_UPDATED,
+    ...Object.fromEntries(FILTER_SOURCES.map(source => [source.set, source.update]))
+};
+const FILTER_UPDATES = new Map(FILTER_SOURCES.map(source => [source.update, source]));
 let csrfToken = null;
 let debugMode = false;
 
 // Cleanup tracking
-let cleanupFunctions = [];
+let session = null;
 let isCleanedUp = false;
+let filterStatisticsReporter = null;
+const cancelledResponse = () => ({ success: false, code: 'CANCELLED', error: 'Page session ended' });
 
 // Memoized functions (created once, reused)
 let memoizedProcessElementWithContext = null;
@@ -76,29 +88,31 @@ function debug(...args) {
 }
 
 function fetchUserInfoViaPage(screenName) {
+    const current = session;
+    if (!current || current.disposed) return Promise.resolve(cancelledResponse());
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
     return new Promise(resolve => {
-        const timeout = setTimeout(() => {
-            window.removeEventListener('x-posed-fetch-user-info-result', onResult);
-            resolve({ success: false, code: 'TIMEOUT', error: 'Timed out waiting for page fetch' });
-        }, 10000);
-
-        function onResult(event) {
-            let result;
-            try {
-                result = JSON.parse(event.detail || '{}');
-            } catch {
-                return;
-            }
-
-            if (result.id !== id) return;
-            clearTimeout(timeout);
-            window.removeEventListener('x-posed-fetch-user-info-result', onResult);
+        let settled = false;
+        let cancelTimer = () => {};
+        let removeListener = () => {};
+        let forget = () => {};
+        const finish = result => {
+            if (settled) return;
+            settled = true;
+            cancelTimer();
+            removeListener();
+            forget();
             resolve(result);
-        }
-
-        window.addEventListener('x-posed-fetch-user-info-result', onResult);
+        };
+        removeListener = current.listen(window, 'x-posed-fetch-user-info-result', event => {
+            let result;
+            try { result = JSON.parse(event.detail || '{}'); } catch { return; }
+            if (result.id === id) finish(result);
+        });
+        cancelTimer = current.delay(() => finish({
+            success: false, code: 'TIMEOUT', error: 'Timed out waiting for page fetch'
+        }), 10000);
+        forget = current.add(() => finish(cancelledResponse()));
         window.dispatchEvent(new CustomEvent('x-posed-fetch-user-info', {
             detail: JSON.stringify({ id, screenName })
         }));
@@ -113,8 +127,16 @@ function fetchUserInfoViaPage(screenName) {
  * Send message to background script
  */
 async function sendMessage(message) {
+    const current = session;
+    if (!current || current.disposed) return cancelledResponse();
     try {
-        return await browserAPI.runtime.sendMessage(message);
+        const response = await browserAPI.runtime.sendMessage(message);
+        if (current.disposed) return cancelledResponse();
+        const updateType = STATE_MUTATION_UPDATES[message.type];
+        if (response?.success && updateType) {
+            await handleBackgroundMessage(updateType, response.data, response.revision);
+        }
+        return response;
     } catch (error) {
         console.error('Message send error:', error);
         return { success: false, error: error.message, code: 'NETWORK_ERROR' };
@@ -149,11 +171,12 @@ function getCsrfToken() {
  * page-script.js short-circuits on window.__X_POSED_INJECTED__, so whichever path lands
  * first wins and the other is a no-op.
  */
-function injectPageScript() {
+function injectPageScript(current) {
     const scriptUrl = browserAPI.runtime.getURL('page-script.js');
     
     const script = document.createElement('script');
     script.src = scriptUrl;
+    current.add(() => script.remove());
     script.onload = function() {
         this.remove();
     };
@@ -164,8 +187,8 @@ function injectPageScript() {
 /**
  * Listen for events from page script
  */
-function setupPageScriptListener() {
-    window.addEventListener('x-posed-headers-captured', async event => {
+function setupPageScriptListener(current) {
+    current.listen(window, 'x-posed-headers-captured', async event => {
         let headers;
         try {
             ({ headers } = JSON.parse(event.detail || '{}'));
@@ -182,7 +205,7 @@ function setupPageScriptListener() {
         });
 
         if (response?.success && memoizedScanPageFn) {
-            setTimeout(() => memoizedScanPageFn(), 250);
+            current.delay(() => memoizedScanPageFn?.(), 250);
         }
     });
 }
@@ -210,16 +233,7 @@ function reprocessRowsMissingAffiliation() {
     // Same teardown the settings-change path uses: a hidden row has no layout box, so the
     // IntersectionObserver would never report it visible and it could never re-process.
     // Un-hide and un-mark everything first, then let the rescan re-derive each row.
-    document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
-    document.querySelectorAll('[data-x-processed]').forEach(el => {
-        delete el.dataset.xProcessed;
-        delete el.dataset.xScreenName;
-    });
-    document.querySelectorAll('.x-tweet-blocked, .x-tweet-vpn-blocked, .x-tweet-highlighted')
-        .forEach(el => el.classList.remove('x-tweet-blocked', 'x-tweet-vpn-blocked', 'x-tweet-highlighted'));
-    document.querySelectorAll('[data-x-block]').forEach(el => { delete el.dataset.xBlock; });
-    document.querySelectorAll('[data-x-quote-block]').forEach(el => { delete el.dataset.xQuoteBlock; });
-    document.querySelectorAll('[data-x-quote-reason]').forEach(el => { delete el.dataset.xQuoteReason; });
+    resetProcessedElements(currentFilters());
 
     if (memoizedScanPageFn) memoizedScanPageFn();
 }
@@ -229,17 +243,7 @@ function reprocessRowsMissingAffiliation() {
  * into the wrong parameter slot.
  */
 function currentFilters() {
-    return {
-        blockedCountries,
-        blockedRegions,
-        blockedTags,
-        blockedBioTags,
-        blockedPcf,
-        blockedLanguages,
-        blockedAffiliations,
-        allowedUsers,
-        settings
-    };
+    return { ...filterSets, settings };
 }
 
 /**
@@ -249,8 +253,17 @@ function currentFilters() {
  */
 function syncEnrichmentSetting() {
     window.dispatchEvent(new CustomEvent('x-posed-set-enrichment', {
-        detail: JSON.stringify({ enabled: settings.profileEnrichment !== false })
+        detail: JSON.stringify({ enabled: settingsLoaded && isEnabled && settings.profileEnrichment !== false })
     }));
+}
+
+/** A fresh snapshot for UI consumers; never capture a Set at sidebar creation. */
+function getBlockingState() {
+    return {
+        ...Object.fromEntries(FILTER_SOURCES.map(source => [source.field, [...filterSets[source.field]]])),
+        settings: { ...settings },
+        stateRevisions: stateSnapshots.snapshot()
+    };
 }
 
 /**
@@ -261,10 +274,14 @@ function syncEnrichmentSetting() {
  * contributed to the community cache, because bios are personal free text and follower
  * counts are stale within minutes.
  */
-function setupProfileListener() {
+function setupProfileListener(current) {
     const onReady = () => syncEnrichmentSetting();
 
     const onProfiles = event => {
+        if (!settingsLoaded || !isEnabled || settings.profileEnrichment === false || isCleanedUp) return;
+        // The page relay is an untrusted boundary. Bound decoding and iteration,
+        // then let the profile cache validate individual fields.
+        if (typeof event.detail !== 'string' || event.detail.length > PROFILE_LIMITS.MAX_RELAY_LENGTH) return;
         let users;
         try {
             ({ users } = JSON.parse(event.detail || '{}'));
@@ -273,44 +290,35 @@ function setupProfileListener() {
         }
         if (!Array.isArray(users) || users.length === 0) return;
 
-        for (const entry of users) {
-            setProfile(entry.u, {
-                bio: entry.b,
-                pcf: entry.p,
-                followers: entry.f,
-                following: entry.g,
-                tweets: entry.t,
-                media: entry.m
-            });
+        const changedUsers = new Set();
+        for (const entry of users.slice(0, PROFILE_LIMITS.MAX_BATCH_ENTRIES)) {
+            const profile = profilePatchFromWire(entry);
+            if (!profile) continue;
+            if (setProfile(entry.u, profile)) changedUsers.add(entry.u.toLowerCase());
         }
         debug(`Harvested ${users.length} profile(s) from X's own response`);
 
         // Newly known bios/labels can change a row's verdict, so re-derive what's on screen.
         // Coalesced by updateBlockedTweets, so a burst of scroll responses costs one pass.
-        if (blockedBioTags.size > 0 || blockedPcf.size > 0) {
-            updateBlockedTweets(currentFilters());
+        if (changedUsers.size > 0 && (filterSets.blockedBioTags.size > 0 || filterSets.blockedPcf.size > 0 || filterSets.blockedLinks.size > 0)) {
+            updateBlockedTweets(currentFilters(), changedUsers);
         }
     };
 
-    window.addEventListener('x-posed-page-ready', onReady);
-    window.addEventListener('x-posed-profiles', onProfiles);
-
-    cleanupFunctions.push(() => {
-        window.removeEventListener('x-posed-page-ready', onReady);
-        window.removeEventListener('x-posed-profiles', onProfiles);
-        clearProfiles();
-    });
+    current.listen(window, 'x-posed-page-ready', onReady);
+    current.listen(window, 'x-posed-profiles', onProfiles);
+    current.add(clearProfiles);
 }
 
 /**
  * Listen for messages from background script
  */
-function setupBackgroundListener() {
+function setupBackgroundListener(current) {
     const messageHandler = (message, sender, sendResponse) => {
-        const { type, payload } = message;
+        const { type, payload, revision } = message;
 
         // Use proper async handling with error boundary
-        handleBackgroundMessage(type, payload)
+        handleBackgroundMessage(type, payload, revision)
             .then(result => {
                 sendResponse(result);
             })
@@ -324,9 +332,7 @@ function setupBackgroundListener() {
 
     browserAPI.runtime.onMessage.addListener(messageHandler);
 
-    cleanupFunctions.push(() => {
-        browserAPI.runtime.onMessage.removeListener(messageHandler);
-    });
+    current.add(() => browserAPI.runtime.onMessage.removeListener(messageHandler));
 }
 
 /**
@@ -336,7 +342,7 @@ function setupBackgroundListener() {
  * this event when it sees a difference; we refresh the warm local cache and re-render the
  * affected badges so the two stay in sync.
  */
-function setupAuthoritativeInfoListener() {
+function setupAuthoritativeInfoListener(current) {
     const onAuthoritativeInfo = event => {
         const { screenName, info } = event.detail || {};
         if (!screenName || !info) return;
@@ -351,6 +357,7 @@ function setupAuthoritativeInfoListener() {
         // hovercard's reposition target out from under it. Letting the hovercard finish
         // first keeps the open card from jumping.
         queueMicrotask(() => {
+            if (current.disposed) return;
             const key = screenName.toLowerCase();
             document.querySelectorAll('[data-x-screen-name]').forEach(el => {
                 if ((el.dataset.xScreenName || '').toLowerCase() !== key) return;
@@ -363,10 +370,7 @@ function setupAuthoritativeInfoListener() {
         });
     };
 
-    document.addEventListener('xposed:authoritative-info', onAuthoritativeInfo);
-    cleanupFunctions.push(() => {
-        document.removeEventListener('xposed:authoritative-info', onAuthoritativeInfo);
-    });
+    current.listen(document, 'xposed:authoritative-info', onAuthoritativeInfo);
 }
 
 /**
@@ -375,17 +379,47 @@ function setupAuthoritativeInfoListener() {
  * @param {any} payload - Message payload
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-async function handleBackgroundMessage(type, payload) {
+async function handleBackgroundMessage(type, payload, revision) {
+    if (isCleanedUp) return cancelledResponse();
+    if (type === MESSAGE_TYPES.FILTER_STATISTICS_RESET) {
+        filterStatisticsReporter?.reset(payload?.epoch, payload?.revision ?? revision);
+        return { success: true };
+    }
+    if (type !== MESSAGE_TYPES.SETTINGS_UPDATED && !FILTER_UPDATES.has(type)) {
+        return { success: false, error: 'Unknown message type' };
+    }
+    if (type === MESSAGE_TYPES.SETTINGS_UPDATED) {
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { success: false };
+    } else if (Object.values(STATE_MUTATION_UPDATES).includes(type) && !Array.isArray(payload)) {
+        return { success: false };
+    }
+    if (revision !== undefined && stateSnapshots.snapshot()[type] === revision) return { success: true };
+    if (!stateSnapshots.accept(type, revision)) return { success: true };
+    const source = FILTER_UPDATES.get(type);
+    if (source) {
+        filterSets[source.field] = new Set(payload);
+        syncModalState(source.kind, payload, revision);
+        // Affiliation filters must re-check unknown cached evidence, not treat it as empty.
+        if (source.kind === 'affiliations' && filterSets[source.field].size > 0) {
+            reprocessRowsMissingAffiliation();
+        } else {
+            updateBlockedTweets(currentFilters());
+        }
+        return { success: true };
+    }
     switch (type) {
         case MESSAGE_TYPES.SETTINGS_UPDATED: {
             const prevSettings = { ...settings };
             settings = payload;
+            settingsLoaded = true;
             isEnabled = settings.enabled !== false;
             debugMode = settings.debugMode === true;
             debug('Settings updated:', settings);
+            syncSidebarSettings(settings, revision);
+            syncModalSettings(settings, revision);
             
             if (!isEnabled) {
-                resetProcessedElements();
+                resetProcessedElements(currentFilters());
             } else {
                 // Apply display/blocking toggles live to already-processed tweets, not
                 // only to newly-loaded ones. Clearing the processed markers + re-scanning
@@ -408,69 +442,24 @@ async function handleBackgroundMessage(type, payload) {
                 }
             }
             
-            if (prevSettings.profileEnrichment !== settings.profileEnrichment) {
+            if (prevSettings.profileEnrichment !== settings.profileEnrichment || prevSettings.enabled !== settings.enabled) {
                 syncEnrichmentSetting();
+                if (!isEnabled || settings.profileEnrichment === false) clearProfiles();
+            }
+            if (isEnabled && ['profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation']
+                .some(key => prevSettings[key] !== settings[key])) {
+                updateBlockedTweets(currentFilters());
             }
 
             if (prevSettings.showSidebarBlockerLink !== settings.showSidebarBlockerLink) {
                 if (settings.showSidebarBlockerLink === false) {
                     removeSidebarLink(debug);
                 } else {
-                    injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
+                    injectSidebarLink(settings, debug, filterSets.blockedCountries, filterSets.blockedRegions, sendMessage, MESSAGE_TYPES, getBlockingState);
                 }
             }
             return { success: true };
         }
-
-        case MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED:
-            blockedCountries = new Set(payload);
-            updateBlockedTweets(currentFilters());
-            return { success: true };
-
-        case MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED:
-            blockedRegions = new Set(payload);
-            updateBlockedTweets(currentFilters());
-            return { success: true };
-
-        case MESSAGE_TYPES.BLOCKED_TAGS_UPDATED:
-            blockedTags = new Set(payload);
-            updateBlockedTweets(currentFilters());
-            return { success: true };
-
-        case MESSAGE_TYPES.BLOCKED_BIO_TAGS_UPDATED:
-            blockedBioTags = new Set(payload);
-            updateBlockedTweets(currentFilters());
-            return { success: true };
-
-        case MESSAGE_TYPES.BLOCKED_PCF_UPDATED:
-            blockedPcf = new Set(payload);
-            updateBlockedTweets(currentFilters());
-            return { success: true };
-
-        case MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED:
-            blockedLanguages = new Set(payload);
-            updateBlockedTweets(currentFilters());
-            return { success: true };
-
-        case MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED:
-            blockedAffiliations = new Set(payload);
-            if (blockedAffiliations.size > 0) {
-                // Rows already on screen were resolved before this filter existed, and a
-                // community-cache hit carries no affiliation at all. Re-deriving from that
-                // cache would silently conclude "not affiliated" and block nothing, so
-                // drop the unchecked entries and re-process instead. The background then
-                // re-checks the CLOUD for a richer record (see wantsRicherRecord); it
-                // never spends an X API call, so this can't trip the rate limit.
-                reprocessRowsMissingAffiliation();
-            } else {
-                updateBlockedTweets(currentFilters());
-            }
-            return { success: true };
-
-        case MESSAGE_TYPES.ALLOWED_USERS_UPDATED:
-            allowedUsers = new Set(payload);
-            updateBlockedTweets(currentFilters());
-            return { success: true };
 
         default:
             return { success: false, error: 'Unknown message type' };
@@ -487,13 +476,14 @@ async function handleBackgroundMessage(type, payload) {
  * The flag (a timestamp) is written by evidence-capture just before window.open;
  * the post-share toast would otherwise fire on the now-background origin tab.
  */
-async function maybeShowPasteHint() {
+async function maybeShowPasteHint(current) {
     try {
         const res = await browserAPI.storage.local.get('xpPasteHint');
+        if (current.disposed) return;
         const t = res?.xpPasteHint;
         if (!t || Date.now() - t > 15000) return;
         await browserAPI.storage.local.remove('xpPasteHint');
-        setTimeout(() => {
+        current.delay(() => {
             showToast({
                 title: 'Evidence is on your clipboard',
                 message: 'Press Ctrl / ⌘ + V to attach it to your post, then post.',
@@ -509,14 +499,28 @@ async function maybeShowPasteHint() {
  * Initialize the content script
  */
 async function initialize() {
+    if (session && !session.disposed) return;
+    const current = session = createLifecycle();
+    isCleanedUp = false;
+    settingsLoaded = false;
+    isEnabled = false;
     console.log(`🚀 X-Posed v${VERSION} initializing...`);
+    filterStatisticsReporter = createFilterStatisticsReporter({
+        sendMessage: message => browserAPI.runtime.sendMessage(message),
+        isEnabled: () => !current.disposed && isEnabled,
+        getInfo: name => {
+            const info = userInfoCache.get(name);
+            return { location: effectiveCountry(info, settings.flagFromDevice), device: info?.device };
+        }
+    });
+    setFilterStatisticsReporter(filterStatisticsReporter);
     
     try {
         // Set up listeners BEFORE injecting page script
-        setupPageScriptListener();
-        setupProfileListener();
-        setupBackgroundListener();
-        setupAuthoritativeInfoListener();
+        setupPageScriptListener(current);
+        setupProfileListener(current);
+        setupBackgroundListener(current);
+        setupAuthoritativeInfoListener(current);
         // "Click to show" on a collapsed quote card (issue #32). Must be bound in the
         // capture phase before X's own handlers, so bind it here at document_start.
         setupQuoteReveal();
@@ -525,74 +529,43 @@ async function initialize() {
         csrfToken = getCsrfToken();
         
         // Inject page script for header interception
-        injectPageScript();
+        injectPageScript(current);
 
-        // Load initial settings, blocked countries/regions/tags/languages, and allowlisted accounts
-        const [settingsResponse, blockedResponse, blockedRegionsResponse, blockedTagsResponse, blockedBioTagsResponse, blockedPcfResponse, blockedLanguagesResponse, allowedUsersResponse, blockedAffiliationsResponse] = await Promise.all([
+        // Load every registered filter without maintaining a second positional list.
+        const [settingsResponse, ...responses] = await Promise.all([
             sendMessage({ type: MESSAGE_TYPES.GET_SETTINGS }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_COUNTRIES }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_REGIONS }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_TAGS }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_BIO_TAGS }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_PCF }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_LANGUAGES }),
-            sendMessage({ type: MESSAGE_TYPES.GET_ALLOWED_USERS }),
-            sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS })
+            ...FILTER_SOURCES.map(source => sendMessage({ type: source.get }))
         ]);
-
-        if (settingsResponse?.success) {
+        if (current.disposed) return;
+        if (settingsResponse?.success && stateSnapshots.accept(MESSAGE_TYPES.SETTINGS_UPDATED, settingsResponse.revision)) {
             settings = settingsResponse.data;
+            settingsLoaded = true;
             isEnabled = settings.enabled !== false;
             debugMode = settings.debugMode === true;
         }
-        
+        FILTER_SOURCES.forEach((source, index) => {
+            const response = responses[index];
+            if (response?.success && Array.isArray(response.data) &&
+                stateSnapshots.accept(source.update, response.revision)) {
+                filterSets[source.field] = new Set(response.data);
+            }
+        });
         console.log(`✅ X-Posed initialized (enabled: ${isEnabled}, debug: ${debugMode})`);
+        maybeShowPasteHint(current);
+        // Ready can precede storage loading or follow it. Sending on both events
+        // makes the persisted preference authoritative in either ordering.
+        syncEnrichmentSetting();
 
-        // If we arrived here from a "Share evidence" action, remind the user to paste.
-        maybeShowPasteHint();
-
-        if (blockedResponse?.success) {
-            blockedCountries = new Set(blockedResponse.data);
-        }
-
-        if (blockedRegionsResponse?.success) {
-            blockedRegions = new Set(blockedRegionsResponse.data);
-        }
-
-        if (blockedTagsResponse?.success) {
-            blockedTags = new Set(blockedTagsResponse.data);
-        }
-
-        if (blockedBioTagsResponse?.success) {
-            blockedBioTags = new Set(blockedBioTagsResponse.data);
-        }
-
-        if (blockedPcfResponse?.success) {
-            blockedPcf = new Set(blockedPcfResponse.data);
-        }
-
-        if (blockedLanguagesResponse?.success) {
-            blockedLanguages = new Set(blockedLanguagesResponse.data);
-        }
-
-        if (allowedUsersResponse?.success) {
-            allowedUsers = new Set(allowedUsersResponse.data);
-        }
-
-        if (blockedAffiliationsResponse?.success) {
-            blockedAffiliations = new Set(blockedAffiliationsResponse.data);
-        }
-
-        createMemoizedFunctions();
-
-        // Inject styles
-        injectStyles();
+        createMemoizedFunctions(current);
+        // The manifest is the sole production owner of content stylesheets.
+        // A restored page still has DOM markers from its previous session.
+        resetProcessedElements(currentFilters());
 
         let readyWorkStarted = false;
         const startReadyWork = () => {
-            if (readyWorkStarted) return;
+            if (current.disposed || readyWorkStarted) return;
             if (!document.body) {
-                setTimeout(startReadyWork, 100);
+                current.delay(startReadyWork, 100);
                 return;
             }
 
@@ -607,7 +580,7 @@ async function initialize() {
             }
 
             try {
-                injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
+                injectSidebarLink(settings, debug, filterSets.blockedCountries, filterSets.blockedRegions, sendMessage, MESSAGE_TYPES, getBlockingState);
             } catch (error) {
                 console.error('X-Posed sidebar failed:', error);
             }
@@ -616,9 +589,11 @@ async function initialize() {
         if (document.readyState !== 'loading') {
             startReadyWork();
         } else {
-            document.addEventListener('DOMContentLoaded', startReadyWork, { once: true });
+            current.listen(document, 'DOMContentLoaded', startReadyWork, { once: true });
         }
     } catch (error) {
+        if (current.disposed) return;
+        cleanup();
         console.error('X-Posed initialization failed:', error);
     }
 }
@@ -631,38 +606,27 @@ async function initialize() {
  * Create memoized functions once during initialization
  * These functions close over the module state and are reused
  */
-function createMemoizedFunctions() {
-    // Only create once
-    if (memoizedProcessElementWithContext) return;
-    
-    // Process element function that closes over current state
-    // Note: This references the module-level variables, so it always uses current values
-    memoizedProcessElementWithContext = element => processElement(element, {
-        get blockedCountries() { return blockedCountries; },
-        get blockedRegions() { return blockedRegions; },
-        get blockedTags() { return blockedTags; },
-        get blockedBioTags() { return blockedBioTags; },
-        get blockedPcf() { return blockedPcf; },
-        get blockedLanguages() { return blockedLanguages; },
-        get allowedUsers() { return allowedUsers; },
-        get blockedAffiliations() { return blockedAffiliations; },
+function createMemoizedFunctions(current) {
+    const context = {
         get settings() { return settings; },
         get csrfToken() { return csrfToken; },
-        sendMessage,
-        fetchUserInfoViaPage,
+        sendMessage: message => current.disposed ? Promise.resolve(cancelledResponse()) : sendMessage(message),
+        fetchUserInfoViaPage: name => current.disposed ? Promise.resolve(cancelledResponse()) : fetchUserInfoViaPage(name),
         debug,
         get debugMode() { return debugMode; }
-    });
-    
-    memoizedProcessElementSafe = createProcessElementSafe(memoizedProcessElementWithContext);
-    
-    // These use getters to always return current state values
-    memoizedIsEnabledFn = () => isEnabled;
-    memoizedScanPageFn = () => scanPage(
-        memoizedIsEnabledFn,
-        elements => processElementsBatch(elements, memoizedProcessElementSafe, debug),
-        debug
-    );
+    };
+    for (const source of FILTER_SOURCES) {
+        Object.defineProperty(context, source.field, { enumerable: true, get: () => filterSets[source.field] });
+    }
+    memoizedProcessElementWithContext = element =>
+        current.disposed ? Promise.resolve() : processElement(element, context);
+    const processSafe = createProcessElementSafe(memoizedProcessElementWithContext);
+    const enabled = () => !current.disposed && isEnabled;
+    memoizedProcessElementSafe = processSafe;
+    memoizedIsEnabledFn = enabled;
+    memoizedScanPageFn = () => {
+        if (!current.disposed) scanPage(enabled, elements => processElementsBatch(elements, processSafe, debug), debug);
+    };
 }
 
 // ============================================
@@ -670,44 +634,35 @@ function createMemoizedFunctions() {
 // ============================================
 
 /**
- * Cleanup all resources. Idempotent — safe to invoke more than once
- * (e.g. both 'pagehide' and 'beforeunload' firing).
+ * Cleanup all resources. Safe to invoke more than once for the same page session.
  */
 function cleanup() {
     if (isCleanedUp) return;
+    filterStatisticsReporter?.dispose();
+    filterStatisticsReporter = null;
     isCleanedUp = true;
+    isEnabled = false;
+    settingsLoaded = false;
+    syncEnrichmentSetting();
+    session?.dispose();
 
-    debug('Cleaning up X-Posed resources...');
-
-    // Run local cleanup functions
-    for (const cleanupFn of cleanupFunctions) {
-        try {
-            cleanupFn();
-        } catch (error) {
-            console.error('X-Posed: Cleanup error:', error);
-        }
-    }
-    cleanupFunctions = [];
-
-    // Cleanup modules
+    cleanupEvidenceCapture();
+    closeModal({ restoreFocus: false });
     cleanupUI();
     cleanupObservers();
-
-    // Tear down the hovercard (removes global scroll/resize listeners + cache)
-    try {
-        hovercard.teardown();
-    } catch (error) {
-        console.error('X-Posed: Cleanup error:', error);
-    }
-
-    debug('Cleanup complete');
+    hovercard.teardown();
+    memoizedProcessElementWithContext = null;
+    memoizedProcessElementSafe = null;
+    memoizedIsEnabledFn = null;
+    memoizedScanPageFn = null;
 }
 
-// Handle page unload. 'pagehide' fires reliably on the x.com SPA (and on
-// bfcache navigations) where 'beforeunload' often does not; cleanup() is
-// idempotent so both firing is harmless.
-window.addEventListener('beforeunload', cleanup);
+// pagehide also covers BFCache. A restored document needs a fresh session and
+// current settings, but keeps the already-installed MAIN-world transport.
 window.addEventListener('pagehide', cleanup);
+window.addEventListener('pageshow', event => {
+    if (event.persisted && isCleanedUp) initialize();
+});
 
 // ============================================
 // BOOTSTRAP
@@ -720,28 +675,11 @@ initialize();
 window.__X_POSED_CONTENT__ = {
     version: VERSION,
     scanPage: () => {
-        // Use memoized functions if available, create on-demand otherwise
-        if (memoizedScanPageFn) {
-            memoizedScanPageFn();
-        } else {
-            // Fallback for debugging before initialization
-            createMemoizedFunctions();
-            memoizedScanPageFn();
-        }
+        // Debugging must not resurrect a disposed or not-yet-ready session.
+        memoizedScanPageFn?.();
     },
     // Harvest diagnostics: how many accounts we hold profile data for, and whether the
     // page script was told enrichment is on.
     profiles: () => ({ cached: profileCount(), enabled: settings.profileEnrichment !== false }),
-    getState: () => ({
-        isEnabled,
-        blockedCountries: Array.from(blockedCountries),
-        blockedRegions: Array.from(blockedRegions),
-        blockedTags: Array.from(blockedTags),
-        blockedBioTags: Array.from(blockedBioTags),
-        blockedPcf: Array.from(blockedPcf),
-        blockedLanguages: Array.from(blockedLanguages),
-        allowedUsers: Array.from(allowedUsers),
-        blockedAffiliations: Array.from(blockedAffiliations),
-        settings
-    })
+    getState: () => ({ ...getBlockingState(), isEnabled })
 };

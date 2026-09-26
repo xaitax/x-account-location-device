@@ -1,87 +1,80 @@
 /**
- * Guard: the two AboutAccountQuery parsers must stay in sync.
- *
- * `background/api-client.js` parses X's response for the normal path. `content/page-script.js`
- * parses the SAME response for the in-page fallback used when the background can't
- * authenticate. The page script runs in the MAIN world, so it cannot import from shared/ —
- * the duplication is unavoidable, but silent divergence is not.
- *
- * This has already caused a real bug: page-script emitted `restId` without ever reading
- * the affiliation, so accounts were cached as confirmed-unaffiliated and the affiliation
- * filter stopped working after a page refresh.
- *
- * Run via `npm run check:parsers` (and as part of `npm run lint`).
+ * Guard the shared AboutAccountQuery parser and each caller's metadata projection.
+ * Rollup bundles the shared module into the page script's MAIN-world IIFE, so
+ * neither caller needs its own response mapping. Parse syntax rather than matching
+ * textual object keys: comments, formatting and nested objects cannot fool this check.
+ * Run via `npm run check:parsers` (also included in `npm run lint`).
  */
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseAst } from 'rollup/parseAst';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sharedPath = '../shared/account-response.js';
 
-/** Pull the key names out of the `meta: { ... }` object literal a parser returns. */
-function metaKeys(file, startMarker) {
-    const src = fs.readFileSync(path.join(root, file), 'utf8');
-    const from = src.indexOf(startMarker);
-    if (from === -1) throw new Error(`${file}: could not find ${startMarker}`);
-
-    const metaAt = src.indexOf('meta: {', from);
-    if (metaAt === -1) throw new Error(`${file}: no 'meta: {' after ${startMarker}`);
-
-    // Walk braces so nested objects don't end the block early.
-    let braces = 0;
-    let end = metaAt + 'meta: '.length;
-    for (let i = end; i < src.length; i++) {
-        if (src[i] === '{') braces++;
-        else if (src[i] === '}') {
-            braces--;
-            if (braces === 0) { end = i; break; }
-        }
-    }
-
-    // Collect keys at depth 1 only, so nested objects (e.g. affiliate: { name })
-    // don't leak their fields in. Indentation differs between the two files, so
-    // brace depth is the reliable signal rather than column count.
-    const body = src.slice(src.indexOf('{', metaAt) + 1, end);
-    const keys = new Set();
-    let depth = 0;
-    for (const rawLine of body.split('\n')) {
-        const line = rawLine.trim();
-        if (depth === 0) {
-            // `key: value`, `key,` and a trailing shorthand `key` with no comma.
-            const m = line.match(/^([a-zA-Z][a-zA-Z0-9]*)\s*(?:[,:]|$)/);
-            if (m) keys.add(m[1]);
-        }
-        for (const ch of line) {
-            if (ch === '{' || ch === '[') depth++;
-            else if (ch === '}' || ch === ']') depth--;
-        }
-    }
-    return keys;
+function parse(file) {
+    return parseAst(fs.readFileSync(path.join(root, file), 'utf8'));
 }
 
-const apiKeys = metaKeys('src/background/api-client.js', 'parseResponse');
-const pageKeys = metaKeys('src/content/page-script.js', 'function parseAboutAccount');
-
-// Fields the page-script fallback is allowed to omit: they exist only to enrich the
-// hovercard, which re-fetches through the background anyway.
-const OPTIONAL_IN_PAGE_SCRIPT = new Set([
-    'profileImageShape', 'blueVerified', 'verified', 'identityVerified',
-    'verifiedSinceMsec', 'protected', 'createdCountryAccurate', 'learnMoreUrl'
-]);
-
-// Fields that decide FILTERING must exist in both, or a fallback fetch silently
-// mis-classifies the account.
-const missing = [...apiKeys].filter(k => !pageKeys.has(k) && !OPTIONAL_IN_PAGE_SCRIPT.has(k));
-const extra = [...pageKeys].filter(k => !apiKeys.has(k));
-
-console.log(`api-client   meta keys (${apiKeys.size}): ${[...apiKeys].join(', ')}`);
-console.log(`page-script  meta keys (${pageKeys.size}): ${[...pageKeys].join(', ')}`);
-
-if (missing.length || extra.length) {
-    if (missing.length) console.error(`\n✗ page-script.js is MISSING required meta fields: ${missing.join(', ')}`);
-    if (extra.length) console.error(`\n✗ page-script.js emits unknown meta fields: ${extra.join(', ')}`);
-    console.error('\nBoth parsers read the same X response and must agree on the fields that drive filtering.');
-    process.exit(1);
+function walk(node, visit) {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.type === 'string') visit(node);
+    for (const value of Object.values(node)) {
+        if (Array.isArray(value)) value.forEach(child => walk(child, visit));
+        else if (value && typeof value === 'object') walk(value, visit);
+    }
 }
 
-console.log('\n✓ parsers agree on every filtering-relevant meta field');
+function propertyName(node) {
+    if (!node.computed && node.property?.type === 'Identifier') return node.property.name;
+    if (node.property?.type === 'Literal') return node.property.value;
+    return null;
+}
+
+function checkCaller(file, fullMetadata) {
+    const ast = parse(file);
+    const imports = ast.body.filter(node => node.type === 'ImportDeclaration' && node.source.value === sharedPath);
+    const bindings = imports.flatMap(node => node.specifiers).filter(node =>
+        node.type === 'ImportSpecifier' && node.imported.name === 'parseAccountResponse'
+    );
+    assert.equal(bindings.length, 1, `${file}: import the shared response parser exactly once`);
+    const parserName = bindings[0].local.name;
+    const calls = [];
+    walk(ast, node => {
+        if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === parserName) {
+            calls.push(node);
+        }
+        if (node.type === 'MemberExpression') {
+            assert.ok(!['about_profile', 'user_result_by_screen_name'].includes(propertyName(node)),
+                `${file}: raw AboutAccount response mapping belongs in shared/account-response.js`);
+        }
+    });
+    assert.equal(calls.length, 1, `${file}: delegate to the shared response parser exactly once`);
+    const args = calls[0].arguments;
+    if (fullMetadata) {
+        assert.equal(args.length, 2, `${file}: retain the default full metadata projection`);
+    } else {
+        assert.equal(args.length, 3, `${file}: explicitly request the page metadata subset`);
+        assert.equal(args[2].type, 'ObjectExpression', `${file}: use explicit parser options`);
+        assert.equal(args[2].properties.length, 1, `${file}: keep the page projection explicit`);
+        const option = args[2].properties[0];
+        assert.equal(option.type, 'Property', `${file}: do not spread parser options`);
+        assert.equal(option.computed, false, `${file}: use a literal projection option`);
+        assert.equal(option.key.name || option.key.value, 'fullMetadata');
+        assert.equal(option.value.type, 'Literal');
+        assert.equal(option.value.value, false, `${file}: retain the page metadata subset`);
+    }
+    console.log(`${file}: shared parser, ${fullMetadata ? 'full' : 'page'} metadata projection`);
+}
+
+const shared = parse('src/shared/account-response.js');
+assert.ok(shared.body.some(node => node.type === 'ExportNamedDeclaration' &&
+    node.declaration?.type === 'FunctionDeclaration' && node.declaration.id.name === 'parseAccountResponse'),
+'The shared response parser must remain an exported function');
+assert.ok(!shared.body.some(node => node.type === 'ImportDeclaration'),
+    'The shared response projection must remain independent of browser and transport modules');
+checkCaller('src/background/api-client.js', true);
+checkCaller('src/content/page-script.js', false);
+console.log('AboutAccount response mapping is centralized in both execution paths.');

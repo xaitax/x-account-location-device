@@ -14,51 +14,111 @@
  *    go stale within minutes, so persisting either would be both wrong and a privacy problem.
  *  - Cleared on teardown along with every other content-script cache.
  *
- * At the configured limits the worst case is roughly 500 × ~550 B ≈ 270 KB.
+ * Each source's host list and text length is capped before processing. Storage stays
+ * bounded even when a relayed record is malformed, and no X response objects are kept.
  */
 
 import { LRUCache } from '../shared/lru-cache.js';
-import { PROFILE_CACHE_CONFIG, normalizePcfLabel } from '../shared/constants.js';
+import { normalizePcfLabel } from '../shared/constants.js';
+import { PROFILE_LIMITS, isProfileUsername, normalizeProfileHosts, normalizeProfileUrls } from '../shared/profile-data.js';
 
-/** screenName (lowercase) -> { bio, pcf, followers, following, tweets, media } */
-const profiles = new LRUCache(PROFILE_CACHE_CONFIG.MAX_ENTRIES);
+/** Lowercase username -> bounded primitive profile fields; missing means unknown. */
+const profiles = new LRUCache(PROFILE_LIMITS.MAX_ENTRIES);
 
 /**
- * Coerce to a non-negative integer, or null. Counts arrive as numbers already, but a
+ * Coerce to a non-negative integer, or undefined. Counts arrive as numbers already, but a
  * shape change upstream shouldn't put a string or an object into the cache.
  * @param {any} value
- * @returns {number|null}
+ * @returns {number|undefined}
  */
 function toCount(value) {
-    return Number.isInteger(value) && value >= 0 ? value : null;
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 /**
- * Store one harvested profile. Values are copied into a fresh object of primitives —
- * see the memory contract above.
+ * Merge known fields from a harvested profile. Omitted/invalid fields preserve the
+ * previous value; explicit empty strings/arrays remove old matching evidence.
+ * Null link fields invalidate an observed source whose destinations are now unknown.
+ * Changed source text invalidates its old hosts when replacement hosts are unknown.
+ * Returns whether filter-relevant data changed, so count-only updates need no DOM pass.
  * @param {string} screenName
- * @param {{bio?: string, pcf?: string, followers?: number, following?: number, tweets?: number, media?: number}} data
+ * @param {Object} data - optional bio/location/host and exact URL lists/label/counts
+ * @returns {boolean}
  */
 export function setProfile(screenName, data) {
-    if (!screenName || typeof screenName !== 'string' || !data) return;
+    if (!isProfileUsername(screenName) || !data || typeof data !== 'object' || Array.isArray(data)) return false;
+    const key = screenName.toLowerCase();
+    const previous = profiles.get(key) || {};
+    const next = { ...previous };
+    let changed = false;
+    let filtersChanged = false;
+    const assign = (field, value, affectsFilters = true) => {
+        if (value === undefined) return;
+        const old = previous[field];
+        const equal = Array.isArray(value)
+            ? Array.isArray(old) && old.length === value.length && value.every((host, i) => host === old[i])
+            : old === value;
+        if (equal) return;
+        next[field] = value;
+        changed = true;
+        if (affectsFilters) filtersChanged = true;
+    };
 
-    const bio = typeof data.bio === 'string'
-        ? data.bio.slice(0, PROFILE_CACHE_CONFIG.MAX_BIO_LENGTH)
-        : null;
-
-    profiles.set(screenName.toLowerCase(), {
-        bio: bio || null,
-        pcf: normalizePcfLabel(data.pcf) || null,
-        followers: toCount(data.followers),
-        following: toCount(data.following),
-        tweets: toCount(data.tweets),
-        media: toCount(data.media)
-    });
+    const forget = field => {
+        if (!Object.hasOwn(next, field)) return;
+        delete next[field];
+        changed = filtersChanged = true;
+    };
+    const linkPatch = {};
+    const sources = [
+        ['websiteHosts', 'websiteUrls'], ['bioHosts', 'bioUrls'], ['locationHosts', 'locationUrls']
+    ];
+    for (const [hosts, urls] of sources) {
+        if (Object.hasOwn(data, hosts)) linkPatch[hosts] = normalizeProfileHosts(data[hosts]);
+        if (Object.hasOwn(data, urls)) linkPatch[urls] = normalizeProfileUrls(data[urls]);
+        if (Object.hasOwn(data, hosts) && data[hosts] === null) {
+            forget(hosts);
+            if (linkPatch[urls] === undefined) forget(urls);
+        }
+        if (Object.hasOwn(data, urls) && data[urls] === null) {
+            forget(urls);
+            if (linkPatch[hosts] === undefined) forget(hosts);
+        }
+        // A host-only update cannot keep an old channel/page URL alive, or vice versa.
+        if (linkPatch[hosts] !== undefined && linkPatch[urls] === undefined) forget(urls);
+        if (linkPatch[urls] !== undefined && linkPatch[hosts] === undefined) forget(hosts);
+    }
+    for (const [field, limit, evidence] of [
+        ['bio', PROFILE_LIMITS.MAX_BIO_LENGTH, ['bioHosts', 'bioUrls']],
+        ['location', PROFILE_LIMITS.MAX_LOCATION_LENGTH, ['locationHosts', 'locationUrls']]
+    ]) {
+        if (Object.hasOwn(data, field) && typeof data[field] === 'string') {
+            const text = data[field].slice(0, limit);
+            if (text !== previous[field]) {
+                for (const source of evidence) {
+                    if (linkPatch[source] === undefined) forget(source);
+                }
+            }
+            assign(field, text);
+        }
+    }
+    for (const [field, value] of Object.entries(linkPatch)) {
+        assign(field, value);
+    }
+    if (Object.hasOwn(data, 'pcf') && typeof data.pcf === 'string' && data.pcf.length <= 32) {
+        const label = normalizePcfLabel(data.pcf);
+        if (['', 'parody', 'commentary', 'fan'].includes(label)) assign('pcf', label);
+    }
+    for (const field of ['followers', 'following', 'tweets', 'media']) {
+        if (Object.hasOwn(data, field)) assign(field, toCount(data[field]), false);
+    }
+    if (changed) profiles.set(key, next);
+    return filtersChanged;
 }
 
 /**
  * @param {string|null|undefined} screenName
- * @returns {{bio: string|null, pcf: string|null, followers: number|null, following: number|null, tweets: number|null, media: number|null}|null}
+ * @returns {Object|null} Known profile fields, or null if not observed this session.
  */
 export function getProfile(screenName) {
     if (!screenName || typeof screenName !== 'string') return null;

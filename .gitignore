@@ -1,4 +1,5 @@
 package-lock.json
+!/extension/package-lock.json
 
 # Local secrets / developer-specific configs
 cloud-server/.dev.vars
@@ -26,3 +27,6 @@ CLAUDE.md
 /screenshots/marketing/render.mjs
 /screenshots/marketing/README.md
 /screenshots/marketing/prototype-*
+
+# Local-only design exploration and temporary canvas files
+/.superdesign/

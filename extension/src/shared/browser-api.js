@@ -133,6 +133,18 @@ const browserAPI = (() => {
                     });
                 }
             },
+            commands: chrome.commands ? {
+                onCommand: chrome.commands.onCommand,
+                getAll: () => new Promise((resolve, reject) => {
+                    chrome.commands.getAll(commands => {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error(chrome.runtime.lastError.message));
+                        } else {
+                            resolve(commands);
+                        }
+                    });
+                })
+            } : undefined,
             scripting: chrome.scripting ? {
                 executeScript: details => {
                     return new Promise((resolve, reject) => {
@@ -173,6 +185,10 @@ const browserAPI = (() => {
             query: () => Promise.resolve([]),
             sendMessage: () => Promise.resolve(),
             create: () => Promise.resolve()
+        },
+        commands: {
+            onCommand: { addListener: () => {} },
+            getAll: () => Promise.resolve([])
         }
     };
 })();

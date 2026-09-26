@@ -10,6 +10,15 @@ import { LRUCache } from '../shared/lru-cache.js';
 import { getProfile } from './profile-cache.js';
 import { isFocalTweet, ownPostId } from './post-identity.js';
 import { hasGovernmentBadge, VERIFIED_BADGE_SELECTOR } from './government-badge.js';
+import { findBlockedDomain, findBlockedExactUrl } from '../shared/domain-utils.js';
+import { dialogIcon } from './dialog-icons.js';
+
+let filterStatisticsReporter = null;
+
+/** The content session owns reporting. Standalone observers perform no messaging. */
+export function setFilterStatisticsReporter(reporter) {
+    filterStatisticsReporter = reporter;
+}
 
 /**
  * Resolve the country used for the flag, the xCountry dataset, and country/region
@@ -21,7 +30,7 @@ import { hasGovernmentBadge, VERIFIED_BADGE_SELECTOR } from './government-badge.
  * @param {boolean} flagFromDevice
  * @returns {string|null}
  */
-function effectiveCountry(info, flagFromDevice) {
+export function effectiveCountry(info, flagFromDevice) {
     if (flagFromDevice && info?.device) {
         const deviceCountry = getDeviceCountry(info.device);
         if (deviceCountry) return deviceCountry;
@@ -29,32 +38,123 @@ function effectiveCountry(info, flagFromDevice) {
     return info?.location || null;
 }
 
+/** The reader and Always Show accounts are exempt from every filter. */
+function isAuthorExempt(screenName, allowedUsers, loggedInUser = getLoggedInUsername()) {
+    const author = screenName?.toLowerCase();
+    return !!author && (author === loggedInUser?.toLowerCase() || allowedUsers?.has(author) === true);
+}
+
+/** Assemble the same author verdict for first resolution and live filter updates. */
+function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUserCell,
+    loggedInUser = getLoggedInUsername()) {
+    const { blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedLinks,
+        blockedPcf, blockedAffiliations, allowedUsers, settings } = filters;
+    const isExempt = isAuthorExempt(screenName, allowedUsers, loggedInUser);
+    const isQuote = isInsideQuoteTweet(element, tweet);
+    const location = canonicalCountry(element.dataset.xCountry);
+    const profile = settings.profileEnrichment === false ? null : getProfile(screenName);
+    const reasons = resolveBlockReasons({
+        isExempt,
+        isBlockedCountry: location !== '' && blockedCountries.has(location),
+        isBlockedRegion: location !== '' && !!blockedRegions?.has(location),
+        isTagBlocked: blockedTags?.size > 0 && hasBlockedTag(extractDisplayName(element), blockedTags),
+        isBioBlocked: hasBlockedBio(profile, blockedBioTags, settings),
+        isLinkBlocked: hasBlockedLink(profile, blockedLinks, settings),
+        isLabelBlocked: hasBlockedAccountLabel(element, tweet, blockedPcf, profile),
+        isAffiliationBlocked: hasBlockedAffiliation(info?.meta, blockedAffiliations)
+    });
+    return {
+        isListBlocked: reasons.length > 0,
+        // A quoted account's location warning must not hide the quoting author's post.
+        isVpnHidden: !isQuote && info?.locationAccurate === false && settings.showVpnUsers === false && !isExempt,
+        highlightMode: settings.highlightBlockedTweets === true,
+        isQuote,
+        neverHide: isUserCell,
+        reasons
+    };
+}
+
 /**
- * Which filter blocked this account, or '' if none did.
- *
- * The verdict used to be computed as one OR'd boolean in two separate places
- * (applyInfoToElement and runUpdateBlockedTweets), which meant the two could drift
- * apart and the reason was thrown away the moment it was known. Both now call this,
- * so they cannot disagree, and the surviving reason is what labels a collapsed quote
- * card (issue #42).
- *
- * Order is precedence, not importance: an account can trip several filters at once and
- * the reader only sees one label, so the most concrete reason wins. Location first (it
- * is what this extension is for), then the text filters, then affiliation.
- *
- * @param {Object} r - reason flags, each already resolved by the caller
- * @returns {'country'|'region'|'tag'|'bio'|'label'|'affiliation'|''}
+ * Ordered filter categories, shared by initial resolution and live updates.
+ * Presentation never needs to parse a comma-separated verdict or profile text.
  */
-function resolveBlockReason({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
-    isBioBlocked, isLabelBlocked, isAffiliationBlocked }) {
-    if (isExempt) return '';
-    if (isBlockedCountry) return 'country';
-    if (isBlockedRegion) return 'region';
-    if (isTagBlocked) return 'tag';
-    if (isBioBlocked) return 'bio';
-    if (isLabelBlocked) return 'label';
-    if (isAffiliationBlocked) return 'affiliation';
-    return '';
+function resolveBlockReasons({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
+    isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked }) {
+    if (isExempt) return [];
+    const reasons = [];
+    if (isBlockedCountry) reasons.push('country');
+    if (isBlockedRegion) reasons.push('region');
+    if (isTagBlocked) reasons.push('tag');
+    if (isBioBlocked) reasons.push('bio');
+    if (isLinkBlocked) reasons.push('link');
+    if (isLabelBlocked) reasons.push('label');
+    if (isAffiliationBlocked) reasons.push('affiliation');
+    return reasons;
+}
+
+const BLOCK_REASON_LABELS = {
+    country: 'Country', region: 'Region', tag: 'Display name', bio: 'Bio or profile location',
+    link: 'Linked domain / URL', label: 'Account label', affiliation: 'Affiliation'
+};
+const QUOTE_PLACEHOLDER_CLASS = 'x-quote-placeholder';
+let quotePlaceholders = new WeakMap();
+
+function clearQuotePlaceholder(element) {
+    const placeholder = quotePlaceholders.get(element);
+    if (!placeholder) return;
+    placeholder.remove();
+    quotePlaceholders.delete(element);
+}
+
+/** Only our own button is managed; X retains ownership of the quoted content. */
+function syncQuotePlaceholder(element, reasons) {
+    const card = element.closest('div[role="link"][tabindex="0"]');
+    let placeholder = quotePlaceholders.get(element);
+    if (placeholder && placeholder.parentElement !== card) {
+        clearQuotePlaceholder(element);
+        placeholder = null;
+    }
+    // X can replace just the author node while retaining the card and our button.
+    // Retire buttons owned by the old node before creating or clearing this one.
+    if (card) {
+        for (const child of card.children) {
+            if (child.classList.contains(QUOTE_PLACEHOLDER_CLASS) && child !== placeholder) child.remove();
+        }
+    }
+    if (!card || element.dataset.xQuoteBlock !== 'hide') {
+        clearQuotePlaceholder(element);
+        return;
+    }
+    if (!placeholder || !placeholder.isConnected) {
+        placeholder = document.createElement('button');
+        placeholder.type = 'button';
+        placeholder.className = QUOTE_PLACEHOLDER_CLASS;
+        const icon = dialogIcon('shield', 18);
+        icon.classList.add(`${QUOTE_PLACEHOLDER_CLASS}-icon`);
+        const copy = document.createElement('span');
+        copy.className = `${QUOTE_PLACEHOLDER_CLASS}-copy`;
+        for (const [suffix, text] of [
+            ['title', 'Quoted post hidden'], ['reasons', '']
+        ]) {
+            const span = document.createElement('span');
+            span.className = `${QUOTE_PLACEHOLDER_CLASS}-${suffix}`;
+            span.textContent = text;
+            copy.appendChild(span);
+        }
+        const action = document.createElement('span');
+        action.className = `${QUOTE_PLACEHOLDER_CLASS}-action`;
+        action.append('Show quoted post', dialogIcon('chevronRight', 14));
+        placeholder.append(icon, copy, action);
+        card.prepend(placeholder);
+        quotePlaceholders.set(element, placeholder);
+    }
+    const labels = reasons.map(reason => BLOCK_REASON_LABELS[reason]).filter(Boolean);
+    const summary = labels.slice(0, 2).join(' · ') + (labels.length > 2 ? ` · +${labels.length - 2} more` : '');
+    const reasonText = placeholder.querySelector(`.${QUOTE_PLACEHOLDER_CLASS}-reasons`);
+    if (reasonText.textContent !== summary) reasonText.textContent = summary;
+    const description = labels.length ? `Hidden because: ${labels.join(', ')}.` : 'Matches your filters.';
+    placeholder.setAttribute('aria-label', `Show quoted post. ${description}`);
+    placeholder.title = description;
 }
 
 /**
@@ -72,10 +172,10 @@ function resolveBlockReason({ isExempt, isBlockedCountry, isBlockedRegion, isTag
  * re-derive pass (runUpdateBlockedTweets) so the two can never disagree about a row.
  * @param {HTMLElement} element
  * @param {HTMLElement|null} tweet
- * @param {{isListBlocked: boolean, isVpnHidden: boolean, highlightMode: boolean, isQuote?: boolean, neverHide?: boolean, reason?: string}} state
+ * @param {{isListBlocked: boolean, isVpnHidden: boolean, highlightMode: boolean, isQuote?: boolean, neverHide?: boolean, reasons?: string[]}} state
  * @returns {{hide: boolean, highlight: boolean}}
  */
-function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode, isQuote = false, neverHide = false, reason = '' }) {
+function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlightMode, isQuote = false, neverHide = false, reasons = [] }) {
     // A quoted author lives INSIDE someone else's tweet, so it must never decide the
     // fate of the row (issue #32) — the article-level `:has([data-x-block="hide"])`
     // rule can't tell a quoted marker from the main author's. Mark the quoted username
@@ -92,8 +192,10 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
             // Names the filter on the collapsed card's placeholder (issue #42). Written
             // alongside the verdict it belongs to, and cleared with it, so a row that
             // stops being blocked — or gets recycled — can never keep a stale reason.
-            element.dataset.xQuoteReason = isListBlocked ? reason : '';
+            element.dataset.xQuoteReason = isListBlocked ? reasons[0] || '' : '';
         }
+        syncQuotePlaceholder(element, reasons);
+        filterStatisticsReporter?.schedule(tweet);
         // Always report hide:false: the row stays, and the badge is still built so it's
         // already in place inside the card when the reader reveals it.
         return { hide: false, highlight: quoteHighlight };
@@ -101,6 +203,7 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
 
     delete element.dataset.xQuoteBlock;
     delete element.dataset.xQuoteReason;
+    clearQuotePlaceholder(element);
 
     // People lists (Followers, Verified followers, Following) only ever FLAG a row.
     // Removing someone from your own follower list hides the information you opened
@@ -118,6 +221,7 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
         tweet.classList.toggle('x-tweet-highlighted', highlight);
     }
     element.dataset.xBlock = hide ? 'hide' : (highlight ? 'highlight' : '');
+    filterStatisticsReporter?.schedule(tweet);
 
     return { hide, highlight };
 }
@@ -136,65 +240,24 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
  * @param {Object} opts.settings
  * @param {boolean} opts.isUserCell
  * @param {HTMLElement|null} opts.tweet - the already-resolved tweet article
- * @param {boolean} [opts.tagBlocked] - display-name tag verdict computed in processElement
  * @param {Function} [opts.debug]
  * @param {string|null} [opts.csrfToken]
  */
 function applyInfoToElement(element, screenName, info, opts) {
-    const { blockedCountries, blockedRegions, blockedAffiliations, blockedBioTags, blockedPcf,
-        allowedUsers, settings, isUserCell, tweet, debug, csrfToken, tagBlocked } = opts;
+    const { settings, isUserCell, tweet, debug, csrfToken } = opts;
 
     const effCountry = effectiveCountry(info, settings.flagFromDevice);
     element.dataset.xCountry = effCountry || '';
 
-    const loggedInUser = getLoggedInUsername();
-    const isSelf = loggedInUser && screenName.toLowerCase() === loggedInUser.toLowerCase();
-    // Allowlisted ("always show") accounts are exempt from every filter, exactly like
-    // your own account — so treat them as isExempt everywhere a block is decided (issue #26).
-    const isExempt = isSelf || (allowedUsers && allowedUsers.has(screenName.toLowerCase()));
-
-    // Resolve the full block decision from every reason at once, then apply it in one
-    // authoritative pass (set what applies, clear what doesn't).
-    // Fold aliases ("Macedonia" → "north macedonia") so a location X words differently
-    // than the picker still matches the blocked set.
-    const locationLower = canonicalCountry(effCountry);
-    const isQuote = isInsideQuoteTweet(element, tweet);
-    // Who-they-are filters (country/region/tag) apply to quoted authors too — they just
-    // collapse the quote card instead of the row (issue #32).
-    const affiliationBlocked = hasBlockedAffiliation(info?.meta, blockedAffiliations);
-    // Bio and account label come from the profile data X already sent with the timeline,
-    // so neither costs a lookup — see profile-cache.js.
-    const bioBlocked = hasBlockedBio(screenName, blockedBioTags);
-    const labelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
-    const blockReason = resolveBlockReason({
-        isExempt,
-        isBlockedCountry: locationLower !== '' && blockedCountries.has(locationLower),
-        isBlockedRegion: locationLower !== '' && !!blockedRegions && blockedRegions.has(locationLower),
-        isTagBlocked: tagBlocked,
-        isBioBlocked: bioBlocked,
-        isLabelBlocked: labelBlocked,
-        isAffiliationBlocked: affiliationBlocked
-    });
-    const matchesBlockList = blockReason !== '';
-    // Location uncertainty is filtered only for the MAIN author: a quoted account
-    // must never hide the quoting user's own post.
-    const isVpnHidden =
-        !isQuote && info?.locationAccurate === false && settings.showVpnUsers === false && !isExempt;
-
-    const { hide } = applyBlockState(element, tweet, {
-        isListBlocked: matchesBlockList,
-        isVpnHidden,
-        highlightMode: settings.highlightBlockedTweets === true,
-        isQuote,
-        neverHide: isUserCell,
-        reason: blockReason
-    });
+    const { hide } = applyBlockState(element, tweet,
+        resolveAuthorBlockState(element, screenName, info, opts, tweet, isUserCell));
 
     if (hide) return; // hidden row → don't build a badge
 
     if (info?.location || info?.device) {
         try {
-            createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken, effCountry);
+            createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken, effCountry,
+                extractDisplayName(element));
         } catch (badgeError) {
             if (debug) debug(`Badge creation error for @${screenName}: ${badgeError.message}`);
         }
@@ -285,17 +348,14 @@ function getMainAuthorScreenName(tweet) {
 }
 
 /**
- * Is a tweet's main author on the "always show" allowlist (issue #26)? Allowlisted
- * accounts are exempt from every filter, so this short-circuits language blocking
- * the same way isSelf/isAllowed exempts the per-author country/region/tag/VPN blocks.
+ * Is the main author the reader or an Always Show account? Use the same exemption
+ * for language and per-author rules so the reader's own posts cannot be hidden.
  * @param {HTMLElement} tweet
  * @param {Set<string>} allowedUsers - lowercase allowlisted handles
  * @returns {boolean}
  */
-function isAuthorAllowlisted(tweet, allowedUsers) {
-    if (!allowedUsers || allowedUsers.size === 0) return false;
-    const author = getMainAuthorScreenName(tweet);
-    return author !== '' && allowedUsers.has(author);
+function isMainAuthorExempt(tweet, allowedUsers) {
+    return isAuthorExempt(getMainAuthorScreenName(tweet), allowedUsers);
 }
 
 /**
@@ -303,7 +363,7 @@ function isAuthorAllowlisted(tweet, allowedUsers) {
  * article-level marker (data-x-lang-block) from the per-author data-x-block, so
  * the two filters compose in CSS instead of clobbering each other's state. The
  * marker honors the hide-vs-highlight preference; 'und' (undetermined —
- * emoji/link-only) is never blocked, and an allowlisted author is never blocked.
+ * emoji/link-only) is never blocked, and exempt authors are never blocked.
  * @param {HTMLElement|null} tweet - the article element
  * @param {Set<string>} blockedLanguages - lowercase primary subtags
  * @param {Object} settings
@@ -313,7 +373,7 @@ function applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers) {
     if (!tweet) return;
 
     let blocked = false;
-    if (blockedLanguages && blockedLanguages.size > 0 && !isAuthorAllowlisted(tweet, allowedUsers)) {
+    if (blockedLanguages && blockedLanguages.size > 0 && !isMainAuthorExempt(tweet, allowedUsers)) {
         const lang = getMainTweetLanguage(tweet);
         if (lang && lang !== 'und' && blockedLanguages.has(lang)) {
             blocked = true;
@@ -326,6 +386,7 @@ function applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers) {
     } else if (tweet.dataset.xLangBlock) {
         delete tweet.dataset.xLangBlock;
     }
+    filterStatisticsReporter?.schedule(tweet);
 }
 
 // ============================================
@@ -346,6 +407,7 @@ export const userInfoCache = new LRUCache(USER_INFO_CACHE_MAX_SIZE);
 
 let observer = null;
 let intersectionObserver = null;
+let liveProcessElementSafe = null;
 const pendingVisibility = new Map();
 const PENDING_VISIBILITY_MAX_SIZE = 500;
 
@@ -353,6 +415,8 @@ const PENDING_VISIBILITY_MAX_SIZE = 500;
 // Map<screenName, Promise> for deduplication and waiting on in-flight requests
 const PROCESSING_QUEUE_MAX_SIZE = 200;
 export const processingQueue = new Map();
+let processingGeneration = 0;
+const processingCleanups = new Set();
 
 // Each processing attempt owns its row until another attempt or a settings reset
 // replaces it. Network replies may arrive after X has recycled the same DOM node.
@@ -697,27 +761,36 @@ function getAccountTypeTokens(element, tweet) {
 }
 
 /**
- * Does this account's BIO contain a blocked term?
+ * Does the bio (or explicitly selected free-text location) contain a blocked term?
  *
  * The bio comes from the profile data X already ships with its own timeline responses
  * (see profile-cache.js), so this costs no lookup. Absent profile data simply means "not
  * blocked" — never a guess.
- * @param {string|null|undefined} screenName
+ * @param {Object|null} profile
  * @param {Set<string>|null} blockedBioTags - lowercase terms
  * @returns {boolean}
  */
-function hasBlockedBio(screenName, blockedBioTags) {
-    if (!screenName || !blockedBioTags || blockedBioTags.size === 0) return false;
-
-    const bio = getProfile(screenName)?.bio;
-    if (!bio) return false;
-
-    const haystack = bio.toLowerCase();
+function hasBlockedBio(profile, blockedBioTags, settings) {
+    if (!profile || !blockedBioTags?.size) return false;
+    const bio = profile.bio?.toLowerCase() || '';
+    const location = settings.bioTagsMatchLocation === true ? profile.location?.toLowerCase() || '' : '';
     for (const term of blockedBioTags) {
         const needle = term.trim().toLowerCase();
-        if (needle && haystack.includes(needle)) return true;
+        if (needle && (bio.includes(needle) || location.includes(needle))) return true;
     }
     return false;
+}
+
+function hasBlockedLink(profile, blockedLinks, settings) {
+    if (!profile || !blockedLinks?.size) return false;
+    return findBlockedDomain(profile.websiteHosts, blockedLinks) !== null ||
+        findBlockedDomain(profile.bioHosts, blockedLinks) !== null ||
+        findBlockedExactUrl(profile.websiteUrls, blockedLinks) !== null ||
+        findBlockedExactUrl(profile.bioUrls, blockedLinks) !== null ||
+        (settings.linksMatchLocation === true && (
+            findBlockedDomain(profile.locationHosts, blockedLinks) !== null ||
+            findBlockedExactUrl(profile.locationUrls, blockedLinks) !== null
+        ));
 }
 
 /**
@@ -729,11 +802,11 @@ function hasBlockedBio(screenName, blockedBioTags) {
  * response has landed.
  * @param {HTMLElement} element
  * @param {HTMLElement|null} tweet
- * @param {string|null|undefined} screenName
  * @param {Set<string>|null} blockedPcf - lowercase label values
+ * @param {Object|null} profile
  * @returns {boolean}
  */
-function hasBlockedAccountLabel(element, tweet, screenName, blockedPcf) {
+function hasBlockedAccountLabel(element, tweet, blockedPcf, profile) {
     if (!blockedPcf || blockedPcf.size === 0) return false;
 
     // Grey verification is independent of the PCF enum. A parody label must not
@@ -741,7 +814,7 @@ function hasBlockedAccountLabel(element, tweet, screenName, blockedPcf) {
     // stand in for a government badge. No extra lookup is required (#48).
     if (blockedPcf.has(GOVERNMENT_LABEL) && hasGovernmentBadge(element)) return true;
     if (blockedPcf.size === 1 && blockedPcf.has(GOVERNMENT_LABEL)) return false;
-    const structured = getProfile(screenName)?.pcf;
+    const structured = profile?.pcf;
     if (structured) return structured !== GOVERNMENT_LABEL && blockedPcf.has(structured);
 
     const tokens = getAccountTypeTokens(element, tweet);
@@ -893,6 +966,7 @@ export function queueForVisibility(element, processElementSafe, debug) {
  */
 export function startObserver(isEnabled, processElementSafe, scanPage, debug, getFilters) {
     if (observer) return;
+    liveProcessElementSafe = processElementSafe;
     
     // Start Intersection Observer
     startIntersectionObserver(processElementSafe, debug);
@@ -954,6 +1028,11 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug, ge
                     scheduleContextRefresh();
                 }
                 continue;
+            }
+            if (mutation.target.closest?.(`.${QUOTE_PLACEHOLDER_CLASS}`)) continue;
+            if (Array.from(mutation.removedNodes).some(node => node.classList?.contains(QUOTE_PLACEHOLDER_CLASS)) &&
+                mutation.target.querySelector?.('[data-x-quote-block="hide"]')) {
+                scheduleContextRefresh();
             }
             for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
                 if (node.nodeType === Node.ELEMENT_NODE &&
@@ -1088,6 +1167,7 @@ export async function processElement(element, {
     blockedRegions,
     blockedTags,
     blockedBioTags,
+    blockedLinks,
     blockedPcf,
     blockedLanguages,
     blockedAffiliations,
@@ -1099,7 +1179,9 @@ export async function processElement(element, {
     debug,
     debugMode
 }) {
-    if (!element.isConnected) return;
+    if (settings.enabled === false || !element.isConnected) return;
+    const generation = processingGeneration;
+    const isCurrentProcessing = () => generation === processingGeneration;
     const isUserCell = element.matches && element.matches(SELECTORS.USER_CELL);
     
     const screenName = isUserCell
@@ -1148,7 +1230,7 @@ export async function processElement(element, {
     elementTweetContexts.set(element, tweet);
     elementQuoteContexts.set(element, isQuoteAtStart);
     const isCurrentElement = () => {
-        if (!element.isConnected || elementProcessingTokens.get(element) !== processingToken ||
+        if (!isCurrentProcessing() || !element.isConnected || elementProcessingTokens.get(element) !== processingToken ||
             element.dataset.xScreenName !== screenName || element.closest(SELECTORS.TWEET) !== tweet ||
             isInsideQuoteTweet(element, tweet) !== isQuoteAtStart) return false;
         const currentName = isUserCell ? extractUsernameFromUserCell(element) : extractUsername(element);
@@ -1160,7 +1242,7 @@ export async function processElement(element, {
     // Language blocking is a per-tweet signal (X's own lang tag), independent of the
     // author lookup — apply it eagerly here, before any early return below, so
     // media/API state can't gate it. Marks the article via a separate data-x-lang-block.
-    // (Skips allowlisted authors — data-x-screen-name is already set above.)
+    // Self and Always Show exemptions can use the screen name already set above.
     applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
 
     // In HIDE mode a language-blocked article is fully hidden by CSS, so skip the badge
@@ -1180,6 +1262,7 @@ export async function processElement(element, {
         blockedLanguages,
         blockedAffiliations,
         blockedBioTags,
+        blockedLinks,
         blockedPcf,
         allowedUsers,
         settings,
@@ -1194,12 +1277,9 @@ export async function processElement(element, {
         const currentOpts = latestFilterSnapshot && filterRevision !== startedFilterRevision
             ? { ...applyOpts, ...latestFilterSnapshot }
             : applyOpts;
+        if (currentOpts.settings.enabled === false) return;
         applyLanguageBlock(tweet, currentOpts.blockedLanguages, currentOpts.settings, currentOpts.allowedUsers);
-        applyInfoToElement(element, screenName, info, {
-            ...currentOpts,
-            tagBlocked: currentOpts.blockedTags?.size > 0 &&
-                hasBlockedTag(extractDisplayName(element), currentOpts.blockedTags)
-        });
+        applyInfoToElement(element, screenName, info, currentOpts);
     };
 
     // Name/bio/label filters already have their inputs, even if location is unknown,
@@ -1226,6 +1306,7 @@ export async function processElement(element, {
                 // Ignore errors - we'll check cache below
             }
         }
+        if (!isCurrentProcessing()) return;
         
         // The row may have changed while waiting; applyCurrentInfo checks ownership.
         applyCurrentInfo(userInfoCache.get(screenName) || null);
@@ -1249,17 +1330,25 @@ export async function processElement(element, {
     }
     
     processingQueue.set(screenName, processingPromise);
-    
-    const processingTimeout = setTimeout(() => {
-        if (processingQueue.get(screenName) === processingPromise) {
-            if (debug) debug(`Cleaning up stale processing entry for @${screenName}`);
-            processingQueue.delete(screenName);
-            resolveProcessing();
-        }
-    }, 30000);
-    
-    // Show shimmer in debug mode
     let shimmer = null;
+    let processingTimeout = null;
+    let processingFinished = false;
+    const finishProcessing = result => {
+        if (processingFinished) return;
+        processingFinished = true;
+        clearTimeout(processingTimeout);
+        processingCleanups.delete(finishProcessing);
+        if (shimmer) shimmer.remove();
+        if (processingQueue.get(screenName) === processingPromise) processingQueue.delete(screenName);
+        resolveProcessing(result);
+    };
+    processingCleanups.add(finishProcessing);
+    processingTimeout = setTimeout(() => {
+        if (debug) debug(`Cleaning up stale processing entry for @${screenName}`);
+        finishProcessing();
+    }, 30000);
+
+    // Show shimmer in debug mode
     if (debugMode) {
         shimmer = document.createElement('span');
         shimmer.className = CSS_CLASSES.FLAG_SHIMMER;
@@ -1276,12 +1365,14 @@ export async function processElement(element, {
             type: MESSAGE_TYPES.FETCH_USER_INFO,
             payload: { screenName, csrfToken }
         });
+        if (!isCurrentProcessing()) return;
 
         // Issue #14: if the background can't authenticate (e.g. a Firefox container
         // cookie mismatch), retry the lookup from the PAGE context — which uses the
         // page's own correct session — then cache the result via the background.
         if ((response?.code === 'UNAUTHORIZED' || response?.code === 'NO_HEADERS') && fetchUserInfoViaPage) {
             const pageResponse = await fetchUserInfoViaPage(screenName);
+            if (!isCurrentProcessing()) return;
             // Keep the page's actual failure code too, so a rate limit or timeout
             // isn't mislabeled as the background's original authentication failure.
             if (pageResponse) response = { ...pageResponse, source: 'page' };
@@ -1290,6 +1381,7 @@ export async function processElement(element, {
                     type: MESSAGE_TYPES.SET_CACHE,
                     payload: { screenName, data: pageResponse.data }
                 });
+                if (!isCurrentProcessing()) return;
             }
         }
 
@@ -1360,6 +1452,7 @@ export async function processElement(element, {
 
         applyCurrentInfo(info);
     } catch (error) {
+        if (!isCurrentProcessing()) return;
         // Issue #16: a thrown error (e.g. messaging/network blip) is transient, so we
         // do NOT negative-cache it — the user is retried on a later scan rather than
         // being blanked for the session.
@@ -1368,10 +1461,7 @@ export async function processElement(element, {
         if (isCurrentElement()) deferElementRetry(element, screenName, retryAt);
         if (debug) debug(`Processing error for @${screenName}: ${error?.message || error}`);
     } finally {
-        if (shimmer) shimmer.remove();
-        clearTimeout(processingTimeout);
-        if (processingQueue.get(screenName) === processingPromise) processingQueue.delete(screenName);
-        resolveProcessing({ retryAt }); // Waiting rows inherit the same retry deadline.
+        finishProcessing({ retryAt }); // Waiting rows inherit the same retry deadline.
     }
 }
 
@@ -1380,14 +1470,13 @@ export async function processElement(element, {
 // ============================================
 
 function applyAvailableFilters(element, screenName, filters) {
+    if (filters.settings?.enabled === false) return;
     const tweet = element.closest(SELECTORS.TWEET);
     const isUserCell = element.matches(SELECTORS.USER_CELL);
     element.dataset.xScreenName = screenName;
     applyLanguageBlock(tweet, filters.blockedLanguages, filters.settings, filters.allowedUsers);
     applyInfoToElement(element, screenName, userInfoCache.get(screenName) || null, {
-        ...filters, tweet, isUserCell,
-        tagBlocked: filters.blockedTags?.size > 0 &&
-            hasBlockedTag(extractDisplayName(element), filters.blockedTags)
+        ...filters, tweet, isUserCell
     });
 }
 
@@ -1398,6 +1487,13 @@ function applyAvailableFilters(element, screenName, filters) {
  * Explicitly revealed quotes remain revealed until their element is recycled.
  */
 export function resetProcessedElements(filters) {
+    // An already-scheduled pass must not restore the presentation being cleared.
+    if (pendingBlockedTweetsUpdate !== null) cancelAnimationFrame(pendingBlockedTweetsUpdate);
+    pendingBlockedTweetsUpdate = null;
+    pendingBlockedTweetsArgs = null;
+    pendingBlockedUsers = null;
+    latestFilterSnapshot = filters || null;
+    filterRevision++;
     const retryRows = Array.from(document.querySelectorAll('[data-x-retry-after]'));
     document.querySelectorAll(`.${CSS_CLASSES.INFO_BADGE}`).forEach(el => el.remove());
     document.querySelectorAll('[data-x-processed], [data-x-screen-name]').forEach(el => {
@@ -1413,6 +1509,8 @@ export function resetProcessedElements(filters) {
         if (el.dataset.xQuoteBlock !== 'shown') delete el.dataset.xQuoteBlock;
         delete el.dataset.xQuoteReason;
     });
+    document.querySelectorAll(`.${QUOTE_PLACEHOLDER_CLASS}`).forEach(el => el.remove());
+    quotePlaceholders = new WeakMap();
 
     // Waiting rows skip the visibility queue, but their already-known filters
     // must still reflect settings changes. This pass performs no lookup.
@@ -1432,27 +1530,35 @@ export function resetProcessedElements(filters) {
 // trigger. We keep only the LATEST args and run a single scan on the next frame.
 let pendingBlockedTweetsUpdate = null;
 let pendingBlockedTweetsArgs = null;
+let pendingBlockedUsers = null;
 
 /**
  * Update visibility of tweets based on blocked countries and regions.
  * Coalesced: multiple calls within the same frame collapse into one DOM pass
  * using the most recent arguments.
- * @param {Set} blockedCountries - Set of blocked country names (lowercase)
- * @param {Set} blockedRegions - Set of blocked region names (lowercase)
- * @param {Set} blockedTags - Set of blocked tags (lowercase)
- * @param {Object} settings - Settings object with highlightBlockedTweets flag
+ * @param {Object} filters - current filter snapshot
+ * @param {Set<string>|null} changedUsers - optional profile-only update scope
  */
-export function updateBlockedTweets(filters) {
+export function updateBlockedTweets(filters, changedUsers = null) {
     pendingBlockedTweetsArgs = filters || {};
     latestFilterSnapshot = pendingBlockedTweetsArgs;
     filterRevision++;
+    if (pendingBlockedTweetsUpdate === null) {
+        pendingBlockedUsers = changedUsers ? new Set(changedUsers) : null;
+    } else if (!changedUsers) {
+        pendingBlockedUsers = null;
+    } else if (pendingBlockedUsers) {
+        for (const user of changedUsers) pendingBlockedUsers.add(user);
+    }
     if (pendingBlockedTweetsUpdate !== null) return;
 
     pendingBlockedTweetsUpdate = requestAnimationFrame(() => {
         pendingBlockedTweetsUpdate = null;
         const args = pendingBlockedTweetsArgs;
+        const users = pendingBlockedUsers;
         pendingBlockedTweetsArgs = null;
-        if (args) runUpdateBlockedTweets(args);
+        pendingBlockedUsers = null;
+        if (args) runUpdateBlockedTweets(args, users);
     });
 }
 
@@ -1464,17 +1570,24 @@ function runUpdateBlockedTweets({
     blockedRegions,
     blockedTags,
     blockedBioTags = null,
+    blockedLinks = null,
     blockedPcf = null,
     settings = {},
     blockedLanguages = null,
     allowedUsers = null,
     blockedAffiliations = null
-} = {}) {
-    const highlightMode = settings.highlightBlockedTweets === true;
-    const hasTags = blockedTags && blockedTags.size > 0;
+} = {}, changedUsers = null) {
+    if (settings.enabled === false) return;
+    const filters = {
+        blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedLinks,
+        blockedPcf, settings, blockedLanguages, allowedUsers, blockedAffiliations
+    };
+    const newlyVisible = new Set();
     const loggedInUser = getLoggedInUsername();
 
     document.querySelectorAll('[data-x-screen-name]').forEach(element => {
+        const screenName = element.dataset.xScreenName;
+        if (changedUsers && !changedUsers.has(screenName?.toLowerCase())) return;
         const tweet = element.closest(SELECTORS.TWEET);
         // People-list rows have no enclosing tweet, but they still need re-deriving when a
         // filter changes — otherwise adding a country would flag nothing on Followers /
@@ -1482,55 +1595,14 @@ function runUpdateBlockedTweets({
         const isUserCell = !tweet && !!element.matches && element.matches(SELECTORS.USER_CELL);
         if (!tweet && !isUserCell) return;
 
-        const screenName = element.dataset.xScreenName;
-        const isSelf = !!loggedInUser && !!screenName && screenName.toLowerCase() === loggedInUser.toLowerCase();
-        // Allowlisted accounts are exempt from every filter, like your own account (issue #26).
-        const isExempt = isSelf || (!!screenName && !!allowedUsers && allowedUsers.has(screenName.toLowerCase()));
-        const isQuote = isInsideQuoteTweet(element, tweet);
-
-        const locationLower = canonicalCountry(element.dataset.xCountry);
-        const isBlockedCountry = locationLower !== '' && blockedCountries.has(locationLower);
-        const isBlockedRegion = locationLower !== '' && blockedRegions && blockedRegions.has(locationLower);
-
-        // Re-derive tag-blocking from the CURRENT blocked-tags set against the live
-        // display name (the row is still on screen). This is what makes adding OR
-        // removing a tag re-apply to already-rendered tweets — and, because we never
-        // trust a cached flag, a recycled row can't inherit a previous occupant's block.
-        const isTagBlocked = hasTags && hasBlockedTag(extractDisplayName(element), blockedTags);
-        const isBioBlocked = hasBlockedBio(screenName, blockedBioTags);
-        const isLabelBlocked = hasBlockedAccountLabel(element, tweet, screenName, blockedPcf);
-
-        // Affiliation lives on the cached info, keyed by name, like locationAccurate below.
         const cachedInfo = screenName ? userInfoCache.get(screenName) : null;
-        const isAffiliationBlocked = hasBlockedAffiliation(cachedInfo?.meta, blockedAffiliations);
-
-        // Who-they-are filters apply to quoted authors too; applyBlockState routes a
-        // quoted verdict to the card-only marker instead of the row (issue #32).
-        const blockReason = resolveBlockReason({
-            isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
-            isBioBlocked, isLabelBlocked, isAffiliationBlocked
-        });
-        const matchesBlockList = blockReason !== '';
-
-        // Location uncertainty is a setting, not a blocked-list entry, but a list edit
-        // must retain its verdict. The presentation follows hide/highlight mode too.
-        // locationAccurate lives on the cached info, keyed by name.
-        // Never for a quoted author: that would hide the quoting user's own post.
-        const info = screenName ? userInfoCache.get(screenName) : null;
-        const isVpnHidden = !isQuote && !!info && info.locationAccurate === false &&
-            settings.showVpnUsers === false && !isExempt;
-
-        const { hide } = applyBlockState(element, tweet, {
-            isListBlocked: matchesBlockList,
-            isVpnHidden,
-            highlightMode,
-            isQuote,
-            neverHide: isUserCell,
-            reason: blockReason
-        });
+        const wasHidden = element.dataset.xBlock === 'hide';
+        const { hide } = applyBlockState(element, tweet,
+            resolveAuthorBlockState(element, screenName, cachedInfo, filters, tweet, isUserCell, loggedInUser));
 
         const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
         if (badge) badge.style.display = hide ? 'none' : '';
+        else if (wasHidden && !hide) newlyVisible.add(element);
     });
 
     // Language blocking is per-tweet (not per-author), so re-derive it across ALL
@@ -1538,9 +1610,40 @@ function runUpdateBlockedTweets({
     // already-rendered tweets. applyLanguageBlock authoritatively sets or clears the
     // marker, so a removed language un-hides its tweets. Runs only on config/setting
     // changes (this pass is rAF-coalesced), not per scroll.
-    document.querySelectorAll(SELECTORS.TWEET).forEach(tweet => {
-        applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
-    });
+    if (!changedUsers) {
+        document.querySelectorAll(SELECTORS.TWEET).forEach(tweet => {
+            const wasHidden = tweet.dataset.xLangBlock === 'hide';
+            applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
+            if (wasHidden && tweet.dataset.xLangBlock !== 'hide') {
+                tweet.querySelectorAll('[data-x-screen-name]').forEach(element => {
+                    if (element.closest(SELECTORS.TWEET) === tweet) newlyVisible.add(element);
+                });
+            }
+        });
+    }
+    // Recover only after both author and language verdicts have settled.
+    for (const element of newlyVisible) recoverVisibleElement(element, filters);
+}
+
+/** Resume work that a previous hide verdict short-circuited before badge creation. */
+function recoverVisibleElement(element, filters) {
+    if (!element.isConnected || filters.settings?.enabled === false ||
+        element.dataset.xBlock === 'hide' || element.closest(SELECTORS.TWEET)?.dataset.xLangBlock === 'hide' ||
+        element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`)) return;
+    const screenName = element.dataset.xScreenName;
+    const currentName = element.matches(SELECTORS.USER_CELL)
+        ? extractUsernameFromUserCell(element) : extractUsername(element);
+    if (!screenName || currentName?.toLowerCase() !== screenName.toLowerCase()) return;
+
+    // Existing location results can restore a badge without any network work.
+    if (userInfoCache.has(screenName)) {
+        applyAvailableFilters(element, screenName, filters);
+        return;
+    }
+    elementProcessingTokens.delete(element);
+    delete element.dataset.xProcessed;
+    // The normal queue retains retry deadlines and waits for off-screen rows.
+    if (liveProcessElementSafe) queueForVisibility(element, liveProcessElementSafe);
 }
 
 // ============================================
@@ -1553,10 +1656,9 @@ const QUOTE_CARD_SELECTOR = 'div[role="link"][tabindex="0"]';
 let quoteRevealBound = false;
 
 /**
- * Let the reader open a collapsed quote card ("click to show"). Delegated on document
+ * Let the reader open a collapsed quote card. Delegated on document
  * in the CAPTURE phase so we run before X's own card handler and can stop it from
- * navigating to the quoted post. Nothing is injected into the DOM, so X re-rendering
- * a row can't break this — the reveal is just a marker flip that CSS reacts to.
+ * navigating to the quoted post. Reveal remains tied to the owned quote marker.
  * Idempotent: safe to call more than once.
  */
 export function setupQuoteReveal() {
@@ -1577,12 +1679,21 @@ export function setupQuoteReveal() {
         event.preventDefault();
         event.stopPropagation();
         marker.dataset.xQuoteBlock = 'shown';
+        const hadFocus = card.contains(document.activeElement);
+        clearQuotePlaceholder(marker);
+        if (hadFocus) card.focus({ preventScroll: true });
     };
 
     document.addEventListener('click', reveal, true);
-    document.addEventListener('keydown', event => {
+    const onKeydown = event => {
         if (event.key === 'Enter' || event.key === ' ') reveal(event);
-    }, true);
+    };
+    document.addEventListener('keydown', onKeydown, true);
+    observerCleanupFunctions.push(() => {
+        document.removeEventListener('click', reveal, true);
+        document.removeEventListener('keydown', onKeydown, true);
+        quoteRevealBound = false;
+    });
 }
 
 // ============================================
@@ -1600,6 +1711,7 @@ function releaseElementMarkers(element, currentScreenName) {
     delete element.dataset.xBlock;
     delete element.dataset.xQuoteBlock;
     delete element.dataset.xQuoteReason;
+    clearQuotePlaceholder(element);
     if (isValidScreenName(currentScreenName)) element.dataset.xScreenName = currentScreenName;
 }
 
@@ -1628,6 +1740,7 @@ export function refreshPostContext(filters, processElementSafe) {
             for (const element of tweet.querySelectorAll('[data-x-quote-block]')) {
                 delete element.dataset.xQuoteBlock;
                 delete element.dataset.xQuoteReason;
+                clearQuotePlaceholder(element);
             }
         }
 
@@ -1756,6 +1869,12 @@ export function startNavigationWatcher(onNavigate) {
  * Cleanup all observer resources
  */
 export function cleanupObservers() {
+    // Outstanding lookups may settle after a restored page starts processing again.
+    // Invalidate their cache writes independently of row recycling within one session.
+    processingGeneration++;
+    filterStatisticsReporter = null;
+    for (const finishProcessing of processingCleanups) finishProcessing({ cancelled: true });
+    liveProcessElementSafe = null;
     for (const cleanupFn of observerCleanupFunctions) {
         try {
             cleanupFn();
@@ -1770,6 +1889,7 @@ export function cleanupObservers() {
         cancelAnimationFrame(pendingBlockedTweetsUpdate);
         pendingBlockedTweetsUpdate = null;
         pendingBlockedTweetsArgs = null;
+        pendingBlockedUsers = null;
     }
 
     // Clear all processing queues properly
@@ -1777,6 +1897,8 @@ export function cleanupObservers() {
     elementTweetContexts = new WeakMap();
     elementQuoteContexts = new WeakMap();
     postContexts = new WeakMap();
+    document.querySelectorAll(`.${QUOTE_PLACEHOLDER_CLASS}`).forEach(el => el.remove());
+    quotePlaceholders = new WeakMap();
     latestFilterSnapshot = null;
     processingQueue.clear();
     userInfoCache.clear();

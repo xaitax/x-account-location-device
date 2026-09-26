@@ -17,7 +17,7 @@ import { COUNTRY_FLAGS, REGION_FLAGS, SELECTORS, canonicalCountry } from './cons
  */
 export function debounce(func, wait, immediate = false) {
     let timeout;
-    return function executedFunction(...args) {
+    function executedFunction(...args) {
         const context = this;
         const later = function() {
             timeout = null;
@@ -27,7 +27,9 @@ export function debounce(func, wait, immediate = false) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
         if (callNow) func.apply(context, args);
-    };
+    }
+    executedFunction.cancel = () => { clearTimeout(timeout); timeout = null; };
+    return executedFunction;
 }
 
 /**
@@ -35,13 +37,13 @@ export function debounce(func, wait, immediate = false) {
  * @template {Function} T
  * @param {T} func - The function to throttle
  * @param {number} wait - The minimum time between function calls in milliseconds
- * @returns {T} - The throttled function
+ * @returns {T & {cancel: () => void}} - The throttled function with cancellation
  */
 export function throttle(func, wait) {
     let lastCall = 0;
     let timeout = null;
     
-    return function executedFunction(...args) {
+    function executedFunction(...args) {
         const now = Date.now();
         const remaining = wait - (now - lastCall);
         
@@ -59,7 +61,9 @@ export function throttle(func, wait) {
                 func.apply(this, args);
             }, remaining);
         }
-    };
+    }
+    executedFunction.cancel = () => { clearTimeout(timeout); timeout = null; lastCall = 0; };
+    return executedFunction;
 }
 
 /**

@@ -4,205 +4,102 @@
  * Uses native Canvas API with image loading for profile pics and media
  */
 
-import { VERSION, Z_INDEX } from '../shared/constants.js';
+import { VERSION } from '../shared/constants.js';
 import { getCountryCode, classifyDevice } from '../shared/utils.js';
 import { glyph } from '../content/icons.js';
-import { showToast } from './ui.js';
+import { dialogIcon } from './dialog-icons.js';
 import browserAPI from '../shared/browser-api.js';
+import { showToast, dismissToast } from './notifications.js';
+import { extractCaptureSnapshot } from './capture-snapshot.js';
+import { statusIdOf } from './post-identity.js';
+
+let activeCapture = null;
+
+/** Cancel unfinished rendering and release the Share sheet's focus listeners. */
+export function cleanupEvidenceCapture() {
+    cancelPendingCapture();
+    activeShareSheet?.close(false);
+}
+
+function cancelPendingCapture() {
+    if (!activeCapture) return;
+    const previous = activeCapture;
+    activeCapture = null;
+    previous.controller.abort();
+    dismissToast(previous.toast, { immediate: true });
+}
 
 /**
- * Capture a tweet as evidence with metadata overlay
- * @param {HTMLElement} tweetElement - The tweet article element
- * @param {Object} userInfo - User info from cache (location, device, etc.)
- * @param {string} screenName - The username
+ * Capture the post belonging to the clicked badge, not a nearby quoted account.
+ * The immutable snapshot is taken before images load or X can recycle the DOM.
+ * @param {HTMLElement} tweetElement
+ * @param {Object} userInfo
+ * @param {string} screenName
+ * @param {HTMLElement|null} sourceAuthor
  */
-export async function captureEvidence(tweetElement, userInfo, screenName) {
-    if (!tweetElement) {
-        console.error('X-Posed: No tweet element to capture');
-        showErrorNotification('No tweet element found');
-        return;
-    }
-
+export async function captureEvidence(tweetElement, userInfo, screenName, sourceAuthor = null) {
+    cancelPendingCapture();
+    const job = { controller: new AbortController(), toast: null };
+    activeCapture = job;
+    const signal = job.controller.signal;
     try {
-        // Show loading state
-        const loadingToast = showLoadingToast('Capturing evidence...');
-        
-        // Extract tweet content
-        const tweetData = await extractTweetData(tweetElement, screenName);
-        
-        // Get current timestamp
-        const captureTime = new Date().toISOString();
-        
-        // Create canvas with evidence
-        const canvas = await createEvidenceCanvas({
-            ...tweetData,
-            screenName,
-            location: userInfo?.location || 'Unknown',
-            device: userInfo?.device || 'Unknown',
+        const snapshot = Object.freeze({
+            ...extractCaptureSnapshot(tweetElement, screenName, sourceAuthor),
+            location: typeof userInfo?.location === 'string' && userInfo.location ? userInfo.location : 'Unknown',
+            device: typeof userInfo?.device === 'string' && userInfo.device ? userInfo.device : 'Unknown',
             locationAccurate: userInfo?.locationAccurate,
-            captureTime,
+            captureTime: new Date().toISOString(),
             version: VERSION
         });
-        
-        // Remove loading toast
-        loadingToast.remove();
-        
-        // Open the share sheet (preview + caption + quote/reply/post)
+        job.toast = showToast({ message: 'Capturing evidence…', iconType: 'info',
+            duration: 0, loading: true, dismissible: false });
+        const canvas = await createEvidenceCanvas(snapshot, signal);
+        if (activeCapture !== job || signal.aborted) return;
         showShareSheet(canvas, {
-            screenName,
-            tweetUrl: tweetData.tweetUrl,
-            location: userInfo?.location
+            screenName: snapshot.screenName,
+            tweetUrl: snapshot.tweetUrl,
+            location: snapshot.location
         });
-        
     } catch (error) {
+        if (activeCapture !== job || signal.aborted) return;
         console.error('X-Posed: Evidence capture failed:', error);
-        showErrorNotification('Failed to capture evidence: ' + error.message);
+        showErrorNotification(error.message || 'Failed to capture this post. Try again.');
+    } finally {
+        dismissToast(job.toast, { immediate: true });
+        if (activeCapture === job) activeCapture = null;
     }
 }
 
-/**
- * Show loading toast using safe DOM methods
- */
-function showLoadingToast(message) {
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: rgba(13, 15, 18, 0.96);
-        border-left: 3px solid #22D3EE;
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-        font-size: 14px;
-        z-index: ${Z_INDEX.TOAST};
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    `;
-    
-    // Create spinner using safe DOM methods
-    const spinner = document.createElement('div');
-    spinner.style.cssText = 'width: 16px; height: 16px; border: 2px solid white; border-top-color: transparent; border-radius: 50%; animation: x-spin 1s linear infinite;';
-    
-    // Create text node for message (safe)
-    const messageText = document.createTextNode(message);
-    
-    toast.appendChild(spinner);
-    toast.appendChild(messageText);
-    
-    // Add keyframes if not exists
-    if (!document.getElementById('x-evidence-keyframes')) {
-        const style = document.createElement('style');
-        style.id = 'x-evidence-keyframes';
-        style.textContent = '@keyframes x-spin { to { transform: rotate(360deg); } }';
-        (document.head || document.documentElement).appendChild(style);
-    }
-    
-    document.body.appendChild(toast);
-    return toast;
+function captureAborted() {
+    return new DOMException('Evidence capture cancelled.', 'AbortError');
 }
 
-/**
- * Extract data from tweet element
- */
-async function extractTweetData(tweetElement, screenName) {
-    // Get display name
-    let displayName = screenName;
-    const nameEl = tweetElement.querySelector('[data-testid="User-Name"] a[role="link"] span span');
-    if (nameEl) {
-        displayName = nameEl.textContent || screenName;
-    }
-    
-    // Get profile image URL
-    let profileImageUrl = null;
-    const avatarImg = tweetElement.querySelector('[data-testid="Tweet-User-Avatar"] img');
-    if (avatarImg) {
-        profileImageUrl = avatarImg.src;
-    }
-    
-    // Get tweet text
-    let tweetText = '';
-    const tweetTextEl = tweetElement.querySelector('[data-testid="tweetText"]');
-    if (tweetTextEl) {
-        tweetText = tweetTextEl.textContent || '';
-    }
-    
-    // Get timestamp
-    let timestamp = '';
-    const timeEl = tweetElement.querySelector('time');
-    if (timeEl) {
-        timestamp = timeEl.getAttribute('datetime') || timeEl.textContent || '';
-    }
-    
-    // Get tweet URL
-    let tweetUrl = window.location.href;
-    const timeLink = tweetElement.querySelector('a[href*="/status/"] time')?.closest('a');
-    if (timeLink) {
-        tweetUrl = 'https://x.com' + timeLink.getAttribute('href');
-    } else {
-        const statusLink = tweetElement.querySelector('a[href*="/status/"]');
-        if (statusLink) {
-            const href = statusLink.getAttribute('href');
-            if (href.includes('/status/')) {
-                tweetUrl = 'https://x.com' + href;
-            }
-        }
-    }
-    
-    // Get attached media
-    const mediaUrls = [];
-    const mediaImages = tweetElement.querySelectorAll('[data-testid="tweetPhoto"] img');
-    mediaImages.forEach(img => {
-        if (img.src && !img.src.includes('emoji')) {
-            mediaUrls.push(img.src);
-        }
-    });
-    
-    // Get metrics (likes, retweets, etc.)
-    const metrics = {
-        replies: getMetricValue(tweetElement, '[data-testid="reply"]'),
-        retweets: getMetricValue(tweetElement, '[data-testid="retweet"]'),
-        likes: getMetricValue(tweetElement, '[data-testid="like"]'),
-        views: getMetricValue(tweetElement, 'a[href*="/analytics"]')
-    };
-    
-    return {
-        displayName,
-        profileImageUrl,
-        tweetText,
-        timestamp,
-        tweetUrl,
-        mediaUrls,
-        metrics
-    };
-}
-
-/**
- * Get metric value from button
- */
-function getMetricValue(element, selector) {
-    const btn = element.querySelector(selector);
-    if (btn) {
-        const text = btn.textContent.trim();
-        if (text && text !== '0' && text !== '') {
-            return text;
-        }
-    }
-    return null;
-}
-
-/**
- * Load image and return it
- */
-function loadImage(src) {
+/** Image requests belong to the capture job and cannot outlive its cleanup. */
+function loadImage(src, signal) {
     return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(captureAborted());
+            return;
+        }
         const img = new Image();
+        let settled = false;
+        const finish = error => {
+            if (settled) return;
+            settled = true;
+            img.onload = null;
+            img.onerror = null;
+            signal?.removeEventListener('abort', onAbort);
+            if (error) reject(error);
+            else resolve(img);
+        };
+        const onAbort = () => {
+            finish(captureAborted());
+            img.removeAttribute('src');
+        };
         img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('Failed to load image'));
+        img.onload = () => finish();
+        img.onerror = () => finish(new Error('Failed to load image'));
+        signal?.addEventListener('abort', onAbort, { once: true });
         img.src = src;
     });
 }
@@ -210,15 +107,17 @@ function loadImage(src) {
 /**
  * Create evidence canvas with all data
  */
-async function createEvidenceCanvas(data) {
+async function createEvidenceCanvas(data, signal) {
+    if (signal?.aborted) throw captureAborted();
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    // Theme-aware palette - matches the "glass" design tokens
+    // Solid Graphite colors match the surrounding account and settings views.
     const theme = document.documentElement.getAttribute('data-x-theme') === 'light' ? 'light' : 'dark';
     const PAL = theme === 'light'
-        ? { bg: '#FBFDFE', panel: '#F1F5F8', text: '#0C1A22', dim: '#5A6B78', border: '#D8E0E6', accent: '#0E7490', danger: '#DC2640' }
-        : { bg: '#0B0D10', panel: '#14171C', text: '#E9EDF0', dim: '#8A93A0', border: '#2A2F36', accent: '#22D3EE', danger: '#FF4D5E' };
+        ? { bg: '#FFFFFF', panel: '#F1F4F3', text: '#20272A', dim: '#5E6A70', border: '#D7DDDD', accent: '#236C5C', warning: '#85500D' }
+        : { bg: '#1C1F22', panel: '#25292D', text: '#ECF0F1', dim: '#A5AFB6', border: '#353B40', accent: '#91D2C2', warning: '#E7B36A' };
+    const font = '"Segoe UI", system-ui, sans-serif';
 
     // 24x24-viewBox vector icon path data (matches the extension SVG icon set).
     // Each icon is an array of { d, fill? } sub-paths (fill:true => fill, else stroke).
@@ -228,8 +127,8 @@ async function createEvidenceCanvas(data) {
             { d: 'M12 11 m-2.2 0 a2.2 2.2 0 1 0 4.4 0 a2.2 2.2 0 1 0 -4.4 0' }
         ],
         vpn: [
-            { d: 'M12 3l7 3v5c0 4.4-3 8-7 10-4-2-7-5.6-7-10V6z' },
-            { d: 'M9.5 12l1.8 1.8L15 9.8' }
+            { d: 'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3' },
+            { d: 'M12 9v4M12 17h.01' }
         ],
         verified: [
             { d: 'M9.6 12l1.7 1.7 3.3-3.4' },
@@ -309,8 +208,9 @@ async function createEvidenceCanvas(data) {
     let profileImg = null;
     if (data.profileImageUrl) {
         try {
-            profileImg = await loadImage(data.profileImageUrl);
+            profileImg = await loadImage(data.profileImageUrl, signal);
         } catch (e) {
+            if (signal?.aborted) throw captureAborted();
             console.warn('Could not load profile image');
         }
     }
@@ -319,16 +219,19 @@ async function createEvidenceCanvas(data) {
     let mediaImg = null;
     if (data.mediaUrls && data.mediaUrls.length > 0) {
         try {
-            mediaImg = await loadImage(data.mediaUrls[0]);
+            mediaImg = await loadImage(data.mediaUrls[0], signal);
         } catch (e) {
+            if (signal?.aborted) throw captureAborted();
             console.warn('Could not load media image');
         }
     }
     
+    if (signal?.aborted) throw captureAborted();
+
     // Calculate content height
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d');
-    const tweetLines = wrapText(tempCtx, data.tweetText, width - padding * 2 - 70, '15px -apple-system, sans-serif');
+    const tweetLines = wrapText(tempCtx, data.tweetText, width - padding * 2 - 70, `15px ${font}`);
     const tweetHeight = Math.max(tweetLines.length * lineHeight, lineHeight);
     
     // Media height (max 250px, maintain aspect ratio)
@@ -367,9 +270,7 @@ async function createEvidenceCanvas(data) {
     ctx.fillStyle = PAL.bg;
     ctx.fillRect(0, 0, width, height);
 
-    // Outer glow effect (accent tint)
-    ctx.shadowColor = PAL.accent;
-    ctx.shadowBlur = 20;
+    // A quiet outline keeps the exported image consistent with Graphite.
     ctx.strokeStyle = PAL.border;
     ctx.lineWidth = 1;
     roundRect(ctx, 0, 0, width, height, 12);
@@ -403,7 +304,7 @@ async function createEvidenceCanvas(data) {
         ctx.fill();
 
         ctx.fillStyle = PAL.bg;
-        ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.font = `bold 18px ${font}`;
         ctx.textAlign = 'center';
         ctx.fillText(data.screenName.charAt(0).toUpperCase(), padding + 22, y + 28);
         ctx.textAlign = 'left';
@@ -411,12 +312,12 @@ async function createEvidenceCanvas(data) {
     
     // Display name - larger and bolder
     ctx.fillStyle = PAL.text;
-    ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.font = `bold 16px ${font}`;
     ctx.fillText(truncateText(ctx, data.displayName, 220), padding + 60, y + 20);
 
     // Username - better spacing
     ctx.fillStyle = PAL.dim;
-    ctx.font = '14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.font = `14px ${font}`;
     const userStr = `@${data.screenName}`;
     ctx.fillText(userStr, padding + 60, y + 42);
     
@@ -424,7 +325,7 @@ async function createEvidenceCanvas(data) {
     
     // === TWEET TEXT ===
     ctx.fillStyle = PAL.text;
-    ctx.font = '16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.font = `16px ${font}`;
 
     for (const line of tweetLines) {
         ctx.fillText(line, padding, y + 18);
@@ -433,7 +334,7 @@ async function createEvidenceCanvas(data) {
 
     if (tweetLines.length === 0) {
         ctx.fillStyle = PAL.dim;
-        ctx.font = 'italic 15px -apple-system, "Segoe UI", sans-serif';
+        ctx.font = `italic 15px ${font}`;
         ctx.fillText('[Media or link only]', padding, y + 18);
         y += lineHeight;
     }
@@ -460,7 +361,7 @@ async function createEvidenceCanvas(data) {
 
     // === METRICS === - improved spacing
     ctx.fillStyle = PAL.dim;
-    ctx.font = '14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `14px ${font}`;
     
     let metricsX = padding;
     const metricGap = 28;
@@ -489,13 +390,9 @@ async function createEvidenceCanvas(data) {
     
     y += metricsHeight;
     
-    // === DIVIDER WITH GRADIENT ===
-    const gradient = ctx.createLinearGradient(padding, y, width - padding, y);
-    gradient.addColorStop(0, hexToRgba(PAL.accent, 0.4));
-    gradient.addColorStop(0.5, hexToRgba(PAL.accent, 0.7));
-    gradient.addColorStop(1, hexToRgba(PAL.accent, 0.4));
-    ctx.strokeStyle = gradient;
-    ctx.lineWidth = 2;
+    // === DIVIDER ===
+    ctx.strokeStyle = PAL.border;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padding, y);
     ctx.lineTo(width - padding, y);
@@ -508,7 +405,7 @@ async function createEvidenceCanvas(data) {
     ctx.fillStyle = PAL.panel;
     roundRect(ctx, padding - 8, y - 8, width - padding * 2 + 16, metadataHeight - 15, 10);
     ctx.fill();
-    ctx.strokeStyle = hexToRgba(PAL.accent, 0.15);
+    ctx.strokeStyle = PAL.border;
     ctx.lineWidth = 1;
     roundRect(ctx, padding - 8, y - 8, width - padding * 2 + 16, metadataHeight - 15, 10);
     ctx.stroke();
@@ -516,7 +413,7 @@ async function createEvidenceCanvas(data) {
     // Header - larger and more prominent
     drawIcon(ctx, ICONS.camera, padding + 4, y + 2, 14, PAL.accent);
     ctx.fillStyle = PAL.accent;
-    ctx.font = 'bold 12px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `bold 12px ${font}`;
     ctx.fillText('X-POSED EVIDENCE CAPTURE', padding + 24, y + 14);
     
     y += 32;
@@ -528,58 +425,56 @@ async function createEvidenceCanvas(data) {
     
     // Location row
     drawIcon(ctx, ICONS.location, labelX, y + 3, 16, PAL.accent);
-    ctx.font = '14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `14px ${font}`;
     ctx.fillStyle = PAL.dim;
     ctx.fillText('Location', labelX + 22, y + 16);
 
     const countryCode = getCountryCode(data.location);
-    const isVpn = data.locationAccurate === false;
+    const locationUncertain = data.locationAccurate === false;
 
     // Location value with country code
     ctx.fillStyle = PAL.text;
-    ctx.font = '600 14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `600 14px ${font}`;
     ctx.fillText(data.location, valueX, y + 16);
 
     // Country code badge - improved styling
     const locWidth = ctx.measureText(data.location).width;
     ctx.fillStyle = hexToRgba(PAL.accent, 0.15);
     const codeText = `${countryCode}`;
-    ctx.font = 'bold 11px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `bold 11px ${font}`;
     const codeWidth = ctx.measureText(codeText).width + 10;
     roundRect(ctx, valueX + locWidth + 10, y + 3, codeWidth, 18, 4);
     ctx.fill();
     ctx.fillStyle = PAL.accent;
     ctx.fillText(codeText, valueX + locWidth + 15, y + 16);
 
-    // VPN indicator - VERY prominent warning box
-    if (isVpn) {
+    // X's warning signals uncertainty, not proof of a VPN or proxy.
+    if (locationUncertain) {
         const vpnX = valueX + locWidth + 10 + codeWidth + 12;
 
-        // Draw VPN warning box - larger and more visible
-        ctx.fillStyle = hexToRgba(PAL.danger, 0.15);
+        ctx.fillStyle = hexToRgba(PAL.warning, 0.15);
         roundRect(ctx, vpnX - 6, y + 1, 105, 22, 5);
         ctx.fill();
-        ctx.strokeStyle = PAL.danger;
+        ctx.strokeStyle = PAL.warning;
         ctx.lineWidth = 1.5;
         roundRect(ctx, vpnX - 6, y + 1, 105, 22, 5);
         ctx.stroke();
 
-        // VPN text with shield warning icon
-        drawIcon(ctx, ICONS.vpn, vpnX + 2, y + 4, 15, PAL.danger, { lineWidth: 1.6 });
-        ctx.fillStyle = PAL.danger;
-        ctx.font = 'bold 11px -apple-system, "Segoe UI", sans-serif';
-        ctx.fillText('VPN / PROXY', vpnX + 20, y + 16);
+        drawIcon(ctx, ICONS.vpn, vpnX + 2, y + 4, 15, PAL.warning, { lineWidth: 1.6 });
+        ctx.fillStyle = PAL.warning;
+        ctx.font = `bold 11px ${font}`;
+        ctx.fillText('UNCERTAIN', vpnX + 20, y + 16);
     }
 
     y += rowHeight;
 
     // Device row
     drawIcon(ctx, deviceIconFor(data.device), labelX, y + 3, 16, PAL.accent);
-    ctx.font = '14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `14px ${font}`;
     ctx.fillStyle = PAL.dim;
     ctx.fillText('Device', labelX + 22, y + 16);
     ctx.fillStyle = PAL.text;
-    ctx.font = '600 14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `600 14px ${font}`;
     ctx.fillText(data.device || 'Unknown', valueX, y + 16);
 
     y += rowHeight;
@@ -589,22 +484,22 @@ async function createEvidenceCanvas(data) {
     const dateStr = captureDate.toISOString().replace('T', '  ').substring(0, 21) + ' UTC';
 
     drawIcon(ctx, ICONS.date, labelX, y + 3, 16, PAL.accent);
-    ctx.font = '14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `14px ${font}`;
     ctx.fillStyle = PAL.dim;
     ctx.fillText('Captured', labelX + 22, y + 16);
     ctx.fillStyle = PAL.text;
-    ctx.font = '600 14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `600 14px ${font}`;
     ctx.fillText(dateStr, valueX, y + 16);
 
     y += rowHeight;
 
     // URL row
     drawIcon(ctx, ICONS.link, labelX, y + 3, 16, PAL.accent);
-    ctx.font = '14px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `14px ${font}`;
     ctx.fillStyle = PAL.dim;
     ctx.fillText('Source', labelX + 22, y + 16);
     ctx.fillStyle = PAL.accent;
-    ctx.font = '13px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `13px ${font}`;
     const shortUrl = data.tweetUrl.replace('https://x.com/', 'x.com/');
     ctx.fillText(truncateText(ctx, shortUrl, width - valueX - padding - 20), valueX, y + 16);
 
@@ -612,7 +507,7 @@ async function createEvidenceCanvas(data) {
 
     // Footer - subtle branding
     ctx.fillStyle = PAL.dim;
-    ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
+    ctx.font = `11px ${font}`;
     ctx.fillText(`Generated by X-Posed v${data.version}`, labelX, y + 10);
     
     return canvas;
@@ -702,11 +597,7 @@ function wrapText(ctx, text, maxWidth, font) {
 // Touch / no-hover devices (e.g. Firefox for Android) use the native share sheet.
 const TOUCH = !(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(hover: hover)').matches);
 let lastShareMode = 'quote';
-
-function statusIdFromUrl(url) {
-    const m = /\/status\/(\d+)/.exec(url || '');
-    return m ? m[1] : null;
-}
+let activeShareSheet = null;
 
 // Synchronous data-URL -> Blob so clipboard write / window.open / share can all
 // fire inside the click gesture (an async toBlob would trip popup + clipboard guards).
@@ -751,8 +642,8 @@ function buildIntentUrl(mode, caption, tweetUrl, statusId, screenName) {
 function defaultCaption(location) {
     const where = location && location !== 'Unknown' ? location : null;
     return where
-        ? `This account posts from ${where}. (via X-Posed)`
-        : 'Where this account actually posts from. (via X-Posed)';
+        ? `X lists this account’s location as ${where}. (via X-Posed)`
+        : 'Account information reported by X. (via X-Posed)';
 }
 
 /**
@@ -761,8 +652,6 @@ function defaultCaption(location) {
  * evidence modal; the capture engine (createEvidenceCanvas) is reused unchanged.
  */
 function showShareSheet(canvas, info) {
-    document.querySelector('.x-share-overlay')?.remove();
-
     const ce = (tag, cls, txt) => {
         const n = document.createElement(tag);
         if (cls) n.className = cls;
@@ -770,234 +659,315 @@ function showShareSheet(canvas, info) {
         return n;
     };
 
-    const statusId = statusIdFromUrl(info.tweetUrl);
+    const statusId = statusIdOf(info.tweetUrl);
     const filename = generateFilename(info.screenName);
 
     // Encode the (immutable) rendered canvas once; preview, zoom, clipboard, share, and
     // save all reuse this single data URL instead of re-running toDataURL each time.
     const previewDataUrl = canvas.toDataURL('image/png');
+    const blob = dataUrlToBlob(previewDataUrl);
+    const returnFocus = activeShareSheet ? activeShareSheet.returnFocus : document.activeElement;
+    activeShareSheet?.close(false);
+    let closed = false;
+    let pending = false;
+    let copying = false;
+    let zoom = null;
 
     const overlay = ce('div', 'x-share-overlay');
     const sheet = ce('div', 'x-share-sheet');
     sheet.setAttribute('role', 'dialog');
-    sheet.setAttribute('aria-label', 'Share evidence');
-    sheet.appendChild(ce('div', 'x-share-scan'));
-    const pad = ce('div', 'x-share-pad');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-labelledby', 'x-share-title');
+    sheet.tabIndex = -1;
 
-    // header
     const head = ce('div', 'x-share-head');
-    const hico = ce('div', 'x-share-ico');
-    hico.appendChild(glyph('shield', 17));
-    const htitle = ce('div', 'x-share-title', 'Share evidence');
-    htitle.appendChild(ce('small', null, 'Quote · reply · post'));
+    const htitle = ce('div', 'x-share-title');
+    const heading = ce('h2', null, 'Share evidence');
+    heading.id = 'x-share-title';
+    htitle.append(heading, ce('p', 'x-share-subtitle', `Account information for @${info.screenName}`));
     const closeBtn = ce('button', 'x-share-close');
     closeBtn.type = 'button';
-    closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.appendChild(glyph('close', 16));
-    head.appendChild(hico);
-    head.appendChild(htitle);
-    head.appendChild(closeBtn);
+    closeBtn.setAttribute('aria-label', 'Close share evidence');
+    closeBtn.appendChild(dialogIcon('close', 18));
+    head.append(htitle, closeBtn);
 
-    // evidence preview (click to enlarge)
-    const preview = ce('div', 'x-share-preview');
-    preview.title = 'Click to enlarge';
+    const previewColumn = ce('div', 'x-share-preview-column');
+    const sectionHead = ce('div', 'x-share-section-head');
+    sectionHead.append(ce('h3', null, 'Evidence image'), ce('span', null, 'PNG'));
+    const preview = ce('button', 'x-share-preview');
+    preview.type = 'button';
+    preview.setAttribute('aria-label', 'Enlarge evidence preview');
     const img = ce('img');
     img.src = previewDataUrl;
-    img.alt = 'Evidence';
+    img.alt = `Evidence image for @${info.screenName}`;
     preview.appendChild(img);
     const zoomHint = ce('span', 'x-share-zoomhint');
-    zoomHint.appendChild(glyph('zoom', 15));
+    zoomHint.append(glyph('zoom', 15), ce('span', null, 'Enlarge preview'));
     preview.appendChild(zoomHint);
     preview.addEventListener('click', () => {
-        const zoom = ce('div', 'x-share-zoom');
+        if (zoom || closed) return;
+        zoom = ce('div', 'x-share-zoom');
+        zoom.setAttribute('role', 'dialog');
+        zoom.setAttribute('aria-modal', 'true');
+        zoom.setAttribute('aria-label', 'Enlarged evidence image');
+        zoom.tabIndex = -1;
         const big = ce('img');
         big.src = previewDataUrl;
-        big.alt = 'Evidence';
-        zoom.appendChild(big);
-        zoom.addEventListener('click', () => zoom.remove());
+        big.alt = img.alt;
+        const zoomClose = ce('button', 'x-share-zoom-close');
+        zoomClose.type = 'button';
+        zoomClose.setAttribute('aria-label', 'Close enlarged preview');
+        zoomClose.appendChild(dialogIcon('close', 20));
+        zoomClose.addEventListener('click', () => closeZoom());
+        zoom.append(big, zoomClose);
+        zoom.addEventListener('click', event => {
+            event.stopPropagation();
+            if (event.target === zoom || event.target === big) closeZoom();
+        });
+        sheet.inert = true;
         document.body.appendChild(zoom);
+        zoomClose.focus({ preventScroll: true });
     });
 
-    // caption
+    const exports = ce('div', 'x-share-exports');
+    const copyBtn = ce('button', 'x-share-ghost');
+    copyBtn.type = 'button';
+    copyBtn.append(glyph('copy', 16), ce('span', null, 'Copy image'));
+    const saveBtn = ce('button', 'x-share-ghost');
+    saveBtn.type = 'button';
+    saveBtn.append(glyph('save', 16), ce('span', null, 'Save PNG'));
+    exports.append(copyBtn, saveBtn);
+    previewColumn.append(sectionHead, preview, exports);
+
     const capWrap = ce('div', 'x-share-capwrap');
+    const capLabel = ce('label', 'x-share-caplbl', 'Caption');
+    capLabel.htmlFor = 'x-share-caption';
     const cap = ce('textarea', 'x-share-cap');
+    cap.id = 'x-share-caption';
     cap.maxLength = 280;
-    cap.value = defaultCaption(info.location);
+    cap.rows = 4;
+    cap.value = defaultCaption(info.location).slice(0, 280);
+    cap.setAttribute('aria-describedby', 'x-share-caption-meta');
+    const capMeta = ce('div', 'x-share-capmeta');
+    capMeta.id = 'x-share-caption-meta';
     const count = ce('span', 'x-share-count');
-    const updCount = () => { count.textContent = cap.value.length + '/280'; };
+    const updCount = () => { count.textContent = `${cap.value.length} / 280`; };
     cap.addEventListener('input', updCount);
     updCount();
     capWrap.appendChild(cap);
-    capWrap.appendChild(count);
+    capMeta.append(ce('span', null, 'Edit before continuing'), count);
+    const captionGroup = ce('div', 'x-share-caption-group');
+    captionGroup.append(capLabel, capWrap, capMeta);
 
-    // modes
-    const modeWrap = ce('div', 'x-share-modes');
-    modeWrap.appendChild(ce('span', 'x-share-modelbl', 'Share as'));
+    const modeWrap = ce('fieldset', 'x-share-modes');
+    modeWrap.hidden = TOUCH;
+    modeWrap.appendChild(ce('legend', 'x-share-modelbl', 'Share as'));
     const seg = ce('div', 'x-share-seg');
-    seg.appendChild(ce('span', 'x-share-pill'));
     const MODES = [
-        { key: 'quote', ico: 'swap', mt: 'Quote', ms: 'your timeline', desc: 'Posts to your timeline with their tweet embedded.' },
-        { key: 'reply', ico: 'reply', mt: 'Reply', ms: 'under post', desc: 'Replies directly under their post — they get notified.' },
-        { key: 'post', ico: 'plus', mt: 'New post', ms: 'mention them', desc: 'A fresh post on your timeline mentioning the account.' }
+        { key: 'quote', label: 'Quote', desc: 'Opens an X draft with the original post linked for quoting.' },
+        { key: 'reply', label: 'Reply', desc: 'Opens an X reply draft under the original post.' },
+        { key: 'post', label: 'New post', desc: 'Opens a new X draft mentioning this account.' }
     ];
     const desc = ce('div', 'x-share-desc');
-    const btns = [];
+    desc.id = 'x-share-mode-description';
+    modeWrap.setAttribute('aria-describedby', desc.id);
+    const radios = [];
     let mode = MODES.some(m => m.key === lastShareMode) ? lastShareMode : 'quote';
-    const selectMode = (key, i) => {
+    const selectMode = key => {
         mode = key;
         lastShareMode = key;
-        seg.style.setProperty('--i', String(i));
-        btns.forEach((b, j) => b.setAttribute('aria-selected', j === i ? 'true' : 'false'));
-        desc.textContent = MODES[i].desc;
+        radios.forEach(radio => { radio.checked = radio.value === key; });
+        desc.textContent = MODES.find(item => item.key === key).desc;
     };
-    MODES.forEach((m, i) => {
-        const b = ce('button');
-        b.type = 'button';
-        b.appendChild(glyph(m.ico, 15));
-        b.appendChild(ce('span', 'x-share-mt', m.mt));
-        b.appendChild(ce('span', 'x-share-ms', m.ms));
-        b.addEventListener('click', () => selectMode(m.key, i));
-        btns.push(b);
-        seg.appendChild(b);
+    MODES.forEach(item => {
+        const label = ce('label', 'x-share-mode');
+        const radio = ce('input');
+        radio.type = 'radio';
+        radio.name = 'x-share-mode';
+        radio.value = item.key;
+        radio.addEventListener('change', () => { if (radio.checked) selectMode(item.key); });
+        label.append(radio, ce('span', null, item.label));
+        radios.push(radio);
+        seg.appendChild(label);
     });
-    modeWrap.appendChild(seg);
-    modeWrap.appendChild(desc);
-    selectMode(mode, MODES.findIndex(m => m.key === mode));
+    modeWrap.append(seg, desc);
+    selectMode(mode);
 
-    // actions
-    const actions = ce('div', 'x-share-actions');
     const shareBtn = ce('button', 'x-share-primary');
     shareBtn.type = 'button';
-    shareBtn.appendChild(glyph('xLogo', 17));
-    shareBtn.appendChild(ce('span', null, 'Share on X'));
-    const copyBtn = ce('button', 'x-share-ghost');
-    copyBtn.type = 'button';
-    copyBtn.title = 'Copy image';
-    copyBtn.appendChild(glyph('copy', 17));
-    const saveBtn = ce('button', 'x-share-ghost');
-    saveBtn.type = 'button';
-    saveBtn.title = 'Save PNG';
-    saveBtn.appendChild(glyph('save', 17));
-    actions.appendChild(shareBtn);
-    actions.appendChild(copyBtn);
-    actions.appendChild(saveBtn);
-
-    const hedge = ce('p', 'x-share-hedge', TOUCH
-        ? 'Share attaches the image to your X post via your phone’s share sheet. Location may be approximate.'
-        : 'Share copies the evidence to your clipboard and opens X. Paste it (Ctrl/⌘+V), then post. Location may be approximate.');
-
-    // Two-column body on PC (preview | controls); stacks on mobile.
+    shareBtn.append(glyph(TOUCH ? 'share' : 'xLogo', 17), ce('span', null, TOUCH ? 'Share image' : 'Continue to X'));
+    const feedback = ce('div', 'x-share-feedback');
+    feedback.setAttribute('role', 'status');
+    feedback.hidden = true;
+    const guide = ce('div', 'x-share-guide');
+    guide.append(dialogIcon('infoCircle', 16), ce('p', null, TOUCH
+        ? 'Your device’s share sheet chooses the destination. Select X or another app and review before sharing. Location may be approximate.'
+        : 'Continue copies the PNG and opens an X draft. Paste the image with Ctrl/⌘+V, review it, then post. Location may be approximate.'));
     const sbody = ce('div', 'x-share-body');
     const side = ce('div', 'x-share-side');
-    side.appendChild(ce('span', 'x-share-caplbl', 'Caption'));
-    side.appendChild(capWrap);
-    side.appendChild(modeWrap);
-    side.appendChild(actions);
-    sbody.appendChild(preview);
-    sbody.appendChild(side);
-
-    pad.appendChild(head);
-    pad.appendChild(sbody);
-    pad.appendChild(hedge);
-    sheet.appendChild(pad);
+    side.append(modeWrap, captionGroup, guide);
+    sbody.append(previewColumn, side);
+    const footer = ce('div', 'x-share-footer');
+    footer.append(ce('p', 'x-share-footnote', 'Nothing is posted automatically.'), shareBtn);
+    sheet.append(head, sbody, feedback, footer);
     overlay.appendChild(sheet);
 
-    const close = () => {
+    function closeZoom(restoreFocus = true) {
+        if (!zoom) return;
+        zoom.remove();
+        zoom = null;
+        sheet.inert = false;
+        if (restoreFocus && !closed) preview.focus({ preventScroll: true });
+    }
+    function close(restoreFocus = true) {
+        if (closed) return;
+        closed = true;
+        closeZoom(false);
         overlay.remove();
-        document.querySelector('.x-share-zoom')?.remove();
-        document.removeEventListener('keydown', onKey);
-    };
+        document.removeEventListener('keydown', onKey, true);
+        document.removeEventListener('focusin', onFocus, true);
+        if (activeShareSheet?.overlay === overlay) activeShareSheet = null;
+        if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    }
+    function focusables(root) {
+        return Array.from(root.querySelectorAll('button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex="0"]'))
+            .filter(node => node.getClientRects().length > 0 && !node.closest('[hidden]') &&
+                (node.type !== 'radio' || node.checked));
+    }
+    function onFocus(event) {
+        const root = zoom || sheet;
+        if (!closed && !root.contains(event.target)) (focusables(root)[0] || root).focus({ preventScroll: true });
+    }
     function onKey(e) {
         if (e.key === 'Escape') {
-            // Escape closes the zoom overlay first (if open), then the sheet.
-            const zoom = document.querySelector('.x-share-zoom');
-            if (zoom) { zoom.remove(); return; }
-            close();
-        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doShare(); }
+            e.preventDefault();
+            e.stopPropagation();
+            if (zoom) closeZoom();
+            else close();
+        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !zoom) {
+            e.preventDefault();
+            e.stopPropagation();
+            doShare();
+        } else if (e.key === 'Tab') {
+            const root = zoom || sheet;
+            const items = focusables(root);
+            const first = items[0] || root;
+            const last = items[items.length - 1] || root;
+            if (!root.contains(document.activeElement) || document.activeElement === root ||
+                (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+                e.preventDefault();
+                (e.shiftKey ? last : first).focus({ preventScroll: true });
+            }
+        }
     }
-    closeBtn.onclick = close;
-    overlay.onclick = e => { if (e.target === overlay) close(); };
-    document.addEventListener('keydown', onKey);
+    closeBtn.addEventListener('click', () => close());
+    overlay.addEventListener('click', event => {
+        event.stopPropagation();
+        if (event.target === overlay) close();
+    });
+    function report(message, tone = 'success') {
+        if (closed) return;
+        feedback.textContent = message;
+        feedback.dataset.tone = tone;
+        feedback.hidden = false;
+    }
+    function setPending(value) {
+        pending = value;
+        shareBtn.disabled = value || copying;
+        copyBtn.disabled = value || copying;
+        shareBtn.setAttribute('aria-busy', String(value));
+    }
 
-    // Save the rendered evidence PNG (shared by the Save button and the mobile fallback).
     const saveImage = () => {
+        if (closed) return;
         const link = document.createElement('a');
         link.download = filename;
         link.href = previewDataUrl;
+        document.body.appendChild(link);
         link.click();
+        link.remove();
     };
+    function nativeFailure(error) {
+        if (closed) return;
+        setPending(false);
+        if (error?.name === 'AbortError') {
+            report('Sharing cancelled. Your image is still here.', 'warning');
+            return;
+        }
+        saveImage();
+        report('Sharing was unavailable. A PNG download was requested. Attach it manually, or use Save PNG if the download did not start.', 'warning');
+    }
 
-    // The flow runs synchronously inside the click so window.open / share / clipboard
-    // all keep the user-gesture activation.
+    // Clipboard, window.open and native share are invoked before any await, while
+    // the initiating click or keyboard gesture still provides user activation.
     function doShare() {
+        if (closed || pending || copying || zoom) return;
+        setPending(true);
         const caption = cap.value;
-        const blob = dataUrlToBlob(previewDataUrl);
-
         if (TOUCH) {
-            const file = new File([blob], 'x-posed-evidence.png', { type: 'image/png' });
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                close();
-                navigator.share({ files: [file], text: caption + (info.tweetUrl ? ' ' + info.tweetUrl : '') })
-                    .catch(err => {
-                        if (err && err.name === 'AbortError') return; // user cancelled — no fallback needed
-                        // A real share failure — save the image so the user still has a path.
-                        saveImage();
-                        showToast({ title: 'Share failed — image saved', message: `${filename} — attach it to your post.`, icon: glyph('save', 20), iconType: 'warning', duration: 7000 });
-                    });
-                return;
+            try {
+                const file = new File([blob], filename, { type: 'image/png' });
+                if (navigator.share && navigator.canShare?.({ files: [file] })) {
+                    Promise.resolve(navigator.share({ files: [file], text: caption + (info.tweetUrl ? ' ' + info.tweetUrl : '') }))
+                        .then(() => close(), nativeFailure);
+                } else nativeFailure();
+            } catch (error) {
+                nativeFailure(error);
             }
-            // No file-level Web Share here, and mobile browsers usually block clipboard
-            // image writes too — so save the PNG to attach manually rather than pretend.
-            close();
-            saveImage();
-            showToast({ title: 'Image saved', message: `${filename} — attach it to your X post.`, icon: glyph('save', 20), iconType: 'info', duration: 7000 });
             return;
         }
 
         const clip = copyImage(blob);
-        const win = window.open(buildIntentUrl(mode, caption, info.tweetUrl, statusId, info.screenName), '_blank');
-        close();
+        let win = null;
+        try {
+            win = window.open(buildIntentUrl(mode, caption, info.tweetUrl, statusId, info.screenName), '_blank');
+            if (win) win.opener = null;
+        } catch { /* Treat browser-denied opens as blocked pop-ups. */ }
         clip.then(copied => {
+            if (closed) return;
             if (win && copied) {
-                // Composer opened AND the image really landed on the clipboard: flag the new
-                // X tab so its content script reminds the user to paste. Set only on success
-                // so a failed copy can't produce a misleading "Evidence is on your clipboard".
-                try { browserAPI.storage.local.set({ xpPasteHint: Date.now() }); } catch (_) { /* ignore */ }
+                // Only a successful image copy plus a real composer window may
+                // produce the reminder in the destination tab.
+                try {
+                    Promise.resolve(browserAPI.storage.local.set({ xpPasteHint: Date.now() })).catch(() => {});
+                } catch { /* The draft and clipboard remain usable without a reminder. */ }
+                close();
             } else if (!win) {
-                // Pop-up blocked: the composer never opened — surface status in this tab.
-                showToast({
-                    title: 'Pop-up blocked',
-                    message: copied
-                        ? 'Your evidence is copied — open a post and paste it (Ctrl/⌘+V).'
-                        : 'Allow pop-ups for x.com, or use Save to attach the image.',
-                    icon: glyph('warn', 20),
-                    iconType: 'warning',
-                    duration: 9000
-                });
+                report(copied
+                    ? 'The image was copied, but the X window was blocked. Allow pop-ups and try again, or open an X draft and paste with Ctrl/⌘+V.'
+                    : 'The X window and image copy were blocked. Allow pop-ups and try again, or use Save PNG to attach the image manually.', 'warning');
+            } else {
+                report('The X draft opened, but image copy was blocked. Use Copy image to retry, or Save PNG and attach the file in your draft.', 'warning');
             }
-            // win && !copied: composer opened but the clipboard write failed — no hint flag
-            // (nothing to paste); the user can fall back to Save.
+            if (!closed) setPending(false);
         });
     }
 
-    shareBtn.onclick = doShare;
-    copyBtn.onclick = () => {
-        const blob = dataUrlToBlob(previewDataUrl);
-        copyImage(blob).then(ok => showToast({
-            title: ok ? 'Image copied' : 'Copy unavailable',
-            message: ok ? 'Paste it into a post, DM, or anywhere.' : 'Your browser blocked image copy — use Save.',
-            icon: glyph(ok ? 'copy' : 'warn', 20),
-            iconType: ok ? 'success' : 'warning',
-            duration: 4000
-        }));
-    };
-    saveBtn.onclick = () => {
+    shareBtn.addEventListener('click', doShare);
+    copyBtn.addEventListener('click', () => {
+        if (closed || pending || copying) return;
+        copying = true;
+        setPending(false);
+        copyBtn.setAttribute('aria-busy', 'true');
+        copyImage(blob).then(ok => {
+            copying = false;
+            if (closed) return;
+            setPending(false);
+            copyBtn.setAttribute('aria-busy', 'false');
+            report(ok ? 'Image copied. Paste it into your draft with Ctrl/⌘+V.'
+                : 'Your browser blocked image copy. Use Save PNG and attach the file instead.', ok ? 'success' : 'warning');
+        });
+    });
+    saveBtn.addEventListener('click', () => {
         saveImage();
-        showToast({ title: 'Saved evidence PNG', message: filename, icon: glyph('check', 20), iconType: 'success', duration: 4000 });
-    };
+        report(`PNG download started: ${filename}`);
+    });
 
+    activeShareSheet = { overlay, close, returnFocus };
     document.body.appendChild(overlay);
-    setTimeout(() => cap.focus(), 60);
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('focusin', onFocus, true);
+    cap.focus({ preventScroll: true });
 }
 
 /**
@@ -1014,27 +984,5 @@ function generateFilename(screenName) {
  * Show error notification
  */
 function showErrorNotification(message) {
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #f4212e;
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-        font-size: 14px;
-        z-index: ${Z_INDEX.TOAST};
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    `;
-    notification.textContent = message;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.style.opacity = '0';
-        notification.style.transition = 'opacity 0.3s';
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
+    showToast({ title: 'Capture unavailable', message, iconType: 'error', duration: 3000 });
 }

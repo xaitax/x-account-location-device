@@ -1,0 +1,100 @@
+/* Shared Graphite notifications. Colors are scoped by graphite-theme.css. */
+.x-toast-container {
+    position: fixed;
+    right: max(20px, env(safe-area-inset-right));
+    bottom: max(20px, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(390px, calc(100vw - 32px));
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    color-scheme: var(--xp-color-scheme);
+    font-family: var(--xp-font-ui);
+    pointer-events: none;
+}
+.x-toast-container, .x-toast-container * { box-sizing: border-box; }
+.x-toast {
+    position: relative;
+    display: flex;
+    flex-shrink: 0;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    overflow: hidden;
+    border: 1px solid var(--xp-border);
+    border-radius: 10px;
+    background: var(--xp-surface);
+    color: var(--xp-text);
+    font-size: 13px;
+    line-height: 1.5;
+    pointer-events: auto;
+    animation: x-toast-enter .2s ease-out;
+    transition: opacity .3s ease, transform .3s ease;
+}
+.x-toast-icon { display: flex; flex: 0 0 20px; justify-content: center; margin-top: 1px; color: var(--xp-text-dim); }
+.x-toast-icon svg { display: block; width: 20px; height: 20px; }
+.x-toast[data-tone="warning"] .x-toast-icon { color: var(--xp-alert); }
+.x-toast[data-tone="error"] .x-toast-icon { color: var(--xp-danger); }
+.x-toast[data-tone="success"] .x-toast-icon { color: var(--xp-accent); }
+.x-toast-content { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.x-toast-title { margin: 0 0 4px; font-size: 13px; font-weight: 650; color: var(--xp-text); }
+.x-toast-message { color: var(--xp-text-dim); }
+.x-toast-time {
+    display: inline-block;
+    margin-top: 3px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--xp-alert-soft);
+    color: var(--xp-alert);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.x-toast-close {
+    display: flex;
+    flex: 0 0 28px;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin: -4px -4px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--xp-text-dim);
+    cursor: pointer;
+}
+.x-toast-close:hover { background: var(--xp-surface-2); color: var(--xp-text); }
+.x-toast-close:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: 2px; }
+.x-toast-progress {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    background: var(--xp-border);
+    transform-origin: left center;
+    animation: x-toast-countdown linear forwards;
+}
+.x-toast-paused .x-toast-progress { animation-play-state: paused; }
+.x-toast-hiding { opacity: 0; transform: translateY(6px); pointer-events: none; }
+.x-toast-spinner {
+    display: block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--xp-border);
+    border-top-color: var(--xp-accent);
+    border-radius: 50%;
+    animation: x-toast-spin .8s linear infinite;
+}
+@keyframes x-toast-enter { from { opacity: 0; transform: translateY(6px); } }
+@keyframes x-toast-countdown { to { transform: scaleX(0); } }
+@keyframes x-toast-spin { to { transform: rotate(360deg); } }
+@media (max-width: 480px) {
+    .x-toast-container { right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .x-toast, .x-toast-spinner { animation: none; transition: none; }
+    .x-toast-progress { display: none; }
+}

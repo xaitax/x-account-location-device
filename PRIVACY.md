@@ -1,150 +1,87 @@
-## **Privacy Policy for "X-Posed: Account Location & Device Info"**
+# Privacy policy
 
-**Last updated: 2025-11-27**
+Last updated: 2026-09-27
 
-This browser extension prioritizes your privacy. By default, it does **not** collect, transmit, store, or share any personal data.
+This policy describes X-Posed: Account Location & Device Info, browser extension version 4.0.0. Earlier versions available in browser stores may not include every feature described below. The separate iPhone and iPad app has its own [privacy policy](PRIVACY_iOS.md).
 
----
+## In brief
 
-### **What the extension does**
+- X-Posed reads account information and post elements on X to display labels and apply your filters locally. It does not block or mute accounts through X.
+- Community Cache is enabled by default on new installations. Updates preserve your existing choice. You can turn it off in Settings.
+- Community lookups send the requested public account handles to the cache server. Contributions share a limited set of account metadata. Handles and account IDs are identifiable data, not anonymous records.
+- X authentication headers are stored locally and used only for requests to X. They are not sent to Community Cache.
+- Filter rules and filtering statistics stay local unless you choose to export rules in a backup. There is no usage-analytics or advertising code in the extension.
 
-* Reads publicly visible usernames on *x.com* / *twitter.com*.
-* Makes authenticated requests **only** to X's official GraphQL API using the user's existing session to display:
-  * Account country label
-  * Device/platform indicator
-* Caches this data **locally** in the user's browser (`chrome.storage.local`) to avoid repeated API calls.
+## Information read from X
 
----
+The extension reads usernames, account labels, post links and relevant page elements on `x.com` and `twitter.com`. It can request additional account information from X using your existing signed-in session. This includes X's account country or region, connection source, location-accuracy warning, affiliation, account dates and other profile metadata shown in the account-details card.
 
-### **What the extension does *not* do**
+These are X's account-level labels, not a measurement of someone's current physical location or the device used for an individual post. A location warning is not proof that someone uses a VPN. Information from X or the community cache can be incomplete, stale or inaccurate.
 
-* It does **not** collect any personal information.
-* It does **not** use analytics, tracking scripts, or third-party services.
-* It does **not** include or execute remote code.
-* It does **not** access or read cookies outside X's own context.
-* It does **not** store or transmit user credentials.
+To make authenticated requests, the extension captures authorization and CSRF headers from X's requests and saves them in extension-local storage. It can also read X's `ct0` CSRF cookie from the X page context; the browser supplies applicable session cookies when making authenticated requests to X. X-Posed does not ask for or record your password. The saved headers are sensitive session-related data and are not included in configuration exports or community-cache requests.
 
----
+## Local settings, account cache and profile details
 
-### **Community Cloud Cache (Opt-In Feature)**
+Settings, saved filters, Always Show accounts and the account cache are stored in the browser's extension-local storage, not browser sync storage. Saved filters can contain text, handles, domains or URLs you enter.
 
-The extension includes an **optional** Community Cloud Cache feature that is **disabled by default**. When enabled by the user:
+The account cache is keyed by handle. New cache writes retain a compact record of location, connection source, location accuracy, affiliation and freshness information. Older stored records can contain additional metadata. The cache has a configured limit of 50,000 accounts and treats observations older than 60 days as expired; entries can be evicted sooner because of capacity or browser-storage limits. Expired entries are removed during cache loading, access or saving, rather than by a server-side deletion schedule.
 
-#### **What data is shared**
+**Use profile details**, in **Blocking → Behavior**, is enabled by default. It reads a bounded subset of profile data already delivered in X's own responses: bios, self-written profile locations, website and bio links, account labels, and follower, following, post and media counts. This passive feature makes no additional requests to X. It holds up to 500 profiles in page-session memory, with limits on text and link sizes. This profile cache is not written to disk, exported or contributed to Community Cache. Turning the feature off clears it; it also clears when the page session ends. Your saved matching rules remain until you change or remove them.
 
-Only anonymous, non-personal data is transmitted:
+## Community Cache
 
-Every field below is already public on the account's own X profile.
+When enabled, the extension contacts `https://x-posed-cache.xaitax.workers.dev`, hosted on Cloudflare Workers with Workers KV storage. It sends handles for account lookups and can contribute freshly obtained account information to help other users avoid repeated X requests. The server also provides aggregate cache totals.
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| Username | Public X handle | `@xaitax` |
-| Location | Country from X's API | `United States` |
-| Device | Platform type | `Android`, `iOS`, `Web` |
-| Affiliation | Parent organisation shown on the account's badge, when it has one | the organisation's public name |
-| Account created | Account creation date | Unix timestamp |
-| Account ID | X's numeric account ID | `44196397` |
-| Handle changes | How many times the username has changed | `0` |
-| Timestamp | When data was cached | Unix timestamp |
+Contributed records can contain:
 
-#### **What is NOT shared**
+| Field | Purpose |
+|---|---|
+| Public handle | Identifies the account being cached |
+| Country or region | X's account-location label |
+| Connection source | X's device, platform or app-store label |
+| Location accuracy | Whether X reports a location warning |
+| Affiliation | Organization name or handle, when available |
+| Account creation date | Account age information, when available |
+| Numeric account ID | X's account identifier, when available |
+| Handle-change count | Number reported by X, when available |
+| Cache timestamp | Time recorded by the server when storing the entry |
 
-* No real names
-* No email addresses
-* No IP addresses (requests go through Cloudflare Workers)
-* No profile pictures or bios
-* No tweet content
-* No follower/following counts
-* No personal identifiers
+Community contributions do not include passwords, X authorization or CSRF headers, X session cookies, post text, profile images, bios, follower/following counts, filter rules or filtering-statistics records. Lookup requests nevertheless reveal which handles are being requested. The service is not an anonymous lookup system.
 
-#### **How it works**
+Requests use HTTPS. Cloudflare receives network information, including the requesting IP address, and the worker uses that address for rate limiting. This policy does not promise that infrastructure providers keep no request logs or network metadata.
 
-1. **Lookup**: Extension queries the cloud cache for username → location/device mapping
-2. **Miss**: If not found, queries X's API directly
-3. **Contribute**: After fetching from X, contributes the anonymous mapping to the cloud
+Cloud records are configured to expire 60 days after a write. A later contribution can refresh a record. Turning off Community Cache stops new cloud lookups and contributions; requests already in progress may finish. It does not delete existing community records or prevent other users from contributing the same accounts. Clearing your local cache or uninstalling the extension does not delete community records either.
 
-#### **Data retention**
+## Local filtering statistics
 
-* Cloud cache entries expire after **60 days**
-* Data can be deleted by the cloud server operator at any time
-* Users can disable cloud cache at any time in the Options page
+Filtering statistics count unique, identifiable posts hidden or highlighted by your filters. Location and device breakdowns use information already available to the extension, without extra X or community-cache requests.
 
-#### **Self-hosting**
+The extension stores totals and per-post fingerprints in local IndexedDB. Each fingerprint is a SHA-256 hash of the post ID and a reset-specific identifier. The statistics database stores those fingerprints and coarse location/device buckets, not raw post IDs, post text or account handles. The fingerprints prevent repeated counting across tabs and restarts. They are pseudonymous identifiers, not a guarantee of anonymity.
 
-Users can deploy their own Cloudflare Worker to run a private cloud cache server. See the [cloud-server documentation](cloud-server/README.md) for instructions.
+These records are not uploaded or included in configuration exports. They remain until you use **Statistics → Filtering → Reset counts** or remove the extension's data through the browser. Resetting clears totals and fingerprints without changing your filters or account cache. Clearing the account cache does not reset statistics. The world maps are bundled and do not contact a map service.
 
----
+## Sharing, backups and external resources
 
-### **Data Storage**
+The Share feature creates an image locally from the selected post and its displayed account information. Rendering can load the account's profile image and post media from their existing image URLs. You choose whether to copy the result to your clipboard, download a PNG, open an X draft, or send it through your device's share menu. Opening an X draft sends the selected draft text and post link to X. Native sharing passes the selected content to the service you choose. X-Posed does not publish posts automatically or upload these images to Community Cache.
 
-#### **Local Storage (Default)**
+**Export Data** creates a local file containing settings, filter rules, Always Show accounts and cached account information. It excludes saved authentication headers, the passive profile cache and filtering statistics. Backups and saved images can contain account information and personal filtering preferences; review them before sharing. Removing extension data does not remove files you already downloaded.
 
-All cached data is stored **locally on the user's device** using `chrome.storage.local` and never leaves the browser unless the user explicitly enables Community Cloud Cache.
+Country flags can load from X's Twemoji CDN at `abs-0.twimg.com`; profile and media images can load from X's image hosts. Those providers receive the associated network requests even when Community Cache is off. Interface icons and world maps are bundled with the extension. The extension does not execute downloaded code.
 
-Users may clear the cache at any time via:
-* Extension popup → "Clear Cache" button
-* Browser settings → Extension data
+Support, donation, repository, browser-store and app links open external services when you follow them. Their policies apply to those visits and any transactions. No external donation widget is embedded in the settings page.
 
-#### **Cloud Storage (Opt-In Only)**
+## Permissions and controls
 
-When Community Cloud Cache is enabled:
-* Anonymous username mappings are stored on Cloudflare Workers KV
-* Data is encrypted in transit (HTTPS)
-* No personal data is ever transmitted
+| Permission | Use |
+|---|---|
+| `storage` | Save settings, filters, cached accounts and request headers locally |
+| `*://*.x.com/*` and `*://*.twitter.com/*` | Read relevant page information, add the interface and make requests to X |
+| `https://x-posed-cache.xaitax.workers.dev/*` | Make community-cache requests when enabled |
 
----
+The Firefox manifest also declares `websiteActivity` under its data-collection permissions. The extension does not request the browser's `cookies` permission; this does not mean it cannot use X's existing session as described above.
 
-### **Permissions**
+You can disable Community Cache in Settings, disable passive profile details in Blocking → Behavior, clear cached accounts from the popup or Settings, reset filtering statistics separately, and remove individual rules or Always Show entries. **Clear cache** does not clear saved authentication headers, settings, filters or statistics. Use your browser's extension-data controls or remove the extension to remove its locally stored data; separately delete any exported files you no longer need.
 
-The extension requests the minimum required permissions:
+## Contact
 
-| Permission | Purpose |
-|------------|---------|
-| `storage` | Store cache and settings locally |
-| `*://*.x.com/*` | Read page content and make API requests to X |
-| `*://*.twitter.com/*` | Legacy domain support |
-
-No additional permissions are required for the optional cloud cache feature.
-
----
-
-### **Third-Party Services**
-
-#### **Default Mode (Cloud Cache Disabled)**
-* **No third-party services used**
-* All requests go directly to X's servers
-
-#### **With Cloud Cache Enabled**
-* **Cloudflare Workers**: Hosts the community cache server
-* Cloudflare's privacy policy applies to their infrastructure
-* No personal data is transmitted or stored
-
----
-
-### **User Control**
-
-Users have full control over their data:
-
-| Action | How |
-|--------|-----|
-| Disable extension | Toggle in popup or browser settings |
-| Clear local cache | Popup → "Clear Cache" button |
-| Disable cloud cache | Options → Toggle "Community Cloud Cache" off |
-| Remove extension | Browser → Manage extensions → Remove |
-
----
-
-### **Changes to This Policy**
-
-Any material changes to this privacy policy will be noted in the extension changelog and this document's "Last updated" date.
-
----
-
-### **Contact**
-
-For questions or concerns, please contact:
-
-**Alexander Hagenah**
-* X: [@xaitax](https://x.com/xaitax)
-* LinkedIn: [alexhagenah](https://www.linkedin.com/in/alexhagenah/)
-* Website: [primepage.de](https://primepage.de)
+For questions about this policy, contact Alexander Hagenah through [@xaitax on X](https://x.com/xaitax) or [primepage.de](https://primepage.de).

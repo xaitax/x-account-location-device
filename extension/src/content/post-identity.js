@@ -72,6 +72,33 @@ export function ownPostId(article) {
 }
 
 /**
+ * Read a quote's own timestamp link. Never borrow the surrounding post's ID or
+ * an arbitrary link from its text. Linkless quotes have no reliable identity.
+ */
+export function quotedPostId(card) {
+    const article = card?.closest('article[data-testid="tweet"]');
+    if (!article || card === article || !card.matches('[data-testid="quoteTweet"], [role="link"][tabindex="0"]')) return null;
+    let quoteId = null;
+    for (const time of card.querySelectorAll('time')) {
+        if (time.closest('article') !== article || time.closest('[data-testid="tweetText"]')) continue;
+        const link = time.closest('a[href]');
+        if (!link || (link !== card && !card.contains(link))) continue;
+        if (link !== card && link.querySelector('[data-testid="User-Name"], [data-testid="tweetText"]')) continue;
+        let parent = time.parentElement;
+        while (parent && parent !== card) {
+            if (parent !== link && parent.matches('[data-testid="quoteTweet"], [role="link"][tabindex="0"]')) break;
+            parent = parent.parentElement;
+        }
+        if (parent !== card) continue;
+        const id = statusIdOf(link.getAttribute('href'));
+        if (!id) continue;
+        if (quoteId && quoteId !== id) return null;
+        quoteId = id;
+    }
+    return quoteId;
+}
+
+/**
  * Unknown identity cannot exempt a post from filtering.
  * @param {HTMLElement|null} article
  * @param {string} [pathname]

@@ -8,6 +8,8 @@
  */
 
 import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.js';
+import { PROFILE_LIMITS, isProfileUsername, projectProfileUser, mergeProjectedProfile, profileSignature } from '../shared/profile-data.js';
+import { parseAccountResponse } from '../shared/account-response.js';
 
 (function() {
     'use strict';
@@ -37,21 +39,12 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
     const lookupQueue = new PacedLookupQueue();
     const pendingLookups = new Map();
 
-    // Kept local rather than imported from shared/constants.js: this bundle is injected into
-    // the page, and pulling that module in would drag the country tables along with it.
-    // Mirrors PROFILE_CACHE_CONFIG.MAX_WALK_NODES.
-    const MAX_WALK_NODES = 200000;
-    const MAX_BIO_LENGTH = 200;
-    // Bounded so the dedup set can't grow across a long session; cleared wholesale when it
-    // fills, which also lets a changed bio or follower count refresh eventually.
-    const RECENT_EMIT_LIMIT = 500;
-
-    // Starts ON, matching the default setting, and is only ever turned OFF by an explicit
-    // instruction from the content script. Starting OFF meant the very first HomeTimeline —
-    // which fires before the content script can finish its ready round-trip — was always
-    // missed, and a single dropped message disabled harvesting for the whole session.
-    let enrichmentEnabled = true;
-    const recentlyEmitted = new Set();
+    // Never collect profile text before the content script has loaded the user's
+    // preference. Its ready/settings handshake enables passive harvesting explicitly.
+    let enrichmentEnabled = false;
+    // Bounded, primitive-only snapshots. A short dedup window permits recipient-cache
+    // recovery; changed or newly available fields are always relayed immediately.
+    const recentlyEmitted = new Map();
 
     // Counters for window.XPosed.enrichmentStatus(), so a "nothing shows up" report can be
     // diagnosed without guessing which link in the chain broke.
@@ -120,62 +113,6 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
         debugLog('🔄 X-Posed: Headers reset - waiting for next API request');
     });
 
-    function parseAboutAccount(data, requestedScreenName = null) {
-        const user = data?.data?.user_result_by_screen_name?.result;
-        const profile = user?.about_profile;
-
-        // Same guard as parseResponse in background/api-client.js (issue #23): never accept a
-        // response describing a DIFFERENT account than the one asked for. This path matters
-        // just as much as the background's — the result is written straight into the shared
-        // cache via SET_CACHE, so an unchecked mismatch would attach one account's country and
-        // device to another and make every filter act on the wrong data. Only enforced when X
-        // actually returns a handle, so it can never break a normal lookup.
-        const returnedScreenName = user?.core?.screen_name || null;
-        if (requestedScreenName && returnedScreenName &&
-            returnedScreenName.toLowerCase() !== requestedScreenName.toLowerCase()) {
-            throw new Error(`Returned @${returnedScreenName} does not match requested @${requestedScreenName}`);
-        }
-
-        // MUST stay in sync with parseAboutAccount in background/api-client.js. This is the
-        // in-page fallback used when the background can't authenticate, so anything missing
-        // here silently becomes missing everywhere. In particular the affiliation must be
-        // parsed: `affiliateUsername` is the marker meaning "affiliation was checked" (see
-        // affiliationWasChecked in shared/constants.js), so emitting the rest of `meta`
-        // without it would cache the account as confirmed-unaffiliated.
-        const label = user?.affiliates_highlighted_label?.label ||
-            user?.identity_profile_labels_highlighted_label?.label || null;
-        const affiliate = label?.description ? {
-            name: label.description,
-            badgeUrl: label?.badge?.url || null,
-            url: label?.url?.url || null,
-            type: label?.userLabelType || label?.userLabelDisplayType || null
-        } : null;
-
-        let usernameChanges = null;
-        const rawChanges = profile?.username_changes?.count;
-        if (rawChanges !== null && rawChanges !== undefined) {
-            const parsed = Number.parseInt(String(rawChanges), 10);
-            if (!Number.isNaN(parsed)) {
-                usernameChanges = parsed;
-            }
-        }
-
-        return {
-            location: profile?.account_based_in || null,
-            device: profile?.source || null,
-            locationAccurate: profile?.location_accurate !== false,
-            meta: {
-                name: user?.core?.name || null,
-                avatarUrl: user?.avatar?.image_url || null,
-                createdAt: user?.core?.created_at || null,
-                restId: user?.rest_id || null,
-                affiliateUsername: profile?.affiliate_username || null,
-                affiliate,
-                usernameChanges
-            }
-        };
-    }
-
     window.addEventListener(EVENT_FETCH_USER_INFO, async event => {
         let request = {};
         try {
@@ -217,7 +154,7 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
                             code: response.status === 404 ? 'NOT_FOUND' : 'NETWORK_ERROR'
                         });
                     }
-                    return parseAboutAccount(await response.json(), screenName);
+                    return parseAccountResponse(await response.json(), screenName, { fullMetadata: false });
                 }).finally(() => { pendingLookups.delete(key); });
                 pendingLookups.set(key, pending);
             }
@@ -254,34 +191,6 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
     }
 
     /**
-     * Pull the profile fields we care about out of one X `User` object.
-     * Returns null for anything that isn't a usable user.
-     *
-     * Only primitives are copied out — nothing here keeps a reference into the response,
-     * so X's payload stays collectable.
-     */
-    function projectUser(user) {
-        const screenName = user?.core?.screen_name;
-        if (!screenName || typeof screenName !== 'string') return null;
-
-        const counts = user.relationship_counts || {};
-        const tweets = user.tweet_counts || {};
-        const bio = user.profile_bio?.description;
-
-        return {
-            u: screenName,
-            b: typeof bio === 'string' && bio ? bio.slice(0, MAX_BIO_LENGTH) : undefined,
-            p: typeof user.parody_commentary_fan_label === 'string'
-                ? user.parody_commentary_fan_label
-                : undefined,
-            f: Number.isInteger(counts.followers) ? counts.followers : undefined,
-            g: Number.isInteger(counts.following) ? counts.following : undefined,
-            t: Number.isInteger(tweets.tweets) ? tweets.tweets : undefined,
-            m: Number.isInteger(tweets.media_tweets) ? tweets.media_tweets : undefined
-        };
-    }
-
-    /**
      * Walk a parsed X GraphQL response for embedded `User` objects and relay what we find.
      *
      * Iterative rather than recursive: these payloads nest deeply enough (tweet → quoted
@@ -293,14 +202,13 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
     function harvestProfiles(data) {
         if (!enrichmentEnabled || !data || typeof data !== 'object') return;
 
-        const found = [];
-        const seenHere = new Set();
+        const found = new Map();
         const visited = new Set();
         const stack = [data];
         let nodes = 0;
 
         while (stack.length > 0) {
-            if (++nodes > MAX_WALK_NODES) break;
+            if (++nodes > PROFILE_LIMITS.MAX_WALK_NODES) break;
 
             const node = stack.pop();
             if (!node || typeof node !== 'object') continue;
@@ -308,31 +216,68 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
             visited.add(node);
 
             if (node.__typename === 'User') {
-                const projected = projectUser(node);
-                if (projected && !seenHere.has(projected.u) && !recentlyEmitted.has(projected.u)) {
-                    seenHere.add(projected.u);
-                    found.push(projected);
+                const name = node.core?.screen_name;
+                if (isProfileUsername(name) &&
+                    (found.size < PROFILE_LIMITS.MAX_USERS_PER_RESPONSE || found.has(name.toLowerCase()))) {
+                    const projected = projectProfileUser(node);
+                    if (projected) {
+                        // Multiple representations may each provide different fields.
+                        // Missing fields must not overwrite earlier known values.
+                        found.set(projected.u, mergeProjectedProfile(found.get(projected.u), projected));
+                    }
                 }
                 // Deliberately no `continue`: a User can contain further nested results.
             }
 
             if (Array.isArray(node)) {
-                for (let i = 0; i < node.length; i++) stack.push(node[i]);
+                const limit = Math.min(node.length, PROFILE_LIMITS.MAX_WALK_NODES - nodes - stack.length);
+                for (let i = 0; i < limit; i++) stack.push(node[i]);
             } else {
-                for (const key in node) stack.push(node[key]);
+                for (const key in node) {
+                    if (nodes + stack.length >= PROFILE_LIMITS.MAX_WALK_NODES) break;
+                    if (Object.hasOwn(node, key)) stack.push(node[key]);
+                }
             }
         }
 
         harvestStats.responses++;
-        if (found.length === 0) return;
+        const now = Date.now();
+        const pending = [];
+        for (const patch of found.values()) {
+            const previous = recentlyEmitted.get(patch.u);
+            const record = mergeProjectedProfile(previous?.record, patch);
+            const signature = profileSignature(record);
+            const emit = !previous || signature !== previous.signature ||
+                now - previous.emittedAt >= PROFILE_LIMITS.EMIT_TTL_MS;
+            recentlyEmitted.delete(patch.u);
+            recentlyEmitted.set(patch.u, {
+                record, signature, emittedAt: emit ? now : previous.emittedAt
+            });
+            if (recentlyEmitted.size > PROFILE_LIMITS.MAX_ENTRIES) {
+                recentlyEmitted.delete(recentlyEmitted.keys().next().value);
+            }
+            if (emit) pending.push(record);
+        }
 
-        if (recentlyEmitted.size > RECENT_EMIT_LIMIT) recentlyEmitted.clear();
-        for (const entry of found) recentlyEmitted.add(entry.u);
-        harvestStats.usersEmitted += found.length;
-
-        window.dispatchEvent(new CustomEvent(EVENT_PROFILES_HARVESTED, {
-            detail: JSON.stringify({ users: found })
-        }));
+        let batch = [];
+        let batchLength = '{"users":[]}'.length;
+        const flush = () => {
+            if (batch.length === 0) return;
+            const detail = `{"users":[${batch.join(',')}]}`;
+            harvestStats.usersEmitted += batch.length;
+            window.dispatchEvent(new CustomEvent(EVENT_PROFILES_HARVESTED, { detail }));
+            batch = [];
+            batchLength = '{"users":[]}'.length;
+        };
+        for (const record of pending) {
+            const serialized = JSON.stringify(record);
+            if (serialized.length + '{"users":[]}'.length > PROFILE_LIMITS.MAX_RELAY_LENGTH) continue;
+            const extraLength = serialized.length + (batch.length > 0 ? 1 : 0);
+            if (batch.length >= PROFILE_LIMITS.MAX_BATCH_ENTRIES || batchLength + extraLength > PROFILE_LIMITS.MAX_RELAY_LENGTH) flush();
+            batchLength += serialized.length + (batch.length > 0 ? 1 : 0);
+            batch.push(serialized);
+        }
+        flush();
     }
 
     /**
@@ -426,7 +371,7 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
                     const clone = response.clone();
                     // One tick, so the .json() tap gets first refusal on this response.
                     Promise.resolve().then(() => {
-                        if (tappedUrls.has(url)) return;
+                        if (!enrichmentEnabled || tappedUrls.has(url)) return;
                         clone.json().then(data => {
                             if (tappedUrls.has(url)) return;
                             tapPayload(url, data, 'fetch');
@@ -485,6 +430,7 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
                     const requestUrl = this._xPosedUrl;
                     this.addEventListener('load', function () {
                         try {
+                            if (!enrichmentEnabled) return;
                             const type = this.responseType;
                             // responseType 'json' hands back an already-parsed object (free);
                             // '' / 'text' needs one parse. Anything else (blob, arraybuffer)

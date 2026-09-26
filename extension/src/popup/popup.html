@@ -4,181 +4,193 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>X-Posed</title>
+    <link rel="stylesheet" href="../styles/graphite-theme.css">
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
     <div class="app">
-
-        <!-- HEADER -->
-        <header class="hdr">
-            <div class="logo">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                    <path d="M3 4 L9.5 12 L3 20" stroke="var(--xp-text)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M21 4 L14.5 12 L21 20" stroke="var(--xp-accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                    <circle cx="12" cy="12" r="2" fill="var(--xp-accent)"/>
-                </svg>
-            </div>
+        <header class="popup-header">
             <div class="brand">
-                <span class="name">X&#8209;POSED</span>
-                <span class="ver"><span class="dot"></span><span class="version"></span>&nbsp;&middot;&nbsp; LIVE</span>
+                <img class="brand-logo" src="../icons/icon48.png" width="32" height="32" alt="">
+                <div class="brand-copy">
+                    <h1>X-Posed</h1>
+                    <span class="version"></span>
+                </div>
             </div>
-            <a class="coffee" href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener" title="Buy me a coffee" aria-label="Support development on Ko-fi">
-                <span class="cup">&#9749;</span>
-                <span class="lbl">Coffee</span>
-                <svg class="heart" width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M12 21s-7.5-4.8-10-9.2C.6 9 1.6 5.6 4.7 4.9 7 4.4 8.8 5.6 12 9c3.2-3.4 5-4.6 7.3-4.1 3.1.7 4.1 4.1 2.7 6.9C19.5 16.2 12 21 12 21z"/></svg>
+            <a class="support-link" href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener" aria-label="Support X-Posed on Ko-fi">
+                <span class="popup-icon" data-popup-icon="coffee" aria-hidden="true"></span>
+                Support
             </a>
         </header>
 
-        <!-- Rate Limit Status Banner -->
-        <div class="rate-limit-banner" id="rate-limit-banner" style="display: none;">
-            <div class="rate-limit-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2 1.6 21h20.8z"/><path d="M12 9.5v5M12 17.8h.01"/></svg></div>
-            <div class="rate-limit-content">
-                <span class="rate-limit-title">Rate Limited</span>
-                <span class="rate-limit-time" id="rate-limit-time"></span>
-            </div>
-        </div>
-
-        <main class="main">
-
-            <!-- MASTER TOGGLE -->
-            <div class="master">
-                <div class="picon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2v6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M5.5 6.5a9 9 0 1 0 13 0" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <main>
+            <section class="extension-state" id="extension-state" data-state="loading" aria-labelledby="extension-status">
+                <span class="state-icon popup-icon" data-popup-icon="power" aria-hidden="true"></span>
+                <div class="state-copy">
+                    <h2 id="extension-status">Loading settings</h2>
+                    <p id="extension-status-description">Checking your preferences.</p>
+                    <button class="retry-button" id="btn-retry-settings" type="button" hidden>Try again</button>
                 </div>
-                <div class="mtext">
-                    <div class="mt-title">Extension Enabled</div>
-                    <div class="mt-sub"><span class="pulse"></span>ALL SYSTEMS ACTIVE</div>
-                </div>
-                <label class="sw">
-                    <input type="checkbox" id="toggle-enabled" checked>
-                    <span class="knob"></span>
+                <label class="toggle" title="Enable or pause X-Posed">
+                    <input type="checkbox" id="toggle-enabled" aria-label="Enable X-Posed" aria-describedby="extension-status-description" disabled>
+                    <span class="toggle-track" aria-hidden="true"></span>
                 </label>
+            </section>
+
+            <div class="rate-limit-banner" id="rate-limit-banner" role="status" hidden>
+                <span class="popup-icon" data-popup-icon="warn" aria-hidden="true"></span>
+                <div class="rate-limit-content">
+                    <span class="rate-limit-title">Lookups temporarily paused</span>
+                    <span id="rate-limit-time"></span>
+                </div>
             </div>
 
-            <!-- 01 STATISTICS -->
-            <div class="sec-label"><span class="idx">01</span> Statistics <span class="line"></span></div>
-            <div class="hero">
-                <svg class="spark" viewBox="0 0 200 54" preserveAspectRatio="none">
-                    <defs>
-                        <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0" stop-color="rgba(34,211,238,.45)"/>
-                            <stop offset="1" stop-color="rgba(34,211,238,0)"/>
-                        </linearGradient>
-                    </defs>
-                    <path d="M0,46 L18,40 L36,42 L54,32 L72,35 L90,24 L108,27 L126,16 L144,18 L162,9 L180,12 L200,3 L200,54 L0,54 Z" fill="url(#sg)"/>
-                    <path d="M0,46 L18,40 L36,42 L54,32 L72,35 L90,24 L108,27 L126,16 L144,18 L162,9 L180,12 L200,3" fill="none" stroke="var(--xp-accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <div class="hero-top">
-                    <span class="hero-cap" id="hero-cap">Community Cache</span>
-                    <span class="hero-badge" id="hero-badge">
-                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="var(--xp-accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        COMMUNITY
+            <section class="cache-summary" id="cache-summary" data-mode="loading" aria-labelledby="hero-cap">
+                <div class="cache-overview">
+                    <div class="cache-details">
+                        <h2 class="cache-heading">
+                            <span class="popup-icon" id="cache-kind" data-popup-icon="cloud" aria-hidden="true"></span>
+                            <span id="hero-cap">Account cache</span>
+                        </h2>
+                        <span class="cache-number" id="stat-community">...</span>
+                    </div>
+                    <span class="cache-art" aria-hidden="true">
+                        <span class="cache-art-orbit"></span>
+                        <span class="cache-art-globe" data-popup-icon="globe"></span>
                     </span>
                 </div>
-                <div class="hero-num"><span id="stat-community">-</span></div>
-                <div class="hero-sub" id="hero-sub">profiles cached by the community</div>
+                <p class="cache-caption" id="hero-sub">Loading cached account count.</p>
+            </section>
+
+            <div class="primary-actions">
+                <button class="button button-primary" id="btn-blocking" type="button">
+                    <span class="popup-icon" data-popup-icon="shield" aria-hidden="true"></span>
+                    Manage filters
+                </button>
+                <button class="button button-secondary" id="btn-options" type="button">
+                    <span class="popup-icon" data-popup-icon="settings" aria-hidden="true"></span>
+                    All settings
+                </button>
             </div>
 
-            <!-- 02 DISPLAY OPTIONS -->
-            <div class="sec-label"><span class="idx">02</span> Display Options <span class="line"></span></div>
-            <div class="settings-group">
-                <div class="chips">
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-flags" checked>
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 4h12l-2.5 4L17 12H5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
-                        <span class="clbl"><span class="ct">Show Flags</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
+            <fieldset class="quick-controls">
+                <legend>Show on posts</legend>
+                <div class="quick-grid">
+                    <label class="quick-option">
+                        <span>Country flags</span>
+                        <span class="toggle toggle-small">
+                            <input type="checkbox" id="toggle-flags" disabled>
+                            <span class="toggle-track" aria-hidden="true"></span>
+                        </span>
                     </label>
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-flag-device">
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M9 3v18" stroke="currentColor" stroke-width="2"/></svg></span>
-                        <span class="clbl"><span class="ct">Flag from Device</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
+                    <label class="quick-option">
+                        <span>Device icons</span>
+                        <span class="toggle toggle-small">
+                            <input type="checkbox" id="toggle-devices" disabled>
+                            <span class="toggle-track" aria-hidden="true"></span>
+                        </span>
                     </label>
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-devices" checked>
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="6" y="2.5" width="12" height="19" rx="2.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg></span>
-                        <span class="clbl"><span class="ct">Device Icons</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
-                    </label>
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-vpn" checked>
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 2.5v5C19 16 16 19.5 12 21 8 19.5 5 16 5 10.5v-5L12 3z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
-                        <span class="clbl"><span class="ct">VPN Indicator</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
-                    </label>
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-vpn-users" checked>
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16.5 5.3a3 3 0 0 1 0 5.4M17 19a5.5 5.5 0 0 0-2.7-4.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
-                        <span class="clbl"><span class="ct" title="Show accounts with X location warnings. When off, your hide or highlight mode applies.">Show warned accounts</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
-                    </label>
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-sidebar-link" checked>
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M9 4v16" stroke="currentColor" stroke-width="2"/></svg></span>
-                        <span class="clbl"><span class="ct">Sidebar Link</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
-                    </label>
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-info-icon" checked>
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2"/><path d="M12 11v5M12 7.7h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
-                        <span class="clbl"><span class="ct">Info Icon</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
-                    </label>
-
-                    <label class="chip">
-                        <input type="checkbox" id="toggle-click-details">
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 3.5l11 6.8-4.6 1.3 2.5 5.2-2.2 1-2.5-5.2-3.2 3.4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
-                        <span class="clbl"><span class="ct">Click for Details</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
-                    </label>
-
-                    <label class="chip span2">
-                        <input type="checkbox" id="toggle-capture-button" checked>
-                        <span class="cico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4M12 2v13"/></svg></span>
-                        <span class="clbl"><span class="ct">Share Button</span></span>
-                        <span class="sw sm"><span class="knob"></span></span>
-                    </label>
-
                 </div>
-            </div>
+            </fieldset>
 
-            <!-- ACTION BAR -->
-            <div class="actions">
-                <button class="btn danger" id="btn-clear-cache">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 7h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 7v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7" stroke="currentColor" stroke-width="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2"/></svg>
-                    Clear Cache
-                </button>
-                <button class="btn primary" id="btn-options">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4.6 14H4a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 5.7 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 11 4.6V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H24" stroke="currentColor" stroke-width="1.6"/></svg>
-                    Options
-                </button>
-            </div>
+            <details class="more-controls" id="more-controls">
+                <summary>
+                    <span>More controls</span>
+                    <span class="summary-chevron popup-icon" data-popup-icon="chevronRight" aria-hidden="true"></span>
+                </summary>
+                <div class="more-content">
+                    <fieldset class="control-group">
+                        <legend>On-post details</legend>
+                        <label class="control-row">
+                            <span>Location warning icon</span>
+                            <span class="toggle toggle-small">
+                                <input type="checkbox" id="toggle-vpn" disabled>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                        <label class="control-row">
+                            <span>Info icon</span>
+                            <span class="toggle toggle-small">
+                                <input type="checkbox" id="toggle-info-icon" disabled>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                        <label class="control-row">
+                            <span>Share button</span>
+                            <span class="toggle toggle-small">
+                                <input type="checkbox" id="toggle-capture-button" disabled>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                        <label class="control-row">
+                            <span>Open details on click</span>
+                            <span class="toggle toggle-small">
+                                <input type="checkbox" id="toggle-click-details" aria-describedby="click-details-hint" disabled>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                        <p class="control-hint" id="click-details-hint">Turn off to open details on hover. Touch devices always use tap.</p>
+                    </fieldset>
 
+                    <fieldset class="control-group">
+                        <legend>Filtering preferences</legend>
+                        <label class="control-row">
+                            <span>Use device country</span>
+                            <span class="toggle toggle-small">
+                                <input type="checkbox" id="toggle-flag-device" aria-describedby="device-country-hint" disabled>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                        <p class="control-hint" id="device-country-hint">Use the connected app's country when available. Otherwise, use account location.</p>
+                        <label class="control-row">
+                            <span>Show warned accounts</span>
+                            <span class="toggle toggle-small">
+                                <input type="checkbox" id="toggle-vpn-users" aria-describedby="warned-accounts-hint" disabled>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                        <p class="control-hint" id="warned-accounts-hint">Other saved filters still apply. Turn off to hide or highlight accounts with X location warnings.</p>
+                    </fieldset>
+
+                    <fieldset class="control-group">
+                        <legend>Navigation</legend>
+                        <label class="control-row">
+                            <span>Blocking link in X sidebar</span>
+                            <span class="toggle toggle-small">
+                                <input type="checkbox" id="toggle-sidebar-link" disabled>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                    </fieldset>
+
+                    <div class="cache-maintenance">
+                        <button class="clear-cache-button" id="btn-clear-cache" type="button" aria-expanded="false" aria-controls="cache-clear-confirm">
+                            <span class="popup-icon" data-popup-icon="database" aria-hidden="true"></span>
+                            Clear local cache
+                        </button>
+                        <div class="cache-clear-confirm" id="cache-clear-confirm" role="group" aria-labelledby="clear-cache-title" hidden>
+                            <h3 id="clear-cache-title">Clear cached accounts?</h3>
+                            <p>Saved filters and preferences stay unchanged. Account information will load again as you browse.</p>
+                            <div class="confirm-actions">
+                                <button class="button button-danger" id="btn-confirm-clear" type="button">Clear cache</button>
+                                <button class="button button-secondary" id="btn-cancel-clear" type="button">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <p class="popup-status" id="popup-status" role="status" aria-live="polite" hidden></p>
         </main>
 
-        <!-- FOOTER -->
-        <footer class="foot">
-            <a href="https://github.com/xaitax/x-account-location-device" target="_blank" rel="noopener">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.3c0 4.5 2.9 8.4 6.8 9.7.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.3 9.3 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7 1 .7 2v2.9c0 .3.2.6.7.5 3.9-1.3 6.8-5.2 6.8-9.7C22 6.6 17.5 2 12 2z"/></svg>
-                GitHub
-            </a>
-            <span class="sep"></span>
-            <a href="#" id="link-privacy">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"/></svg>
-                Privacy
-            </a>
+        <footer class="popup-footer">
+            <span>Made for a clearer timeline.</span>
+            <nav aria-label="Project information">
+                <a href="https://github.com/xaitax/x-account-location-device" target="_blank" rel="noopener">GitHub</a>
+                <a href="https://github.com/xaitax/x-account-location-device/blob/main/PRIVACY.md" id="link-privacy" target="_blank" rel="noopener">Privacy</a>
+            </nav>
         </footer>
-
     </div>
-
     <script src="popup.js" type="module"></script>
 </body>
 </html>

@@ -6,29 +6,42 @@
  * - Theme detection throttle 200→500ms (less CPU during scroll)
  */
 
-import browserAPI from '../shared/browser-api.js';
 import { SELECTORS, CSS_CLASSES, TIMING } from '../shared/constants.js';
 import { findInsertionPoint, getDeviceCountry, formatCountryName, debounce, throttle } from '../shared/utils.js';
 import { deviceIcon, glyph, flagImage } from './icons.js';
 import { showModal } from './modal.js';
 import { captureEvidence } from './evidence-capture.js';
 import { hovercard } from './hovercard.js';
+import { createSnapshotTracker } from '../shared/state-sync.js';
+import { showToast, cleanupNotifications } from './notifications.js';
+import { FILTER_SOURCES } from '../shared/filter-registry.js';
+import { createLifecycle } from '../shared/lifecycle.js';
+
+export { showToast, dismissToast } from './notifications.js';
 
 // ============================================
 // STATE (module-local)
 // ============================================
 
 let themeObserver = null;
-let toastContainer = null;
 let sidebarObserver = null;
 let currentNav = null;
 let resizeHandler = null;
 let sidebarModifying = false;
 let sidebarCheckInterval = null;
 let sidebarCheckTimeout = null;
+let sidebarGetState = null;
+let sidebarSettings = {};
+const sidebarSnapshots = createSnapshotTracker();
 
 // Cleanup functions registry - using Map with keys to prevent duplicates and memory leaks
 const cleanupRegistry = new Map();
+let uiLifecycle = createLifecycle();
+
+function currentUILifecycle() {
+    if (uiLifecycle.disposed) uiLifecycle = createLifecycle();
+    return uiLifecycle;
+}
 
 /**
  * Register a cleanup function with a unique key (prevents duplicate registrations)
@@ -104,6 +117,7 @@ export function detectAndApplyTheme(debug) {
  */
 export function startThemeObserver() {
     if (themeObserver) return;
+    currentUILifecycle();
 
     // Throttle theme detection to run at most once every 500ms
     // Theme changes are rare and don't need immediate detection
@@ -129,6 +143,7 @@ export function startThemeObserver() {
     
     // Use keyed cleanup to prevent duplicate registrations
     registerCleanup('themeObserver', () => {
+        throttledThemeDetection.cancel();
         if (themeObserver) {
             themeObserver.disconnect();
             themeObserver = null;
@@ -141,143 +156,15 @@ export function startThemeObserver() {
 // ============================================
 
 /**
- * Get or create the toast container
- */
-function getToastContainer() {
-    if (!toastContainer || !toastContainer.isConnected) {
-        toastContainer = document.createElement('div');
-        toastContainer.className = 'x-toast-container';
-        document.body.appendChild(toastContainer);
-    }
-    return toastContainer;
-}
-
-/**
- * Build the toast close button with safe DOM methods.
- * @param {HTMLElement} toast - The toast element to dismiss on click
- * @returns {HTMLButtonElement}
- */
-function makeToastCloseButton(toast) {
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'x-toast-close';
-    closeBtn.setAttribute('aria-label', 'Dismiss');
-
-    const closeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    closeSvg.setAttribute('viewBox', '0 0 24 24');
-    closeSvg.setAttribute('fill', 'none');
-    closeSvg.setAttribute('stroke', 'currentColor');
-    closeSvg.setAttribute('stroke-width', '2');
-
-    const closePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    closePath.setAttribute('d', 'M18 6L6 18M6 6l12 12');
-    closeSvg.appendChild(closePath);
-    closeBtn.appendChild(closeSvg);
-
-    closeBtn.addEventListener('click', () => dismissToast(toast));
-    return closeBtn;
-}
-
-/**
- * Show a toast notification
- * @param {Object} options - Toast options
- * @param {string} options.title - Toast title
- * @param {string} options.message - Toast message (rendered as text)
- * @param {string} [options.timeBadge] - Optional styled time badge appended after
- *   the message (XSS-safe; rendered via textContent)
- * @param {SVGElement|string} [options.icon] - Drawn glyph element (preferred) or
- *   a plain string. Defaults to the hourglass glyph.
- * @param {string} options.iconType - Icon type for styling ('warning', 'error', 'success', 'info')
- * @param {number} options.duration - Auto-dismiss duration in ms (default 8000, 0 = no auto-dismiss)
- */
-export function showToast({ title, message, timeBadge, icon, iconType = 'warning', duration = 8000 }) {
-    const container = getToastContainer();
-
-    const toast = document.createElement('div');
-    toast.className = 'x-toast';
-
-    // Icon — accepts a drawn SVG glyph (preferred) or a plain string
-    const iconEl = document.createElement('div');
-    iconEl.className = `x-toast-icon x-toast-icon-${iconType}`;
-    const iconNode = (icon === undefined || icon === null) ? glyph('hourglass', 20) : icon;
-    if (iconNode instanceof Node) iconEl.appendChild(iconNode);
-    else iconEl.textContent = String(iconNode);
-    toast.appendChild(iconEl);
-
-    // Content
-    const contentEl = document.createElement('div');
-    contentEl.className = 'x-toast-content';
-
-    const titleEl = document.createElement('div');
-    titleEl.className = 'x-toast-title';
-    titleEl.textContent = title;
-    contentEl.appendChild(titleEl);
-
-    const messageEl = document.createElement('div');
-    messageEl.className = 'x-toast-message';
-    if (timeBadge) {
-        // Message text followed by a styled time badge (both XSS-safe)
-        messageEl.appendChild(document.createTextNode(message + ' '));
-        const timeBadgeEl = document.createElement('span');
-        timeBadgeEl.className = 'x-toast-time';
-        timeBadgeEl.textContent = timeBadge;
-        messageEl.appendChild(timeBadgeEl);
-    } else {
-        // Use textContent for safety
-        messageEl.textContent = message;
-    }
-    contentEl.appendChild(messageEl);
-
-    toast.appendChild(contentEl);
-
-    // Close button (built with safe DOM methods)
-    toast.appendChild(makeToastCloseButton(toast));
-
-    // Progress bar for auto-dismiss
-    if (duration > 0) {
-        const progress = document.createElement('div');
-        progress.className = 'x-toast-progress';
-        progress.style.animationDuration = `${duration}ms`;
-        toast.appendChild(progress);
-    }
-
-    container.appendChild(toast);
-
-    // Auto-dismiss
-    if (duration > 0) {
-        setTimeout(() => dismissToast(toast), duration);
-    }
-
-    return toast;
-}
-
-/**
- * Dismiss a toast with animation
- */
-export function dismissToast(toast) {
-    if (!toast || !toast.isConnected) return;
-    
-    toast.classList.add('x-toast-hiding');
-    
-    setTimeout(() => {
-        if (toast.isConnected) {
-            toast.remove();
-        }
-    }, 300);
-}
-
-/**
  * Show rate limit toast notification
  * @param {string} timeUntilReset - Human-readable time until reset
  */
 export function showRateLimitToast(timeUntilReset) {
-    // Sanitize the time string to prevent XSS
-    const sanitizedTime = sanitizeText(timeUntilReset);
-
     showToast({
         title: 'Rate Limit Reached',
         message: 'X API limit hit. Resets in',
-        timeBadge: sanitizedTime,
-        icon: glyph('warn', 20),
+        // The shared notification renders this as text, so HTML entity encoding is unnecessary.
+        timeBadge: typeof timeUntilReset === 'string' ? timeUntilReset.substring(0, 100) : '',
         iconType: 'warning',
         duration: 8000
     });
@@ -335,18 +222,27 @@ function makeSep() {
  * Create info badge for a user
  * @param {string|null} [effectiveCountry] - Flag/blocking country already computed
  *   by the observer (effectiveCountry()). Avoids recomputing getDeviceCountry here.
+ * @param {string} [displayName] - This author's visible name, extracted before badge insertion.
  */
-export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null, effectiveCountry = null) {
+export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null, effectiveCountry = null, displayName = '') {
     if (element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`)) {
         return;
     }
 
     const badge = document.createElement('span');
     badge.className = CSS_CLASSES.INFO_BADGE;
+    const detailsButton = document.createElement('button');
+    detailsButton.type = 'button';
+    detailsButton.className = 'x-badge-details';
+    detailsButton.setAttribute('aria-label', `Account details for @${sanitizeText(screenName)}`);
+    detailsButton.setAttribute('aria-haspopup', 'dialog');
+    detailsButton.setAttribute('aria-expanded', 'false');
+    badge.appendChild(detailsButton);
 
     let hasContent = false;
+    let vpnSpan = null;
 
-    // Add flag (plus the accompanying VPN lock).
+    // Build the location signal; its warning is appended after the device below.
     // Issue #17: optionally show the flag of the DEVICE's country instead of the
     // account location. Web/unknown device sources have no country, so we fall back
     // to the account location. The whole block stays gated on having a flag country,
@@ -370,31 +266,31 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
             } else {
                 flagSpan.textContent = '🌍'; // Unknown country fallback (matches prior behavior)
             }
-            badge.appendChild(flagSpan);
+            detailsButton.appendChild(flagSpan);
             hasContent = true;
 
             // VPN indicator — uses ground-truth locationAccurate regardless of flag source
             if (info.locationAccurate === false && settings.showVpnIndicator !== false) {
-                badge.appendChild(makeSep());
-                const vpnSpan = document.createElement('span');
+                vpnSpan = document.createElement('span');
                 vpnSpan.className = 'x-vpn';
-                vpnSpan.title = 'Location may not be accurate (VPN/Proxy detected)';
+                vpnSpan.title = 'X reports that this account’s location may not be accurate.';
                 vpnSpan.appendChild(glyph('vpn', 13));
-                badge.appendChild(vpnSpan);
             }
         }
     }
 
     // Add device — clear platform icon (Apple / Android / Web / Unknown)
     if (info.device && settings.showDevices !== false) {
-        if (hasContent) badge.appendChild(makeSep());
         const deviceSpan = document.createElement('span');
         deviceSpan.className = 'x-device';
         deviceSpan.title = 'Connected via: ' + sanitizeText(info.device);
         deviceSpan.appendChild(deviceIcon(info.device, 15));
-        badge.appendChild(deviceSpan);
+        detailsButton.appendChild(deviceSpan);
         hasContent = true;
     }
+
+    // Match the hovercard's order: location, device, then location warning.
+    if (vpnSpan) detailsButton.appendChild(vpnSpan);
 
     if (!hasContent) return;
 
@@ -410,6 +306,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     const hint = showInfoIcon ? document.createElement('span') : null;
     if (hint) {
         hint.className = 'x-hover-hint';
+        hint.setAttribute('aria-hidden', 'true');
         hint.appendChild(glyph('info', 14));
     }
 
@@ -418,7 +315,9 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     // capture flow needs an enclosing tweet article, which those rows don't have,
     // so the button would render but silently do nothing on click.
     if (settings.showCaptureButton !== false && !isUserCell) {
+        badge.appendChild(makeSep());
         const captureBtn = document.createElement('button');
+        captureBtn.type = 'button';
         captureBtn.className = 'x-capture-btn';
         captureBtn.title = 'Share evidence';
         captureBtn.setAttribute('aria-label', 'Share evidence');
@@ -432,7 +331,10 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
             
             const tweet = element.closest(SELECTORS.TWEET);
             if (tweet) {
-                captureEvidence(tweet, info, screenName);
+                // Dismiss account details before the share sheet takes focus.
+                // Its Escape handler must not compete with the card behind it.
+                hovercard.hide();
+                captureEvidence(tweet, info, screenName, element);
             } else {
                 console.warn('X-Posed: Could not find tweet to capture');
             }
@@ -440,11 +342,19 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     }
 
     // Circled-i is always the last item in the badge (when shown).
+    if (hint && (settings.showCaptureButton === false || isUserCell)) badge.appendChild(makeSep());
     if (hint) badge.appendChild(hint);
 
-    const insertionPoint = isUserCell
+    let insertionPoint = isUserCell
         ? findUserCellInsertionPoint(element, screenName)
         : findInsertionPoint(element, screenName);
+
+    // Keep our native controls outside X's profile links. Some UserCell layouts
+    // return a handle span inside an anchor as their insertion point.
+    const enclosingLink = insertionPoint?.target.closest('a[href]');
+    if (enclosingLink && element.contains(enclosingLink) && enclosingLink.parentElement) {
+        insertionPoint = { target: enclosingLink.parentElement, ref: enclosingLink.nextSibling };
+    }
         
     if (insertionPoint) {
         insertionPoint.target.insertBefore(badge, insertionPoint.ref);
@@ -456,6 +366,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     // Attach hovercard; we fetch rich metadata only when it actually opens.
     hovercard.attach(badge, {
         screenName,
+        displayName,
         info,
         csrfToken,
         clickToOpen: settings.hovercardTrigger === 'click'
@@ -469,8 +380,12 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
 /**
  * Inject sidebar link for country blocker
  */
-export function injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
+export function injectSidebarLink(settings, debug, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES, getState = null) {
+    currentUILifecycle();
+    sidebarGetState = getState;
+    sidebarSettings = { ...settings };
     if (settings.showSidebarBlockerLink === false) {
+        removeSidebarLink(debug);
         if (debug) debug('Sidebar blocker link disabled in settings');
         return;
     }
@@ -559,13 +474,13 @@ function observeSidebarChanges(nav, settings, debug, blockedCountries, blockedRe
         const ourLink = document.getElementById('x-country-blocker-link');
         const profileLink = nav.querySelector(SELECTORS.PROFILE_LINK);
         
-        if (!ourLink && profileLink && settings.showSidebarBlockerLink !== false) {
+        if (!ourLink && profileLink && sidebarSettings.showSidebarBlockerLink !== false) {
             if (debug) debug('Sidebar link removed, re-injecting...');
             
             sidebarObserver.disconnect();
             addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
             
-            setTimeout(() => {
+            uiLifecycle.delay(() => {
                 if (sidebarObserver && nav.isConnected) {
                     sidebarObserver.observe(nav, {
                         childList: true,
@@ -598,10 +513,11 @@ function setupResizeHandler(settings, debug, blockedCountries, blockedRegions, s
     // removes the previous listener instead of leaking it.
     if (resizeHandler) {
         window.removeEventListener('resize', resizeHandler);
+        resizeHandler.cancel();
     }
 
     resizeHandler = debounce(() => {
-        if (!currentNav || settings.showSidebarBlockerLink === false) return;
+        if (!currentNav || sidebarSettings.showSidebarBlockerLink === false) return;
         
         sidebarModifying = true;
         
@@ -613,7 +529,7 @@ function setupResizeHandler(settings, debug, blockedCountries, blockedRegions, s
         addBlockerLink(currentNav, blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES);
         if (debug) debug('Sidebar link refreshed after resize');
         
-        setTimeout(() => {
+        uiLifecycle.delay(() => {
             sidebarModifying = false;
         }, 50);
     }, TIMING.RESIZE_DEBOUNCE_MS);
@@ -624,6 +540,7 @@ function setupResizeHandler(settings, debug, blockedCountries, blockedRegions, s
     registerCleanup('resizeHandler', () => {
         if (resizeHandler) {
             window.removeEventListener('resize', resizeHandler);
+            resizeHandler.cancel();
             resizeHandler = null;
         }
     });
@@ -633,11 +550,26 @@ function setupResizeHandler(settings, debug, blockedCountries, blockedRegions, s
  * Remove sidebar blocker link
  */
 export function removeSidebarLink(debug) {
+    // A settings change can arrive before the initial navigation lookup runs.
+    // Cancel it as well as removing any already-mounted link.
+    if (sidebarCheckInterval) {
+        clearInterval(sidebarCheckInterval);
+        sidebarCheckInterval = null;
+    }
+    if (sidebarCheckTimeout) {
+        clearTimeout(sidebarCheckTimeout);
+        sidebarCheckTimeout = null;
+    }
     const link = document.getElementById('x-country-blocker-link');
     if (link) {
         link.remove();
         if (debug) debug('Sidebar blocker link removed');
     }
+}
+
+export function syncSidebarSettings(settings, revision) {
+    if (!sidebarSnapshots.accept('settings', revision)) return;
+    sidebarSettings = { ...settings };
 }
 
 /**
@@ -657,7 +589,9 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
     link.classList.add('x-blocker-nav-link');
     link.href = '#';
     link.removeAttribute('data-testid');
-    link.setAttribute('aria-label', 'Block Countries & Regions');
+    link.removeAttribute('aria-current');
+    link.removeAttribute('aria-labelledby');
+    link.setAttribute('aria-label', 'Open blocking settings');
     
     const svg = link.querySelector('svg');
     if (svg) {
@@ -704,7 +638,7 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
 
     profileLink.parentElement.insertBefore(link, profileLink.nextSibling);
     
-    setTimeout(() => {
+    uiLifecycle.delay(() => {
         sidebarModifying = false;
     }, 50);
 }
@@ -713,170 +647,22 @@ function addBlockerLink(nav, blockedCountries, blockedRegions, sendMessage, MESS
  * Show the country/region blocker modal
  */
 async function showBlockerModal(blockedCountries, blockedRegions, sendMessage, MESSAGE_TYPES) {
-    // Country action handler
-    const onCountryAction = async (action, country) => {
-        const response = await sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_COUNTRIES,
-            payload: { action, country }
-        });
-        
-        if (response?.success) {
-            // Update the reference (caller needs to handle this)
-            blockedCountries.clear();
-            for (const c of response.data) {
-                blockedCountries.add(c);
-            }
-        }
-        
-        return response;
-    };
-    
-    // Region action handler
-    const onRegionAction = async (action, region) => {
-        const response = await sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_REGIONS,
-            payload: { action, region }
-        });
-        
-        if (response?.success) {
-            // Update the reference (caller needs to handle this)
-            blockedRegions.clear();
-            for (const r of response.data) {
-                blockedRegions.add(r);
-            }
-        }
-        
-        return response;
-    };
-    
-    // Get blockedTags + blockedLanguages from the global state (window.__X_POSED_CONTENT__)
-    const state = window.__X_POSED_CONTENT__?.getState?.() || {};
-    const blockedTags = new Set(state.blockedTags || []);
-    const blockedBioTags = new Set(state.blockedBioTags || []);
-    const blockedPcf = new Set(state.blockedPcf || []);
-    const blockedLanguages = new Set(state.blockedLanguages || []);
-
-    // Read affiliations straight from the background rather than the content script's
-    // snapshot. The snapshot is only as fresh as the last broadcast this tab received, so
-    // a tab that missed one would open the modal showing an empty list while Settings
-    // shows entries. Falls back to the snapshot if the message fails.
-    let blockedAffiliations = new Set(state.blockedAffiliations || []);
-    try {
-        const affiliationsResponse = await sendMessage({ type: MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS });
-        if (affiliationsResponse?.success && Array.isArray(affiliationsResponse.data)) {
-            blockedAffiliations = new Set(affiliationsResponse.data);
-        }
-    } catch {
-        // Keep the snapshot value — the modal still opens, just possibly stale.
-    }
-
-    // Tag action handler
-    const onTagAction = async (action, tag) => {
-        const response = await sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_TAGS,
-            payload: { action, tag }
-        });
-
-        if (response?.success) {
-            blockedTags.clear();
-            for (const t of response.data) {
-                blockedTags.add(t);
-            }
-        }
-
-        return response;
-    };
-
-    // Language action handler (issue #25)
-    const onLanguageAction = async (action, language) => {
-        const response = await sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_LANGUAGES,
-            payload: { action, language }
-        });
-
-        if (response?.success) {
-            blockedLanguages.clear();
-            for (const l of response.data) {
-                blockedLanguages.add(l);
-            }
-        }
-
-        return response;
-    };
-
-    // Affiliation action handler
-    const onAffiliationAction = async (action, affiliation) => {
-        const response = await sendMessage({
-            type: MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS,
-            payload: { action, affiliation }
-        });
-
-        if (response?.success) {
-            blockedAffiliations.clear();
-            for (const a of response.data) {
-                blockedAffiliations.add(a);
-            }
-        }
-
-        return response;
-    };
-
-    // Bio tags and account labels use the same generic shape as the other blocked sets.
-    const makeSetHandler = (messageType, key, localSet) => async (action, value) => {
-        const response = await sendMessage({ type: messageType, payload: { action, [key]: value } });
-        if (response?.success && response.data) {
-            localSet.clear();
-            for (const v of response.data) localSet.add(v);
-        }
-        return response;
-    };
-
-    showModal({
-        blockedCountries,
-        blockedRegions,
-        onCountryAction,
-        onRegionAction,
-        blockedTags,
-        onTagAction,
-        blockedBioTags,
-        onBioTagAction: makeSetHandler(MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS, 'tag', blockedBioTags),
-        blockedPcf,
-        onPcfAction: makeSetHandler(MESSAGE_TYPES.SET_BLOCKED_PCF, 'label', blockedPcf),
-        blockedLanguages,
-        onLanguageAction,
-        blockedAffiliations,
-        onAffiliationAction
+    // Read every list at the moment of opening, rather than keeping the Sets captured
+    // when X's sidebar was first injected. The getter is internal, not a page-global API.
+    const state = sidebarGetState?.() || {};
+    const makeSetHandler = (type, key) => (action, value) => sendMessage({
+        type, payload: { action, [key]: value }
     });
-}
-
-// ============================================
-// STYLES INJECTION
-// ============================================
-
-let stylesInjected = false;
-
-/**
- * Inject CSS styles
- *
- * Note: content scripts can run at `document_start` and Firefox can briefly have
- * `document.head === null`. We fall back to `document.documentElement` to avoid
- * aborting initialization.
- */
-export function injectStyles() {
-    if (stylesInjected) return;
-
-    const styleUrl = browserAPI.runtime.getURL('styles/content.css');
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = styleUrl;
-
-    const mount = document.head || document.documentElement;
-    if (mount) {
-        mount.appendChild(link);
-        stylesInjected = true;
-    } else {
-        console.error('X-Posed: Could not find mount point for styles');
-    }
+    showModal({
+        ...Object.fromEntries(FILTER_SOURCES.map(source => [source.field,
+            new Set(state[source.field] || ({ blockedCountries, blockedRegions })[source.field] || [])])),
+        settings: state.settings || sidebarSettings,
+        stateRevisions: state.stateRevisions || {},
+        ...Object.fromEntries(FILTER_SOURCES.map(source => [source.callback,
+            makeSetHandler(source.set, source.valueKey)])),
+        onSettingsChange: payload => sendMessage({ type: MESSAGE_TYPES.SET_SETTINGS, payload }),
+        onOpenSettings: () => sendMessage({ type: MESSAGE_TYPES.OPEN_OPTIONS_PAGE })
+    });
 }
 
 // ============================================
@@ -887,6 +673,8 @@ export function injectStyles() {
  * Cleanup all UI resources
  */
 export function cleanupUI() {
+    uiLifecycle.dispose();
+    cleanupNotifications();
     // Iterate over all registered cleanup functions
     for (const [key, cleanupFn] of cleanupRegistry.entries()) {
         try {
@@ -896,4 +684,8 @@ export function cleanupUI() {
         }
     }
     cleanupRegistry.clear();
+    removeSidebarLink();
+    currentNav = null;
+    sidebarModifying = false;
+    sidebarGetState = null;
 }

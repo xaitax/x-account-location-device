@@ -2,6 +2,39 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [4.0.0] - 2026-09-27
+
+X-Posed's growing functionality needed a leaner, cleaner home. Version 4.0 introduces a new design, making existing controls easier to find and leaving room for what comes next. Existing settings and filters are preserved.
+
+### Redesign
+
+- **New design throughout:** coordinated light/dark styling for Settings, the popup, blocking, badges, account cards, Share and notifications, with bundled Lucide icons and consistent post/quote highlights.
+- **Simpler blocking:** an Add filter flow, searchable Saved filters and country/region/language choices, plus dedicated Always Show and Behavior tabs. Settings and the on-X dialog share one editor.
+- **Compact account cards and sharing:** stable display names, separate media counts, clearer warnings, an image preview, editable captions and organized Quote/Reply/New post choices. Sharing remains user-confirmed.
+
+### Features
+
+- **Domain and exact-URL filters:** match profile websites and bio links. Bare domains include subdomains; URLs keep their specific destination. Bio and link filters can optionally include self-written profile location text. Rules are included in backups.
+- **Local filtering statistics and maps:** count identifiable hidden and highlighted posts once across tabs and restarts, with location/device breakdowns and a separate reset. Filtering and Cached accounts each get a country heatmap and exact-count lists; regions and unknowns remain separate. No history backfill or extra X/cloud requests.
+- **Optional keyboard shortcut:** assign a browser extension shortcut to switch between Hide and Highlight. No shortcut is assigned by default.
+- **Crypto donations, by request:** Bitcoin, Ethereum and USDC on Ethereum join Ko-fi, with network labels and copy-address controls in About, plus addresses in the README.
+
+### Fixes and maintenance
+
+- Your own posts are exempt from language filtering. Posts revealed by changed filters regain their badges. Hidden quotes have keyboard-accessible reveal controls and clearer multi-filter explanations.
+- Evidence capture preserves the selected author, text, media and permalink through asynchronous work, without borrowing a surrounding post's identity. Clipboard and popup failures provide recovery options.
+- Versioned settings/list updates prevent stale responses from overwriting newer edits across tabs. Failed saves preserve committed state; partial imports synchronize successful changes.
+- Reduced unnecessary profile rescans, improved cleanup and page restoration, consolidated parsers and theme values, and removed obsolete CSS, icons, font files and spinner code. Cloud-client timeouts now include response-body processing.
+- Rewritten README with new screenshots and consolidated usage/build instructions. Privacy documentation now describes the existing cache defaults, shared account data and local storage accurately.
+
+### Thank you
+
+- **@Blitzgeburt** for the features and fixes in [PR #66](https://github.com/xaitax/x-account-location-device/pull/66) and the linked-website request [#62](https://github.com/xaitax/x-account-location-device/issues/62), adapted into the shared filtering and settings code.
+- **@tcryuvgbhjkl** for the country/region statistics request [#31](https://github.com/xaitax/x-account-location-device/issues/31), and **@TMCAtom** for the counter, statistics and quick-toggle ideas [#36](https://github.com/xaitax/x-account-location-device/issues/36), [#44](https://github.com/xaitax/x-account-location-device/issues/44), [#59](https://github.com/xaitax/x-account-location-device/issues/59). This release adds cumulative totals and a shortcut, not per-filter counters or an always-visible sidebar toggle.
+- **@toys4us** for requesting crypto donation options in [#61](https://github.com/xaitax/x-account-location-device/issues/61), and everyone who tested, reported bugs or shared ideas.
+
+A huge thank you to everyone who has donated. September's server bill is **US$273.32**, and your support helps keep the community cache running. There is absolutely no need to donate, but it helps tremendously.
+
 ## [3.6.0] - 2026-09-12
 
 ### New

@@ -1,413 +1,334 @@
 /**
- * Popup Script
- * Handles popup UI interactions and communication with background
+ * Graphite toolbar popup. Quick controls use the same revisioned settings API
+ * as the full settings page; optional status requests never block interaction.
  */
-
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, TIMING, STORAGE_KEYS } from '../shared/constants.js';
+import { createSnapshotTracker } from '../shared/state-sync.js';
+import { dialogIcon } from '../content/dialog-icons.js';
 
-// DOM Elements
-const elements = {
-    toggleEnabled: document.getElementById('toggle-enabled'),
-    toggleFlags: document.getElementById('toggle-flags'),
-    toggleFlagDevice: document.getElementById('toggle-flag-device'),
-    toggleDevices: document.getElementById('toggle-devices'),
-    toggleVpn: document.getElementById('toggle-vpn'),
-    toggleVpnUsers: document.getElementById('toggle-vpn-users'),
-    toggleSidebarLink: document.getElementById('toggle-sidebar-link'),
-    toggleInfoIcon: document.getElementById('toggle-info-icon'),
-    toggleClickDetails: document.getElementById('toggle-click-details'),
-    toggleCaptureButton: document.getElementById('toggle-capture-button'),
-    statCommunity: document.getElementById('stat-community'),
-    btnClearCache: document.getElementById('btn-clear-cache'),
-    btnOptions: document.getElementById('btn-options'),
-    rateLimitBanner: document.getElementById('rate-limit-banner'),
-    rateLimitTime: document.getElementById('rate-limit-time')
-};
-
-// Rate limit update interval
+const TOGGLES = [
+    ['toggle-enabled', 'enabled', true],
+    ['toggle-flags', 'showFlags', true],
+    ['toggle-devices', 'showDevices', true],
+    ['toggle-flag-device', 'flagFromDevice', false],
+    ['toggle-vpn', 'showVpnIndicator', true],
+    ['toggle-vpn-users', 'showVpnUsers', true],
+    ['toggle-sidebar-link', 'showSidebarBlockerLink', true],
+    ['toggle-info-icon', 'showInfoIcon', true],
+    ['toggle-click-details', 'hovercardTrigger', 'hover'],
+    ['toggle-capture-button', 'showCaptureButton', true]
+];
+const byId = id => document.getElementById(id);
+const snapshots = createSnapshotTracker();
+const pending = new Set();
+let settings = {};
+let settingsLoaded = false;
+let settingsFailed = false;
+let settingsRequest = 0;
+let rateStatus = null;
 let rateLimitInterval = null;
+let closed = false;
+let statsGeneration = 0;
+let cloudAllowed = false;
+let communityTotal = null;
+let communityVersion = 0;
+let clearingCache = false;
 
-/**
- * Initialize popup
- */
-async function initialize() {
-    // Load and apply theme first
-    await loadTheme();
-    
-    // Update version display
-    const versionEl = document.querySelector('.version');
-    if (versionEl) {
-        versionEl.textContent = `v${VERSION}`;
+function initialize() {
+    for (const slot of document.querySelectorAll('[data-popup-icon]')) {
+        slot.replaceChildren(dialogIcon(slot.dataset.popupIcon, 18));
     }
-
-    // Load current settings
-    await loadSettings();
-
-    // Load statistics
-    await loadStats();
-
-    // Keep the community total fresh: the background writes updated cloud stats to storage
-    // (stale-while-revalidate). The popup previously read that snapshot once and never
-    // updated, so it lagged one refresh behind the Options page and looked low. Mirror the
-    // Options listener so both surfaces converge on the same number.
-    try {
-        const onCloudStatsChanged = (changes, areaName) => {
-            if (areaName !== 'local') return;
-            const total = changes?.[STORAGE_KEYS.CLOUD_SERVER_STATS]?.newValue?.data?.totalEntries;
-            if (typeof total === 'number' && total > 0 && elements.statCommunity) {
-                elements.statCommunity.textContent = total.toLocaleString();
-                setHero('Community Cache', 'profiles cached by the community', true);
-            }
-        };
-        browserAPI.storage.onChanged.addListener(onCloudStatsChanged);
-        window.addEventListener('beforeunload', () => {
-            try { browserAPI.storage.onChanged.removeListener(onCloudStatsChanged); } catch { /* ignore */ }
-        });
-    } catch { /* storage.onChanged unavailable — non-fatal */ }
-
-    // Load rate limit status
-    await loadRateLimitStatus();
-    
-    // Start periodic rate limit check
-    startRateLimitMonitor();
-
-    // Set up event listeners
+    document.querySelector('.version').textContent = `v${VERSION}`;
     setupEventListeners();
+    browserAPI.runtime.onMessage.addListener(handleMessage);
+    browserAPI.storage.onChanged.addListener(handleStorageChange);
+    window.addEventListener('pagehide', cleanup, { once: true });
+    renderSettings();
+    void loadTheme();
+    void loadSettings();
+    void loadStats();
+    void loadRateLimitStatus();
+    rateLimitInterval = setInterval(loadRateLimitStatus, TIMING.RATE_LIMIT_CHECK_MS);
 }
 
-/**
- * Load rate limit status from background
- */
-async function loadRateLimitStatus() {
+function cleanup() {
+    closed = true;
+    statsGeneration++;
+    clearInterval(rateLimitInterval);
+    browserAPI.runtime.onMessage.removeListener(handleMessage);
+    browserAPI.storage.onChanged.removeListener(handleStorageChange);
+}
+
+function setStatus(message, error = false) {
+    if (closed) return;
+    const status = byId('popup-status');
+    status.textContent = message;
+    status.classList.toggle('error', error);
+    status.hidden = !message;
+}
+
+function renderSettings() {
+    if (closed) return;
+    const enabled = settings.enabled !== false;
+    for (const [id, key, fallback] of TOGGLES) {
+        const input = byId(id);
+        input.checked = settingsLoaded && (key === 'hovercardTrigger'
+            ? settings[key] === 'click' : (settings[key] ?? fallback) === true);
+        input.disabled = !settingsLoaded || pending.has(id) || pending.has('toggle-enabled')
+            || (id !== 'toggle-enabled' && !enabled);
+    }
+    const state = byId('extension-state');
+    state.dataset.state = settingsLoaded ? (enabled ? 'on' : 'off') : (settingsFailed ? 'error' : 'loading');
+    byId('extension-status').textContent = settingsLoaded ? (enabled ? 'X-Posed is on' : 'X-Posed is paused')
+        : (settingsFailed ? 'Settings unavailable' : 'Loading settings');
+    byId('extension-status-description').textContent = settingsLoaded
+        ? (enabled ? 'Your saved preferences apply on X.' : 'Your saved preferences are kept.')
+        : (settingsFailed ? 'Try again to load your saved preferences.' : 'Checking your saved preferences.');
+    byId('btn-retry-settings').hidden = !settingsFailed;
+    renderRateLimit();
+}
+
+function acceptSettings(data, revision) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    if (!snapshots.accept(MESSAGE_TYPES.SETTINGS_UPDATED, revision)) return false;
+    settings = data;
+    settingsLoaded = true;
+    settingsFailed = false;
+    renderSettings();
+    return true;
+}
+
+async function loadSettings() {
+    const request = ++settingsRequest;
+    const retry = byId('btn-retry-settings');
+    retry.disabled = true;
+    try {
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_SETTINGS });
+        if (closed || request !== settingsRequest) return;
+        if (!response?.success || !response.data || typeof response.data !== 'object' || Array.isArray(response.data)) {
+            throw new Error('Could not read settings');
+        }
+        acceptSettings(response.data, response.revision);
+    } catch {
+        if (closed || request !== settingsRequest) return;
+        settingsFailed = !settingsLoaded;
+        if (settingsLoaded) setStatus('Could not refresh settings. Please try again.', true);
+    } finally {
+        if (!closed && request === settingsRequest) {
+            retry.disabled = false;
+            renderSettings();
+        }
+    }
+}
+
+async function saveToggle(id, key, value) {
+    if (!settingsLoaded || pending.has(id)) return;
+    pending.add(id);
+    renderSettings();
+    setStatus('Saving...');
     try {
         const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_RATE_LIMIT_STATUS
+            type: MESSAGE_TYPES.SET_SETTINGS, payload: { [key]: value }
         });
-
-        if (response?.success) {
-            updateRateLimitBanner(response);
+        if (closed) return;
+        if (!response?.success || !response.data || typeof response.data !== 'object' || Array.isArray(response.data)) {
+            throw new Error('Save failed');
         }
-    } catch (error) {
-        console.error('Failed to load rate limit status:', error);
+        // A newer broadcast wins over an older acknowledgement.
+        acceptSettings(response.data, response.revision);
+        setStatus('Changes saved');
+    } catch {
+        setStatus('Could not save this change. Your previous setting is unchanged.', true);
+    } finally {
+        pending.delete(id);
+        renderSettings();
     }
 }
 
-/**
- * Update rate limit banner UI
- */
-function updateRateLimitBanner({ isRateLimited, resetTime, remainingMs }) {
-    if (!elements.rateLimitBanner) return;
-    
-    if (isRateLimited && remainingMs > 0) {
-        elements.rateLimitBanner.style.display = 'flex';
-        elements.rateLimitBanner.classList.remove('ok');
-        
-        // Format remaining time
-        const resetDate = new Date(resetTime);
-        const mins = Math.ceil(remainingMs / 60000);
-        
-        let timeStr;
-        if (mins >= 60) {
-            const hours = Math.floor(mins / 60);
-            const remaining = mins % 60;
-            timeStr = remaining > 0 ? `~${hours}h ${remaining}m remaining` : `~${hours}h remaining`;
-        } else {
-            timeStr = `~${mins} min${mins > 1 ? 's' : ''} remaining`;
-        }
-        
-        elements.rateLimitTime.textContent = `Resets at ${resetDate.toLocaleTimeString()} (${timeStr})`;
-        
-        // Update title
-        const title = elements.rateLimitBanner.querySelector('.rate-limit-title');
-        if (title) title.textContent = 'Rate Limited';
-    } else {
-        // Healthy: hide the banner entirely (the master row already shows status).
-        elements.rateLimitBanner.style.display = 'none';
-        elements.rateLimitBanner.classList.remove('ok');
+function handleMessage(message) {
+    if (message?.type === MESSAGE_TYPES.SETTINGS_UPDATED) {
+        acceptSettings(message.payload, message.revision);
+    } else if (message?.type === MESSAGE_TYPES.THEME_UPDATED && typeof message.payload === 'string') {
+        applyTheme(message.payload);
     }
 }
 
-/**
- * Start periodic rate limit status check
- */
-function startRateLimitMonitor() {
-    // Clear any existing interval
-    if (rateLimitInterval) {
-        clearInterval(rateLimitInterval);
+function handleStorageChange(changes, area) {
+    if (closed || area !== 'local') return;
+    if (changes[STORAGE_KEYS.THEME]?.newValue) applyTheme(changes[STORAGE_KEYS.THEME].newValue);
+    const total = changes[STORAGE_KEYS.CLOUD_SERVER_STATS]?.newValue?.data?.totalEntries;
+    if (validCount(total)) {
+        communityVersion++;
+        communityTotal = total;
+        if (cloudAllowed) renderCache(total, true);
     }
-    
-    // Check every 10 seconds
-    rateLimitInterval = setInterval(loadRateLimitStatus, 10000);
+    // Opting out elsewhere must also stop this popup displaying a community total.
+    if (changes[STORAGE_KEYS.CLOUD_CACHE_ENABLED]) void loadStats();
 }
 
-/**
- * Load and apply theme from storage
- */
+function applyTheme(theme) {
+    if (!closed) document.documentElement.dataset.xTheme = theme === 'light' ? 'light' : 'dark';
+}
+
 async function loadTheme() {
     try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_THEME
-        });
-        
-        if (response?.theme) {
-            applyTheme(response.theme);
-        }
-    } catch (error) {
-        console.error('Failed to load theme:', error);
-    }
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_THEME });
+        if (response?.theme) applyTheme(response.theme);
+    } catch { /* The default Graphite dark theme remains usable. */ }
 }
 
-/**
- * Apply theme to the popup's documentElement via data-x-theme.
- * Only two themes are supported now (light + dark); legacy "dim" maps to dark.
- */
-function applyTheme(theme) {
-    const normalized = theme === 'light' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-x-theme', normalized);
+function validCount(value) {
+    return Number.isSafeInteger(value) && value >= 0;
 }
 
-/**
- * Load settings from background
- */
-async function loadSettings() {
+function renderCache(total, community) {
+    if (closed) return;
+    byId('cache-summary').dataset.mode = community ? 'community' : 'local';
+    byId('hero-cap').textContent = community ? 'Community cache' : 'Local cache';
+    byId('stat-community').textContent = validCount(total) ? total.toLocaleString() : 'Unavailable';
+    byId('hero-sub').textContent = community ? 'accounts shared by the community' : 'accounts cached on this device';
+    byId('cache-kind').replaceChildren(dialogIcon(community ? 'cloud' : 'database', 18));
+}
+
+async function loadLocalStats(generation) {
     try {
-        const response = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_SETTINGS
-        });
-
-        if (response?.success && response.data) {
-            const settings = response.data;
-            
-            elements.toggleEnabled.checked = settings.enabled !== false;
-            elements.toggleFlags.checked = settings.showFlags !== false;
-            elements.toggleFlagDevice.checked = settings.flagFromDevice === true;
-            elements.toggleDevices.checked = settings.showDevices !== false;
-            elements.toggleVpn.checked = settings.showVpnIndicator !== false;
-            elements.toggleVpnUsers.checked = settings.showVpnUsers !== false;
-            elements.toggleSidebarLink.checked = settings.showSidebarBlockerLink !== false;
-            elements.toggleCaptureButton.checked = settings.showCaptureButton !== false;
-            if (elements.toggleInfoIcon) {
-                elements.toggleInfoIcon.checked = settings.showInfoIcon !== false;
-            }
-            if (elements.toggleClickDetails) {
-                elements.toggleClickDetails.checked = settings.hovercardTrigger === 'click';
-            }
-        }
-    } catch (error) {
-        console.error('Failed to load settings:', error);
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_CACHE, payload: {} });
+        if (closed || generation !== statsGeneration) return;
+        // A fresh community snapshot may have arrived while the local fallback loaded.
+        if (cloudAllowed && validCount(communityTotal)) { renderCache(communityTotal, true); return; }
+        renderCache(response?.success && validCount(response.size) ? response.size : null, false);
+    } catch {
+        if (!closed && generation === statsGeneration && !(cloudAllowed && validCount(communityTotal))) renderCache(null, false);
     }
 }
 
-/**
- * Load statistics from background.
- * The hero shows the COMMUNITY cache total (the proud 2.5M+). If the cloud cache is
- * unavailable or disabled, it falls back to this device's local cache size.
- */
 async function loadStats() {
+    const generation = ++statsGeneration;
+    const version = communityVersion;
+    cloudAllowed = false;
     try {
-        const serverResp = await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.GET_CLOUD_SERVER_STATS
-        });
-        const totalEntries = serverResp?.success ? (serverResp.serverStats?.totalEntries || 0) : 0;
+        const [status, cached] = await Promise.all([
+            browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_CLOUD_CACHE_STATUS }),
+            browserAPI.storage.local.get(STORAGE_KEYS.CLOUD_SERVER_STATS).catch(() => ({}))
+        ]);
+        if (closed || generation !== statsGeneration) return;
+        cloudAllowed = status?.success === true && status.enabled === true && status.configured === true;
+        if (!cloudAllowed) { await loadLocalStats(generation); return; }
+        const total = cached?.[STORAGE_KEYS.CLOUD_SERVER_STATS]?.data?.totalEntries;
+        if (version === communityVersion && validCount(total)) communityTotal = total;
+        if (validCount(communityTotal)) renderCache(communityTotal, true);
 
-        if (totalEntries > 0) {
-            elements.statCommunity.textContent = totalEntries.toLocaleString();
-            setHero('Community Cache', 'profiles cached by the community', true);
+        // One stale-while-revalidate request per opening, not recurring cloud polling.
+        const beforeRefresh = communityVersion;
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_CLOUD_SERVER_STATS });
+        if (closed || generation !== statsGeneration) return;
+        const updated = response?.success ? response.serverStats?.totalEntries : null;
+        if (beforeRefresh === communityVersion && validCount(updated)) communityTotal = updated;
+        if (validCount(communityTotal)) renderCache(communityTotal, true);
+        else await loadLocalStats(generation);
+    } catch {
+        if (closed || generation !== statsGeneration) return;
+        if (cloudAllowed && validCount(communityTotal)) renderCache(communityTotal, true);
+        else await loadLocalStats(generation);
+    }
+}
+
+async function loadRateLimitStatus() {
+    try {
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.GET_RATE_LIMIT_STATUS });
+        if (closed || typeof response?.isRateLimited !== 'boolean') return;
+        rateStatus = response;
+        renderRateLimit();
+    } catch { /* A failed status read must not claim the API is healthy. */ }
+}
+
+function renderRateLimit() {
+    const banner = byId('rate-limit-banner');
+    banner.hidden = settingsLoaded && settings.enabled === false || !rateStatus?.isRateLimited;
+    if (banner.hidden) return;
+    const reset = new Date(rateStatus.resetTime).getTime();
+    const remaining = Number.isFinite(rateStatus.remainingMs) ? rateStatus.remainingMs
+        : (Number.isFinite(reset) ? reset - Date.now() : 0);
+    const minutes = Math.ceil(remaining / 60000);
+    banner.querySelector('.rate-limit-title').textContent = 'X is limiting lookups';
+    byId('rate-limit-time').textContent = minutes > 0
+        ? `Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`
+        : 'Waiting for X to allow requests again.';
+}
+
+async function clearLocalCache() {
+    if (clearingCache) return;
+    clearingCache = true;
+    byId('btn-confirm-clear').disabled = true;
+    byId('btn-cancel-clear').disabled = true;
+    byId('btn-clear-cache').disabled = true;
+    setStatus('Clearing local cache...');
+    try {
+        const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.SET_CACHE, payload: { action: 'clear' } });
+        if (closed) return;
+        if (!response?.success) throw new Error('Clear failed');
+        byId('cache-clear-confirm').hidden = true;
+        byId('btn-clear-cache').setAttribute('aria-expanded', 'false');
+        // Clearing local entries never changes the community count or refetches it.
+        if (byId('cache-summary').dataset.mode === 'local') await loadLocalStats(statsGeneration);
+        setStatus('Local cache cleared. Your settings and filters are unchanged.');
+        byId('btn-clear-cache').focus();
+    } catch {
+        setStatus('Could not clear the local cache. Please try again.', true);
+    } finally {
+        clearingCache = false;
+        if (!closed) {
+            byId('btn-confirm-clear').disabled = false;
+            byId('btn-cancel-clear').disabled = false;
+            byId('btn-clear-cache').disabled = false;
+        }
+    }
+}
+
+async function openSettings(blocking = false) {
+    const button = byId(blocking ? 'btn-blocking' : 'btn-options');
+    button.disabled = true;
+    try {
+        if (blocking) {
+            await browserAPI.tabs.create({ url: browserAPI.runtime.getURL('options/options.html#panel-blocking') });
+        } else if (typeof browserAPI.runtime.openOptionsPage === 'function') {
+            try { await browserAPI.runtime.openOptionsPage(); }
+            catch { await browserAPI.tabs.create({ url: browserAPI.runtime.getURL('options/options.html') }); }
         } else {
-            // Fallback: this device's local cache size
-            const cacheResponse = await browserAPI.runtime.sendMessage({
-                type: MESSAGE_TYPES.GET_CACHE,
-                payload: {}
-            });
-            const localSize = cacheResponse?.success ? (cacheResponse.size || 0) : 0;
-            elements.statCommunity.textContent = localSize.toLocaleString();
-            setHero('Cached Users', 'cached on this device', false);
+            await browserAPI.tabs.create({ url: browserAPI.runtime.getURL('options/options.html') });
         }
-    } catch (error) {
-        console.error('Failed to load cache stats:', error);
-        elements.statCommunity.textContent = '-';
+        // Firefox mobile leaves the toolbar surface open after the new tab appears.
+        try { window.close(); } catch { /* Some hosts do not allow self-close. */ }
+    } catch {
+        setStatus('Could not open settings. Please try again.', true);
+    } finally {
+        if (!closed) button.disabled = false;
     }
 }
 
-/**
- * Update the hero caption/subtitle and the COMMUNITY badge visibility.
- */
-function setHero(cap, sub, isCommunity) {
-    const capEl = document.getElementById('hero-cap');
-    const subEl = document.getElementById('hero-sub');
-    const badgeEl = document.getElementById('hero-badge');
-    if (capEl) capEl.textContent = cap;
-    if (subEl) subEl.textContent = sub;
-    if (badgeEl) badgeEl.style.display = isCommunity ? '' : 'none';
-}
-
-/**
- * Save settings to background
- */
-async function saveSettings(settings) {
-    try {
-        await browserAPI.runtime.sendMessage({
-            type: MESSAGE_TYPES.SET_SETTINGS,
-            payload: settings
-        });
-    } catch (error) {
-        console.error('Failed to save settings:', error);
-    }
-}
-
-/**
- * Set up event listeners
- */
 function setupEventListeners() {
-    // Main toggle
-    elements.toggleEnabled.addEventListener('change', async e => {
-        await saveSettings({ enabled: e.target.checked });
-        updateDisabledState(!e.target.checked);
-    });
-
-    // Display toggles
-    elements.toggleFlags.addEventListener('change', async e => {
-        await saveSettings({ showFlags: e.target.checked });
-    });
-
-    elements.toggleFlagDevice.addEventListener('change', async e => {
-        await saveSettings({ flagFromDevice: e.target.checked });
-    });
-
-    elements.toggleDevices.addEventListener('change', async e => {
-        await saveSettings({ showDevices: e.target.checked });
-    });
-
-    elements.toggleVpn.addEventListener('change', async e => {
-        await saveSettings({ showVpnIndicator: e.target.checked });
-    });
-
-    elements.toggleVpnUsers.addEventListener('change', async e => {
-        await saveSettings({ showVpnUsers: e.target.checked });
-    });
-
-    elements.toggleSidebarLink.addEventListener('change', async e => {
-        await saveSettings({ showSidebarBlockerLink: e.target.checked });
-    });
-
-    // Info icon toggle (issue #38)
-    if (elements.toggleInfoIcon) {
-        elements.toggleInfoIcon.addEventListener('change', async e => {
-            await saveSettings({ showInfoIcon: e.target.checked });
+    for (const [id, key] of TOGGLES) {
+        byId(id).addEventListener('change', event => {
+            const checked = event.target.checked;
+            void saveToggle(id, key, key === 'hovercardTrigger' ? (checked ? 'click' : 'hover') : checked);
         });
     }
-
-    // Hover vs click to open the account dossier (issue #38)
-    if (elements.toggleClickDetails) {
-        elements.toggleClickDetails.addEventListener('change', async e => {
-            await saveSettings({ hovercardTrigger: e.target.checked ? 'click' : 'hover' });
-        });
-    }
-
-    // Capture button toggle
-    if (elements.toggleCaptureButton) {
-        elements.toggleCaptureButton.addEventListener('change', async e => {
-            await saveSettings({ showCaptureButton: e.target.checked });
-        });
-    }
-
-    // Clear cache button with confirmation
-    elements.btnClearCache.addEventListener('click', async () => {
-        // The hero shows the COMMUNITY total, not this device — fetch the local size fresh.
-        let localCount = 0;
-        try {
-            const r = await browserAPI.runtime.sendMessage({
-                type: MESSAGE_TYPES.GET_CACHE,
-                payload: {}
-            });
-            localCount = r?.size || 0;
-        } catch { /* ignore — treat as 0 */ }
-
-        // Confirm before clearing
-        if (localCount > 0) {
-            const confirmed = confirm(`Are you sure you want to clear ${localCount.toLocaleString()} locally cached users?\n\nThis will require re-fetching data for all users.`);
-            if (!confirmed) return;
-        }
-
-        elements.btnClearCache.classList.add('loading');
-
-        try {
-            // Clear cache by setting empty
-            await browserAPI.runtime.sendMessage({
-                type: MESSAGE_TYPES.SET_CACHE,
-                payload: { action: 'clear' }
-            });
-
-            // Refresh stats (community total is unaffected; local falls to 0)
-            await loadStats();
-
-            // Visual feedback - save original children
-            const originalChildren = Array.from(elements.btnClearCache.childNodes).map(node => node.cloneNode(true));
-            
-            // Create success content safely
-            elements.btnClearCache.textContent = '';
-            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            svg.setAttribute('viewBox', '0 0 24 24');
-            svg.setAttribute('width', '16');
-            svg.setAttribute('height', '16');
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('fill', 'currentColor');
-            path.setAttribute('d', 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z');
-            svg.appendChild(path);
-            elements.btnClearCache.appendChild(svg);
-            elements.btnClearCache.appendChild(document.createTextNode(' Cleared!'));
-            
-            setTimeout(() => {
-                elements.btnClearCache.textContent = '';
-                for (const child of originalChildren) {
-                    elements.btnClearCache.appendChild(child);
-                }
-            }, TIMING.CACHE_CLEAR_FEEDBACK_MS);
-        } catch (error) {
-            console.error('Failed to clear cache:', error);
-        } finally {
-            elements.btnClearCache.classList.remove('loading');
-        }
+    byId('btn-retry-settings').addEventListener('click', () => { void loadSettings(); });
+    byId('btn-options').addEventListener('click', () => { void openSettings(); });
+    byId('btn-blocking').addEventListener('click', () => { void openSettings(true); });
+    byId('btn-clear-cache').addEventListener('click', () => {
+        byId('cache-clear-confirm').hidden = false;
+        byId('btn-clear-cache').setAttribute('aria-expanded', 'true');
+        byId('btn-cancel-clear').focus();
     });
-
-    // Options button
-    elements.btnOptions.addEventListener('click', () => {
-        const opened = browserAPI.runtime.openOptionsPage?.();
-        if (!opened) {
-            window.open(browserAPI.runtime.getURL('options/options.html'));
-            return;
-        }
-        // DRAFT (needs on-device check — issue #17): Firefox for Android renders the
-        // toolbar popup as a full page that lingers after the options tab opens, so
-        // the user must hit Back. Closing it lands them on Options cleanly. On desktop
-        // the popup is already dismissed when a tab opens, so this is a no-op there.
-        Promise.resolve(opened).finally(() => {
-            try { window.close(); } catch (_) { /* some platforms block popup self-close */ }
-        });
+    byId('btn-cancel-clear').addEventListener('click', () => {
+        byId('cache-clear-confirm').hidden = true;
+        byId('btn-clear-cache').setAttribute('aria-expanded', 'false');
+        byId('btn-clear-cache').focus();
     });
-
-    // Privacy link
-    document.getElementById('link-privacy')?.addEventListener('click', e => {
-        e.preventDefault();
-        window.open('https://github.com/xaitax/x-account-location-device/blob/main/PRIVACY.md');
-    });
+    byId('btn-confirm-clear').addEventListener('click', () => { void clearLocalCache(); });
 }
 
-/**
- * Update disabled state for child settings
- */
-function updateDisabledState(disabled) {
-    const settingsGroup = document.querySelector('.settings-group');
-    if (settingsGroup) {
-        settingsGroup.style.opacity = disabled ? '0.5' : '1';
-        settingsGroup.style.pointerEvents = disabled ? 'none' : 'auto';
-    }
-}
-
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-} else {
-    initialize();
-}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize);
+else initialize();

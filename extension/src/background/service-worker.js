@@ -10,13 +10,16 @@
 
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, affiliationWasChecked } from '../shared/constants.js';
-import { userCache, blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedPcf, blockedLanguages, blockedAffiliations, allowedUsers, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { userCache, filterStores, blockedAffiliations, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { FILTER_SOURCES } from '../shared/filter-registry.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
 import cloudCache from './cloud-cache.js';
+import { filterStatistics } from './filter-statistics.js';
 
 // Track initialization state
 let initialized = false;
+let initializationPromise = null;
 
 // Cache for negative results (users not found) to avoid repeat API calls
 const notFoundCache = new Map();
@@ -28,31 +31,31 @@ let notFoundCleanupInterval = null;
  */
 async function initialize() {
     if (initialized) return;
-    
-    console.log(`🚀 X-Posed v${VERSION} Background Worker starting...`);
-    
-    try {
-        // Initialize storage modules
-        await initializeStorage();
-        
-        // Initialize cloud cache
-        await cloudCache.init();
-        
-        // Restore cached headers to API client
-        const storedHeaders = headersStorage.get();
-        if (storedHeaders) {
-            apiClient.setHeaders(storedHeaders);
+    if (initializationPromise) return initializationPromise;
+
+    // Startup messages and a keyboard command can arrive together. Loading twice
+    // could replace a freshly committed setting with an earlier storage snapshot.
+    initializationPromise = (async () => {
+        console.log(`🚀 X-Posed v${VERSION} Background Worker starting...`);
+        try {
+            await initializeStorage();
+            await cloudCache.init();
+
+            const storedHeaders = headersStorage.get();
+            if (storedHeaders) apiClient.setHeaders(storedHeaders);
+
+            initialized = true;
+            console.log('✅ Background worker initialized');
+            startNotFoundCacheCleanup();
+        } catch (error) {
+            console.error('❌ Background worker initialization failed:', error);
+            throw error;
         }
-
-        initialized = true;
-        console.log('✅ Background worker initialized');
-
-        // Periodically purge expired entries from the in-memory not-found cache.
-        // (No keep-alive timer: plain timers don't reset MV3 idle shutdown, and
-        // persistence is already debounced, so SW termination is fine.)
-        startNotFoundCacheCleanup();
-    } catch (error) {
-        console.error('❌ Background worker initialization failed:', error);
+    })();
+    try {
+        await initializationPromise;
+    } finally {
+        initializationPromise = null;
     }
 }
 
@@ -68,6 +71,14 @@ async function handleMessage(message, _sender) {
     const { type, payload } = message;
 
     try {
+        const filter = FILTER_SOURCES.find(source => source.get === type || source.set === type);
+        if (filter) {
+            const store = filterStores[filter.field];
+            if (type === filter.get) return handleGetBlockedSet(store);
+            return await handleSetBlockedSet(store, filter.update, {
+                action: payload?.action, value: payload?.[filter.valueKey], values: payload?.[filter.valuesKey]
+            });
+        }
         switch (type) {
             case MESSAGE_TYPES.FETCH_USER_INFO:
                 return await handleFetchUserInfo(payload);
@@ -89,61 +100,31 @@ async function handleMessage(message, _sender) {
             
             case MESSAGE_TYPES.SET_SETTINGS:
                 return await handleSetSettings(payload);
-            
-            case MESSAGE_TYPES.GET_BLOCKED_COUNTRIES:
-                return handleGetBlockedCountries();
-            
-            case MESSAGE_TYPES.SET_BLOCKED_COUNTRIES:
-                return await handleSetBlockedCountries(payload);
-            
-            case MESSAGE_TYPES.GET_BLOCKED_REGIONS:
-                return handleGetBlockedRegions();
-            
-            case MESSAGE_TYPES.SET_BLOCKED_REGIONS:
-                return await handleSetBlockedRegions(payload);
-            
-            case MESSAGE_TYPES.GET_BLOCKED_TAGS:
-                return handleGetBlockedTags();
 
-            case MESSAGE_TYPES.SET_BLOCKED_TAGS:
-                return await handleSetBlockedTags(payload);
-
-            case MESSAGE_TYPES.GET_BLOCKED_BIO_TAGS:
-                return handleGetBlockedSet(blockedBioTags);
-
-            case MESSAGE_TYPES.SET_BLOCKED_BIO_TAGS:
-                return await handleSetBlockedSet(blockedBioTags, MESSAGE_TYPES.BLOCKED_BIO_TAGS_UPDATED, {
-                    action: payload?.action, value: payload?.tag, values: payload?.tags
-                });
-
-            case MESSAGE_TYPES.GET_BLOCKED_PCF:
-                return handleGetBlockedSet(blockedPcf);
-
-            case MESSAGE_TYPES.SET_BLOCKED_PCF:
-                return await handleSetBlockedSet(blockedPcf, MESSAGE_TYPES.BLOCKED_PCF_UPDATED, {
-                    action: payload?.action, value: payload?.label, values: payload?.labels
-                });
-
-            case MESSAGE_TYPES.GET_BLOCKED_LANGUAGES:
-                return handleGetBlockedLanguages();
-
-            case MESSAGE_TYPES.SET_BLOCKED_LANGUAGES:
-                return await handleSetBlockedLanguages(payload);
-
-            case MESSAGE_TYPES.GET_BLOCKED_AFFILIATIONS:
-                return handleGetBlockedAffiliations();
-
-            case MESSAGE_TYPES.SET_BLOCKED_AFFILIATIONS:
-                return await handleSetBlockedAffiliations(payload);
-
-            case MESSAGE_TYPES.GET_ALLOWED_USERS:
-                return handleGetAllowedUsers();
-
-            case MESSAGE_TYPES.SET_ALLOWED_USERS:
-                return await handleSetAllowedUsers(payload);
+            case MESSAGE_TYPES.OPEN_OPTIONS_PAGE:
+                await browserAPI.runtime.openOptionsPage();
+                return { success: true };
 
             case MESSAGE_TYPES.GET_STATISTICS:
                 return handleGetStatistics();
+
+            case MESSAGE_TYPES.GET_FILTER_STATISTICS:
+                return { success: true, data: await filterStatistics.getSnapshot() };
+
+            case MESSAGE_TYPES.RECORD_FILTER_STATISTICS:
+                return await filterStatistics.record(payload);
+
+            case MESSAGE_TYPES.RESET_FILTER_STATISTICS: {
+                const result = await filterStatistics.reset(payload);
+                if (result.success) {
+                    broadcastToAll({
+                        type: MESSAGE_TYPES.FILTER_STATISTICS_RESET,
+                        payload: result.data,
+                        revision: result.data.revision
+                    });
+                }
+                return result;
+            }
             
             case MESSAGE_TYPES.GET_THEME:
                 return handleGetTheme();
@@ -526,7 +507,7 @@ function handleSetCache({ action, screenName, data }) {
 function handleGetSettings() {
     return {
         success: true,
-        data: settings.get()
+        ...settings.snapshot()
     };
 }
 
@@ -546,31 +527,44 @@ async function broadcastToTabs(message) {
     }
 }
 
-/**
- * Set settings handler
- */
-async function handleSetSettings(newSettings) {
-    await settings.set(newSettings);
-
-    // Notify all tabs (fire-and-forget): the caller's response shouldn't wait on a
-    // tabs.query + per-tab message round-trip, and the broadcast already swallows errors.
-    broadcastToTabs({
-        type: MESSAGE_TYPES.SETTINGS_UPDATED,
-        payload: settings.get()
+// Keep committed updates in order even when tab discovery is asynchronous. A
+// batch (used for imports) queries tabs once rather than once for every list.
+let stateBroadcastQueue = Promise.resolve();
+function broadcastToAll(update) {
+    const messages = Array.isArray(update) ? update : [update];
+    const operation = stateBroadcastQueue.then(async () => {
+        let tabs = [];
+        try {
+            tabs = await browserAPI.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] });
+        } catch (error) {
+            console.debug('Could not find tabs to notify:', error);
+        }
+        await Promise.all(messages.flatMap(message => [
+            browserAPI.runtime.sendMessage(message).catch(() => {}),
+            ...tabs.map(tab => browserAPI.tabs.sendMessage(tab.id, message).catch(() => {}))
+        ]));
     });
-
-    return { success: true, data: settings.get() };
+    stateBroadcastQueue = operation.catch(error => {
+        console.debug('Could not notify extension state:', error);
+    });
+    return stateBroadcastQueue;
 }
 
-/**
- * Get blocked countries handler
- */
-function handleGetBlockedCountries() {
-    return {
-        success: true,
-        data: blockedCountries.getAll(),
-        size: blockedCountries.size
-    };
+function publishSettings({ data, revision }) {
+    // No open extension page / no listener is normal. Mutation acknowledgements
+    // don't wait for broadcasts, and all surfaces receive the committed snapshot.
+    broadcastToAll({
+        type: MESSAGE_TYPES.SETTINGS_UPDATED,
+        payload: data,
+        revision
+    });
+    return { success: true, data, revision };
+}
+
+/** Persist a partial settings patch before acknowledging or broadcasting it. */
+async function handleSetSettings(newSettings) {
+    await settings.set(newSettings);
+    return publishSettings(settings.snapshot());
 }
 
 /**
@@ -578,7 +572,8 @@ function handleGetBlockedCountries() {
  * @param {object} store - a BlockedSetStorage singleton
  */
 function handleGetBlockedSet(store) {
-    return { success: true, data: store.getAll(), size: store.size };
+    const snapshot = store.snapshot();
+    return { success: true, ...snapshot, size: snapshot.data.length };
 }
 
 /**
@@ -611,138 +606,20 @@ async function handleSetBlockedSet(store, updatedType, { action, value, values }
             break;
     }
 
-    // Notify all tabs (fire-and-forget — don't block the caller's response on it).
-    broadcastToTabs({
+    // Capture data and revision together, before queuing asynchronous delivery.
+    const snapshot = store.snapshot();
+    // Notify tabs and extension pages without delaying the mutation response.
+    broadcastToAll({
         type: updatedType,
-        payload: store.getAll()
+        payload: snapshot.data,
+        revision: snapshot.revision
     });
 
     return {
         success: true,
-        data: store.getAll(),
-        size: store.size
+        ...snapshot,
+        size: snapshot.data.length
     };
-}
-
-/**
- * Set blocked countries handler
- */
-async function handleSetBlockedCountries({ action, country, countries }) {
-    return handleSetBlockedSet(blockedCountries, MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED, {
-        action,
-        value: country,
-        values: countries
-    });
-}
-
-/**
- * Get blocked regions handler
- */
-function handleGetBlockedRegions() {
-    return {
-        success: true,
-        data: blockedRegions.getAll(),
-        size: blockedRegions.size
-    };
-}
-
-/**
- * Get blocked tags handler
- */
-function handleGetBlockedTags() {
-    return {
-        success: true,
-        data: blockedTags.getAll(),
-        size: blockedTags.size
-    };
-}
-
-/**
- * Set blocked regions handler
- */
-async function handleSetBlockedRegions({ action, region, regions }) {
-    return handleSetBlockedSet(blockedRegions, MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, {
-        action,
-        value: region,
-        values: regions
-    });
-}
-
-/**
- * Set blocked tags handler
- */
-async function handleSetBlockedTags({ action, tag, tags }) {
-    return handleSetBlockedSet(blockedTags, MESSAGE_TYPES.BLOCKED_TAGS_UPDATED, {
-        action,
-        value: tag,
-        values: tags
-    });
-}
-
-/**
- * Get blocked languages handler
- */
-function handleGetBlockedLanguages() {
-    return {
-        success: true,
-        data: blockedLanguages.getAll(),
-        size: blockedLanguages.size
-    };
-}
-
-/**
- * Set blocked languages handler
- */
-async function handleSetBlockedAffiliations({ action, affiliation, affiliations }) {
-    return handleSetBlockedSet(blockedAffiliations, MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED, {
-        action,
-        value: affiliation,
-        values: affiliations
-    });
-}
-
-/**
- * Get blocked affiliations handler
- */
-function handleGetBlockedAffiliations() {
-    return {
-        success: true,
-        data: blockedAffiliations.getAll(),
-        size: blockedAffiliations.size
-    };
-}
-
-/**
- * Set blocked languages handler
- */
-async function handleSetBlockedLanguages({ action, language, languages }) {
-    return handleSetBlockedSet(blockedLanguages, MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, {
-        action,
-        value: language,
-        values: languages
-    });
-}
-
-/**
- * Get allowlisted ("always show") accounts handler (issue #26)
- */
-function handleGetAllowedUsers() {
-    return {
-        success: true,
-        data: allowedUsers.getAll(),
-        size: allowedUsers.size
-    };
-}
-
-/**
- * Set allowlisted ("always show") accounts handler (issue #26)
- */
-async function handleSetAllowedUsers({ action, username, usernames }) {
-    return handleSetBlockedSet(allowedUsers, MESSAGE_TYPES.ALLOWED_USERS_UPDATED, {
-        action,
-        value: username,
-        values: usernames
-    });
 }
 
 /**
@@ -946,83 +823,37 @@ async function handleSyncLocalToCloud() {
 /**
  * Import data handler - imports settings, blocked countries, blocked regions, and cache from exported JSON
  */
-async function handleImportData({ settings: importSettings, blockedCountries: importBlockedCountries, blockedRegions: importBlockedRegions, blockedTags: importBlockedTags, blockedBioTags: importBlockedBioTags, blockedPcf: importBlockedPcf, blockedLanguages: importBlockedLanguages, blockedAffiliations: importBlockedAffiliations, allowedUsers: importAllowedUsers, cache: importCache }) {
+async function handleImportData(payload) {
+    const { settings: importSettings, cache: importCache } = payload;
     const results = {
         settings: false,
-        blockedCountries: { count: 0 },
-        blockedRegions: { count: 0 },
-        blockedTags: { count: 0 },
-        blockedBioTags: { count: 0 },
-        blockedPcf: { count: 0 },
-        blockedLanguages: { count: 0 },
-        // Was missing: the import path writes results.blockedAffiliations.count, and the
-        // catch block reads it again, so a backup containing affiliations threw a
-        // TypeError mid-import — leaving allowlist and cache unimported and no tab
-        // broadcast sent, reported to the user only as "Cannot read properties of undefined".
-        blockedAffiliations: { count: 0 },
-        allowedUsers: { count: 0 },
+        ...Object.fromEntries(FILTER_SOURCES.map(source => [source.field, { count: 0 }])),
         cache: { count: 0 }
     };
     
+    let failure = null;
+    const revisions = {};
     try {
         // Import settings if provided
-        if (importSettings && typeof importSettings === 'object') {
+        if (importSettings && typeof importSettings === 'object' && !Array.isArray(importSettings)) {
             await settings.set(importSettings);
             results.settings = true;
         }
         
-        // Import blocked countries if provided (one mutation + one write)
-        if (Array.isArray(importBlockedCountries)) {
-            await blockedCountries.setAll(importBlockedCountries);
-            results.blockedCountries.count = importBlockedCountries.length;
-        }
-
-        // Import blocked regions if provided (one mutation + one write)
-        if (Array.isArray(importBlockedRegions)) {
-            await blockedRegions.setAll(importBlockedRegions);
-            results.blockedRegions.count = importBlockedRegions.length;
-        }
-
-        // Import blocked tags if provided (one mutation + one write)
-        if (Array.isArray(importBlockedTags)) {
-            await blockedTags.setAll(importBlockedTags);
-            results.blockedTags.count = importBlockedTags.length;
-        }
-
-        // Import blocked bio tags if provided (one mutation + one write)
-        if (Array.isArray(importBlockedBioTags)) {
-            await blockedBioTags.setAll(importBlockedBioTags);
-            results.blockedBioTags.count = importBlockedBioTags.length;
-        }
-
-        // Import blocked account labels if provided (one mutation + one write)
-        if (Array.isArray(importBlockedPcf)) {
-            await blockedPcf.setAll(importBlockedPcf);
-            results.blockedPcf.count = importBlockedPcf.length;
-        }
-
-        // Import blocked languages if provided (one mutation + one write)
-        if (Array.isArray(importBlockedLanguages)) {
-            await blockedLanguages.setAll(importBlockedLanguages);
-            results.blockedLanguages.count = importBlockedLanguages.length;
-        }
-
-        // Import blocked affiliations if provided (one mutation + one write)
-        if (Array.isArray(importBlockedAffiliations)) {
-            await blockedAffiliations.setAll(importBlockedAffiliations);
-            results.blockedAffiliations.count = importBlockedAffiliations.length;
-        }
-
-        // Import allowlisted ("always show") accounts if provided (one mutation + one write)
-        if (Array.isArray(importAllowedUsers)) {
-            await allowedUsers.setAll(importAllowedUsers);
-            results.allowedUsers.count = importAllowedUsers.length;
+        // One ordered commit per supplied list; missing fields in older backups stay intact.
+        for (const source of FILTER_SOURCES) {
+            const values = payload[source.field];
+            if (!Array.isArray(values)) continue;
+            const store = filterStores[source.field];
+            await store.setAll(values);
+            // Preserve the existing import response contract (links report normalized rules).
+            results[source.field].count = source.kind === 'links' ? store.size : values.length;
         }
 
         // Import cache entries if provided
         if (Array.isArray(importCache)) {
             for (const entry of importCache) {
-                if (entry.screenName) {
+                if (entry?.screenName) {
                     // Older exports have no observation time. Do not give them a
                     // new full cache lifetime simply because they were imported.
                     const accepted = userCache.set(entry.screenName, {
@@ -1034,48 +865,32 @@ async function handleImportData({ settings: importSettings, blockedCountries: im
             }
         }
         
-        // Notify all tabs about updates (parallelized - all messages sent concurrently)
-        await Promise.all([
-            broadcastToTabs({ type: MESSAGE_TYPES.SETTINGS_UPDATED, payload: settings.get() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_COUNTRIES_UPDATED, payload: blockedCountries.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, payload: blockedRegions.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_TAGS_UPDATED, payload: blockedTags.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_BIO_TAGS_UPDATED, payload: blockedBioTags.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_PCF_UPDATED, payload: blockedPcf.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_LANGUAGES_UPDATED, payload: blockedLanguages.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.BLOCKED_AFFILIATIONS_UPDATED, payload: blockedAffiliations.getAll() }),
-            broadcastToTabs({ type: MESSAGE_TYPES.ALLOWED_USERS_UPDATED, payload: allowedUsers.getAll() })
-        ]);
-
-        return {
-            success: true,
-            importedSettings: results.settings,
-            importedBlockedCountries: results.blockedCountries.count,
-            importedBlockedRegions: results.blockedRegions.count,
-            importedBlockedTags: results.blockedTags.count,
-            importedBlockedBioTags: results.blockedBioTags.count,
-            importedBlockedPcf: results.blockedPcf.count,
-            importedBlockedLanguages: results.blockedLanguages.count,
-            importedBlockedAffiliations: results.blockedAffiliations.count,
-            importedAllowedUsers: results.allowedUsers.count,
-            importedCache: results.cache.count
-        };
     } catch (error) {
-        return {
-            success: false,
-            error: error.message,
-            importedSettings: results.settings,
-            importedBlockedCountries: results.blockedCountries.count,
-            importedBlockedRegions: results.blockedRegions.count,
-            importedBlockedTags: results.blockedTags.count,
-            importedBlockedBioTags: results.blockedBioTags.count,
-            importedBlockedPcf: results.blockedPcf.count,
-            importedBlockedLanguages: results.blockedLanguages.count,
-            importedBlockedAffiliations: results.blockedAffiliations.count,
-            importedAllowedUsers: results.allowedUsers.count,
-            importedCache: results.cache.count
-        };
+        failure = error;
+    } finally {
+        // Imports are intentionally partial: if a later write fails, earlier
+        // commits still need to reach every open surface. One tab query per batch.
+        const messages = [
+            ['settings', MESSAGE_TYPES.SETTINGS_UPDATED, settings],
+            ...FILTER_SOURCES.map(source => [source.field, source.update, filterStores[source.field]])
+        ].map(([key, type, store]) => {
+            const { data, revision } = store.snapshot();
+            revisions[key] = revision;
+            return { type, payload: data, revision };
+        });
+        broadcastToAll(messages);
     }
+
+    return {
+        success: !failure,
+        ...(failure ? { error: failure.message } : {}),
+        revisions,
+        importedSettings: results.settings,
+        ...Object.fromEntries(FILTER_SOURCES.map(({ field }) => [
+            `imported${field[0].toUpperCase()}${field.slice(1)}`, results[field].count
+        ])),
+        importedCache: results.cache.count
+    };
 }
 
 /**
@@ -1151,7 +966,7 @@ async function handleInstalled(details) {
  */
 function handleStartup() {
     console.log('🌅 Browser startup - initializing...');
-    initialize();
+    initialize().catch(() => {}); // A later message retries a failed startup read.
 }
 
 /**
@@ -1214,6 +1029,21 @@ if (runtimeNS?.runtime?.onStartup) {
     runtimeNS.runtime.onStartup.addListener(handleStartup);
 }
 
+if (browserAPI.commands?.onCommand) {
+    browserAPI.commands.onCommand.addListener(async command => {
+        if (command !== 'toggle-blocking-mode') return;
+        try {
+            await initialize();
+            // Compute the toggle inside the storage queue, so rapid commands do
+            // not both read and write the same stale boolean.
+            await settings.toggle('highlightBlockedTweets');
+            publishSettings(settings.snapshot());
+        } catch (error) {
+            console.error('Could not switch blocking mode:', error);
+        }
+    });
+}
+
 // Flush deferred writes before the background suspends (reliable on Firefox event
 // pages; best-effort on Chromium MV3). Prevents losing freshly-cached users and
 // queued community-cache contributions on idle termination.
@@ -1226,7 +1056,7 @@ if (runtimeNS?.runtime?.onSuspend) {
 }
 
 // Initialize on load
-initialize();
+initialize().catch(() => {}); // Logged by initialize; message requests can retry.
 
 // Export for potential use in popup
 export { handleMessage, initialize };

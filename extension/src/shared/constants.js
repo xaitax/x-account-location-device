@@ -22,6 +22,7 @@ export const STORAGE_KEYS = {
     BLOCKED_PCF: 'x_blocked_pcf',
     BLOCKED_LANGUAGES: 'x_blocked_languages',
     BLOCKED_AFFILIATIONS: 'x_blocked_affiliations',
+    BLOCKED_LINKS: 'x_blocked_links',
     ALLOWED_USERS: 'x_allowed_users',
     SETTINGS: 'x_location_settings',
     HEADERS: 'x_api_headers',
@@ -142,6 +143,7 @@ export const MESSAGE_TYPES = {
     SET_CACHE: 'SET_CACHE',
     GET_SETTINGS: 'GET_SETTINGS',
     SET_SETTINGS: 'SET_SETTINGS',
+    OPEN_OPTIONS_PAGE: 'OPEN_OPTIONS_PAGE',
     GET_BLOCKED_COUNTRIES: 'GET_BLOCKED_COUNTRIES',
     SET_BLOCKED_COUNTRIES: 'SET_BLOCKED_COUNTRIES',
     GET_BLOCKED_REGIONS: 'GET_BLOCKED_REGIONS',
@@ -156,9 +158,14 @@ export const MESSAGE_TYPES = {
     SET_BLOCKED_LANGUAGES: 'SET_BLOCKED_LANGUAGES',
     GET_BLOCKED_AFFILIATIONS: 'GET_BLOCKED_AFFILIATIONS',
     SET_BLOCKED_AFFILIATIONS: 'SET_BLOCKED_AFFILIATIONS',
+    GET_BLOCKED_LINKS: 'GET_BLOCKED_LINKS',
+    SET_BLOCKED_LINKS: 'SET_BLOCKED_LINKS',
     GET_ALLOWED_USERS: 'GET_ALLOWED_USERS',
     SET_ALLOWED_USERS: 'SET_ALLOWED_USERS',
     GET_STATISTICS: 'GET_STATISTICS',
+    GET_FILTER_STATISTICS: 'GET_FILTER_STATISTICS',
+    RECORD_FILTER_STATISTICS: 'RECORD_FILTER_STATISTICS',
+    RESET_FILTER_STATISTICS: 'RESET_FILTER_STATISTICS',
     GET_THEME: 'GET_THEME',
     SET_THEME: 'SET_THEME',
     GET_RATE_LIMIT_STATUS: 'GET_RATE_LIMIT_STATUS',
@@ -182,7 +189,9 @@ export const MESSAGE_TYPES = {
     BLOCKED_PCF_UPDATED: 'BLOCKED_PCF_UPDATED',
     BLOCKED_LANGUAGES_UPDATED: 'BLOCKED_LANGUAGES_UPDATED',
     BLOCKED_AFFILIATIONS_UPDATED: 'BLOCKED_AFFILIATIONS_UPDATED',
+    BLOCKED_LINKS_UPDATED: 'BLOCKED_LINKS_UPDATED',
     ALLOWED_USERS_UPDATED: 'ALLOWED_USERS_UPDATED',
+    FILTER_STATISTICS_RESET: 'FILTER_STATISTICS_RESET',
     THEME_UPDATED: 'THEME_UPDATED'
 
     // NOTE: page script ↔ content script does NOT go through MESSAGE_TYPES. It uses
@@ -212,6 +221,10 @@ export const DEFAULT_SETTINGS = {
     // counts) instead of requesting it. Costs no extra API calls and never leaves the device.
     // Exposed as a kill switch because X can change these response shapes without notice.
     profileEnrichment: true,
+    // Profile location is self-written text, not X's detected account country.
+    // Keep existing bio rules unchanged until the user opts into this extra scope.
+    bioTagsMatchLocation: false,
+    linksMatchLocation: false,
     // NOTE: the community cache is NOT a setting here. It lives in its own storage key
     // (STORAGE_KEYS.CLOUD_CACHE_ENABLED) because the background reads it before settings
     // load. A `cloudCacheEnabled: false` used to sit here, read by nothing, riding along
@@ -439,7 +452,7 @@ export const PCF_LABEL_NAMES = Object.fromEntries(PCF_LABELS.map(l => [l.value, 
 export const GOVERNMENT_LABEL = 'government';
 export const ACCOUNT_LABELS = [
     ...PCF_LABELS,
-    { value: GOVERNMENT_LABEL, name: 'Government / multilateral — grey checkmark' }
+    { value: GOVERNMENT_LABEL, name: 'Government / multilateral (grey checkmark)' }
 ];
 
 /**
@@ -453,23 +466,6 @@ export function normalizePcfLabel(raw) {
     if (value === '' || value === 'none') return '';
     return value;
 }
-
-/**
- * Memory budget for the profile data harvested from X's own timeline responses.
- *
- * This data is SESSION-ONLY and never written to storage: bios are personal free text and
- * follower counts go stale within minutes, so persisting either would be both a privacy
- * problem and wrong. The cache is a bounded LRU, so a long scrolling session evicts rather
- * than grows — at these limits the worst case is roughly 500 × ~550 B ≈ 270 KB.
- */
-export const PROFILE_CACHE_CONFIG = {
-    MAX_ENTRIES: 500,
-    MAX_BIO_LENGTH: 200,
-    // Hard ceiling on nodes visited while walking one response, so a pathological payload
-    // can't pin the main thread. X sends ~20 tweets per page; this is orders of magnitude
-    // above what that needs.
-    MAX_WALK_NODES: 200000
-};
 
 // Curated list of languages that can be blocked by post language (issue #25).
 // X tags each tweet's text with its own ML-detected BCP-47 language on the

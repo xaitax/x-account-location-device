@@ -1,0 +1,111 @@
+/**
+ * Shared Graphite palette for the popup, settings and on-page extension UI.
+ * Root rules define only extension-prefixed custom properties. Components opt
+ * into color-scheme locally so loading this file never restyles X's document.
+ */
+:root {
+    --xp-color-scheme: dark;
+    --xp-font-ui: 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+    --xp-bg: #101214;
+    --xp-surface: #191c20;
+    --xp-surface-2: #131518;
+    --xp-border: #30353b;
+    --xp-text: #f2f4f5;
+    --xp-text-dim: #a8b0b8;
+    --xp-accent: #91d2c2;
+    --xp-accent-soft: rgba(145, 210, 194, .09);
+    --xp-accent-line: rgba(145, 210, 194, .4);
+    --xp-on-accent: #102b25;
+    --xp-alert: #e7b36a;
+    --xp-alert-soft: rgba(231, 179, 106, .09);
+    --xp-danger: #f38585;
+    --xp-danger-soft: rgba(243, 133, 133, .09);
+
+    /* A quiet, separate accent for optional community support. */
+    --xp-support: #df9ba8;
+    --xp-support-soft: rgba(223, 155, 168, .07);
+    --xp-support-line: rgba(223, 155, 168, .32);
+
+    /* Account cards are slightly softer than the full-page controls. */
+    --xp-card-surface: #1c1f22;
+    --xp-card-surface-2: #25292d;
+    --xp-card-border: #353b40;
+    --xp-card-text: #ecf0f1;
+    --xp-card-muted: #a5afb6;
+    --xp-card-accent-soft: #233a35;
+    --xp-card-alert: var(--xp-alert);
+    --xp-card-alert-soft: #362c1f;
+
+    /* Filter matches and native navigation keep their independent treatments. */
+    --xp-filter-accent: #c3a06c;
+    --xp-filter-surface: rgba(195, 160, 108, .06);
+    --xp-filter-rail-width: 2px;
+    --xp-nav-hover: rgba(255, 255, 255, .05);
+
+    /* Existing shared-dialog controls use aliases of the same page palette. */
+    --xp-g-bg: var(--xp-bg);
+    --xp-g-surface: var(--xp-surface);
+    --xp-g-inset: var(--xp-surface-2);
+    --xp-g-border: var(--xp-border);
+    --xp-g-text: var(--xp-text);
+    --xp-g-muted: var(--xp-text-dim);
+    --xp-g-accent: var(--xp-accent);
+    --xp-g-accent-ink: var(--xp-on-accent);
+    --xp-g-accent-soft: var(--xp-accent-soft);
+    --xp-g-warning: var(--xp-alert);
+    --xp-g-warning-soft: var(--xp-alert-soft);
+    --xp-g-error: var(--xp-danger);
+    --xp-g-error-soft: var(--xp-danger-soft);
+}
+
+:root[data-x-theme="light"] {
+    --xp-color-scheme: light;
+    --xp-bg: #fafbfb;
+    --xp-surface: #ffffff;
+    --xp-surface-2: #f0f2f2;
+    --xp-border: #d2d8d8;
+    --xp-text: #20272a;
+    --xp-text-dim: #59656b;
+    --xp-accent: #236c5c;
+    --xp-accent-soft: rgba(35, 108, 92, .07);
+    --xp-accent-line: rgba(35, 108, 92, .35);
+    --xp-on-accent: #ffffff;
+    --xp-alert: #895314;
+    --xp-alert-soft: rgba(137, 83, 20, .07);
+    --xp-danger: #ad3535;
+    --xp-danger-soft: rgba(173, 53, 53, .07);
+    --xp-support: #99475c;
+    --xp-support-soft: rgba(153, 71, 92, .06);
+    --xp-support-line: rgba(153, 71, 92, .28);
+
+    --xp-card-surface: var(--xp-surface);
+    --xp-card-surface-2: #f1f4f3;
+    --xp-card-border: #d7dddd;
+    --xp-card-text: var(--xp-text);
+    --xp-card-muted: #5e6a70;
+    --xp-card-accent-soft: #e6f3ed;
+    --xp-card-alert: #85500d;
+    --xp-card-alert-soft: #fff3df;
+
+    --xp-filter-accent: #906124;
+    --xp-filter-surface: rgba(144, 97, 36, .045);
+    --xp-nav-hover: rgba(14, 42, 58, .05);
+}
+
+/* Reuse the approved compact-card palette without changing page-level controls. */
+.x-info-badge,
+.x-posed-hovercard,
+.x-share-overlay,
+.x-share-zoom,
+.x-quote-placeholder,
+.x-toast-container {
+    --xp-surface: var(--xp-card-surface);
+    --xp-surface-2: var(--xp-card-surface-2);
+    --xp-border: var(--xp-card-border);
+    --xp-text: var(--xp-card-text);
+    --xp-text-dim: var(--xp-card-muted);
+    --xp-accent-soft: var(--xp-card-accent-soft);
+    --xp-accent-line: var(--xp-accent);
+    --xp-alert: var(--xp-card-alert);
+    --xp-alert-soft: var(--xp-card-alert-soft);
+}
