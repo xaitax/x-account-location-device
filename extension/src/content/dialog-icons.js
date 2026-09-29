@@ -31,6 +31,17 @@ const ICON_NODES = {
         ['line', { x1: '12', x2: '12', y1: '20', y2: '4' }],
         ['line', { x1: '6', x2: '6', y1: '20', y2: '14' }]
     ],
+    // users-round.svg
+    users: [
+        ['path', { d: 'M18 21a8 8 0 0 0-16 0' }],
+        ['circle', { cx: '10', cy: '8', r: '5' }],
+        ['path', { d: 'M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3' }]
+    ],
+    // at-sign.svg
+    atSign: [
+        ['circle', { cx: '12', cy: '12', r: '4' }],
+        ['path', { d: 'M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8' }]
+    ],
     // cloud.svg
     cloud: [['path', { d: 'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z' }]],
     // database.svg

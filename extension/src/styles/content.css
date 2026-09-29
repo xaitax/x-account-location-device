@@ -26,88 +26,12 @@
 }
 
 /* Theme tokens are shared; native color controls are scoped to our surfaces. */
-.x-info-badge,
 .x-posed-hovercard,
 .x-share-overlay,
 .x-share-zoom,
 .x-quote-placeholder { color-scheme: var(--xp-color-scheme); }
 
-.x-info-badge, .x-info-badge *,
 .x-posed-hovercard, .x-posed-hovercard * { box-sizing: border-box; }
-
-/* One quiet badge, with fixed geometry and independent details/share controls. */
-.x-info-badge {
-    margin: 0 4px 0 6px;
-    display: inline-flex;
-    align-items: center;
-    vertical-align: middle;
-    flex: 0 0 auto;
-    gap: 0;
-    font-family: var(--xp-font-ui);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1;
-    color: var(--xp-text-dim);
-    background: var(--xp-surface-2);
-    padding: 0 4px;
-    min-height: 25px;
-    border-radius: 6px;
-    border: 1px solid var(--xp-border);
-    cursor: pointer;
-    transition: border-color .12s ease;
-}
-
-.x-info-badge:hover {
-    border-color: var(--xp-text-dim);
-}
-
-.x-info-badge .x-badge-details {
-    appearance: none;
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    min-height: 23px;
-    margin: 0;
-    padding: 0 5px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    line-height: 1;
-    cursor: pointer;
-}
-.x-info-badge .x-badge-details:hover { color: var(--xp-text); }
-.x-info-badge .x-badge-details:focus-visible,
-.x-info-badge .x-capture-btn:focus-visible {
-    outline: 2px solid var(--xp-accent);
-    outline-offset: 2px;
-}
-.x-info-badge .x-flag { display: inline-flex; align-items: center; line-height: 1; }
-.x-info-badge .x-flag-emoji { width: 15px; height: 15px; display: block; }
-.x-info-badge .x-device { display: inline-flex; color: inherit; }
-.x-info-badge .x-device svg { width: 15px; height: 15px; display: block; }
-.x-info-badge .x-vpn { display: inline-flex; color: var(--xp-alert); }
-.x-info-badge .x-vpn svg { width: 13px; height: 13px; display: block; }
-
-/* hairline separator between items */
-.x-info-badge .x-sep { width: 1px; height: 11px; margin: 0 3px; background: var(--xp-border); }
-
-/* "More info" affordance: a static circled-i. No hover text-expansion — the badge
-   width stays fixed so the capture button never shifts out from under the cursor. */
-.x-info-badge .x-hover-hint {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 23px;
-    height: 23px;
-    flex-shrink: 0;
-    color: var(--xp-text-dim);
-}
-.x-info-badge .x-hover-hint svg { width: 14px; height: 14px; display: block; }
-.x-info-badge .x-hover-hint:hover { color: var(--xp-accent); }
 
 /* ============================================
    HOVERCARD (rich account metadata)
@@ -470,6 +394,15 @@
     text-overflow: ellipsis;
 }
 
+.x-posed-name-emoji {
+    display: inline-block;
+    width: 1.1em;
+    height: 1.1em;
+    margin: 0 .05em;
+    vertical-align: -.15em;
+    object-fit: contain;
+}
+
 .x-posed-handle {
     font-family: var(--xp-font-ui);
     font-size: 13px;
@@ -535,16 +468,6 @@
     flex-shrink: 0;
 }
 
-.x-posed-row-icon {
-    display: inline-grid;
-    place-items: center;
-    width: 13px;
-    height: 13px;
-    flex: none;
-    color: var(--xp-text-dim);
-}
-.x-posed-row-icon svg { width: 13px; height: 13px; display: block; }
-
 .x-posed-row-label {
     font-family: var(--xp-font-ui);
     font-size: 12px;
@@ -564,7 +487,6 @@
 }
 .x-posed-row--primary .x-posed-row-label { font-size: 11px; }
 .x-posed-card-metadata { padding: 8px 0 0; }
-.x-posed-card-metadata .x-posed-row-icon { display: none; }
 .x-posed-card-stats {
     display: flex;
     background: var(--xp-surface-2);
@@ -576,32 +498,84 @@
 .x-posed-stat-value { display: block; font-size: 16px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .x-posed-stat-label { display: block; color: var(--xp-text-dim); font-size: 11px; margin-top: 3px; overflow-wrap: anywhere; }
 .x-posed-card-warning {
-    position: relative;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 5px 10px;
     margin-bottom: 12px;
-    border-radius: 7px;
-    background: var(--xp-alert-soft);
-    color: var(--xp-alert);
+    border: 1px solid var(--xp-border);
+    border-radius: 8px;
+    color: var(--xp-text-dim);
     font-size: 11px;
-    line-height: 1.55;
+    line-height: 1.5;
+    white-space: nowrap;
 }
-.x-posed-card-warning > svg { flex-shrink: 0; width: 15px; height: 15px; margin-top: 1px; }
+.x-posed-card-warning > svg { flex: none; width: 15px; height: 15px; color: var(--xp-alert); }
+.x-posed-warning-why {
+    appearance: none;
+    flex: none;
+    margin-left: auto;
+    min-height: 26px;
+    padding: 3px 0 3px 3px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--xp-alert);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+.x-posed-warning-why:hover { color: var(--xp-text); }
+.x-posed-warning-why:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: 2px; }
+.x-posed-warning-help {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    z-index: 2;
+    left: 14px;
+    right: 14px;
+    max-height: calc(100% - 16px);
+    border: 1px solid var(--xp-alert);
+    border-radius: 8px;
+    background: var(--xp-bg);
+    color: var(--xp-text);
+    font-size: 12px;
+    line-height: 1.5;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .3), 0 2px 5px rgba(0, 0, 0, .16);
+}
+.x-posed-warning-help-copy { min-height: 0; overflow-y: auto; padding: 10px 12px; border-radius: inherit; }
+.x-posed-warning-help::after {
+    content: '';
+    position: absolute;
+    left: calc(var(--xp-help-pointer-x) - 4px);
+    width: 8px;
+    height: 8px;
+    background: var(--xp-bg);
+    border-right: 1px solid var(--xp-alert);
+    border-bottom: 1px solid var(--xp-alert);
+}
+.x-posed-warning-help[data-placement="above"]::after { bottom: -5px; transform: rotate(45deg); }
+.x-posed-warning-help[data-placement="below"]::after { top: -5px; transform: rotate(225deg); }
+.x-posed-warning-help[hidden] { display: none; }
 .x-posed-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .x-posed-card-status { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding: 10px 0; font-size: 12px; color: var(--xp-text-dim); overflow-wrap: anywhere; }
 .x-posed-card-status > svg { flex-shrink: 0; width: 16px; height: 16px; margin-top: 1px; }
 .x-posed-card-status--error { color: var(--xp-alert); }
 
-.x-posed-loc {
+.x-posed-signal-value {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    max-width: 100%;
+    min-height: 20px;
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.4;
 }
-.x-posed-loc .x-flag-emoji { width: 20px; height: 20px; flex-shrink: 0; }
+.x-posed-signal-value > span { min-width: 0; }
+.x-posed-signal-value > :is(img, svg) { display: block; width: 20px; height: 20px; flex: none; }
 
 .x-posed-link {
     color: var(--xp-text);
@@ -631,7 +605,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .x-posed-hovercard, .x-info-badge { transition: none; }
+    .x-posed-hovercard { transition: none; }
 }
 
 .x-flag-emoji {
@@ -639,26 +613,6 @@
     vertical-align: -0.2em;
     border-radius: 2px;
 }
-
-/* Share is a separate control; it never changes the badge's dimensions. */
-.x-info-badge .x-capture-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    width: 23px;
-    height: 23px;
-    padding: 0;
-    margin: 0;
-    flex-shrink: 0;
-    cursor: pointer;
-    color: var(--xp-text-dim);
-    border-radius: 4px;
-    transition: color .12s ease, background .12s ease;
-}
-.x-info-badge .x-capture-btn:hover { color: var(--xp-accent); background: var(--xp-accent-soft); }
-.x-info-badge .x-capture-btn svg { display: block; width: 14px; height: 14px; }
 
 /* Hidden tweet */
 .x-tweet-blocked {

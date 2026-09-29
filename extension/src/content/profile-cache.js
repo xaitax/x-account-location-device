@@ -40,7 +40,8 @@ function toCount(value) {
  * previous value; explicit empty strings/arrays remove old matching evidence.
  * Null link fields invalidate an observed source whose destinations are now unknown.
  * Changed source text invalidates its old hosts when replacement hosts are unknown.
- * Returns whether filter-relevant data changed, so count-only updates need no DOM pass.
+ * Returns whether text, label or link evidence changed. Callers separately compare
+ * active account-count rules before and after merging the profile.
  * @param {string} screenName
  * @param {Object} data - optional bio/location/host and exact URL lists/label/counts
  * @returns {boolean}

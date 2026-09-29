@@ -5,14 +5,18 @@
 import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, CACHE_CONFIG } from '../shared/constants.js';
 import { dialogIcon } from '../content/dialog-icons.js';
+import { deviceIcon, flagImage, glyph } from '../content/icons.js';
+import { BADGE_SIZES, normalizeBadgeSize, applyBadgeAppearance } from '../shared/badge-appearance.js';
 import { mountStatistics } from './statistics.js';
 import { mountBlockingSettings } from '../content/graphite-dialog.js';
 import { createSnapshotTracker } from '../shared/state-sync.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
+import { BACKUP_FORMAT, prepareBackupImport } from '../shared/backup.js';
 
 const TOGGLES = [
     ['opt-enabled', 'enabled', true],
     ['opt-debug', 'debugMode', false],
+    ['opt-badge-background', 'showBadgeBackground', true],
     ['opt-flags', 'showFlags', true],
     ['opt-devices', 'showDevices', true],
     ['opt-vpn', 'showVpnIndicator', true],
@@ -31,6 +35,10 @@ const LISTS = Object.entries({
 }).map(([kind, label]) => ({ ...FILTER_SOURCES.find(source => source.kind === kind), label }));
 
 const elements = Object.fromEntries(Object.entries({
+    optBadgeSize: 'opt-badge-size',
+    badgePreviewExample: 'badge-preview-example',
+    badgePreviewBadge: 'badge-preview-badge',
+    badgePreviewDescription: 'badge-preview-description',
     optCloudCache: 'opt-cloud-cache',
     cloudStatusIndicator: 'cloud-status-indicator',
     cloudStatusText: 'cloud-status-text',
@@ -58,6 +66,7 @@ const elements = Object.fromEntries(Object.entries({
 let currentSettings = {};
 let settingsLoaded = false;
 let blockingEditor = null;
+let pendingReleaseNavigation = null;
 let statisticsView = null;
 let cloudEnabled = false;
 let saveStatusTimeout = null;
@@ -71,15 +80,18 @@ async function initialize() {
     }
     elements.version.textContent = VERSION;
     for (const label of document.querySelectorAll('[data-release-version]')) label.textContent = VERSION;
+    renderReleaseBadgeSamples();
     const cacheDays = Math.round(CACHE_CONFIG.EXPIRY_MS / (24 * 60 * 60 * 1000));
     document.getElementById('cache-expiry').textContent = `Up to ${cacheDays} days`;
     for (const [id] of TOGGLES) document.getElementById(id).disabled = true;
+    elements.optBadgeSize.disabled = true;
     elements.optCloudCache.disabled = true;
     setupNav();
     setupEventListeners();
     browserAPI.runtime.onMessage.addListener(handleMessage);
     window.addEventListener('beforeunload', () => {
         browserAPI.runtime.onMessage.removeListener(handleMessage);
+        pendingReleaseNavigation = null;
         blockingEditor?.destroy();
         statisticsView?.destroy();
         clearTimeout(saveStatusTimeout);
@@ -103,6 +115,9 @@ function setupNav() {
     const items = [...document.querySelectorAll('.xp-nav-item[data-target]')];
     const panels = [...document.querySelectorAll('.xp-panel')];
     const showPanel = target => {
+        // A later click or browser-history navigation supersedes any release
+        // shortcut waiting for the asynchronous settings editor to be ready.
+        pendingReleaseNavigation = null;
         for (const panel of panels) {
             const active = panel.id === target;
             panel.classList.toggle('active', active);
@@ -135,6 +150,14 @@ function setupNav() {
             window.history.replaceState({}, document.title, url);
             window.scrollTo({ top: 0, behavior: 'auto' });
             if (item.classList.contains('whats-new-open')) {
+                const { target, blockingTab, blockingEditor: editor, focusId } = item.dataset;
+                if (target === 'panel-blocking' && (blockingTab === 'allowed' ||
+                    (blockingTab === 'add' && editor === 'accountCounts'))) {
+                    pendingReleaseNavigation = { target, tab: blockingTab, editor: blockingTab === 'add' ? editor : null };
+                } else if (target === 'panel-display' && focusId === 'opt-badge-size') {
+                    pendingReleaseNavigation = { target, focusId };
+                }
+                if (applyPendingReleaseNavigation()) return;
                 const heading = document.getElementById(item.dataset.target)?.querySelector('.section-title, .xp-g-title');
                 if (heading) {
                     heading.tabIndex = -1;
@@ -145,6 +168,49 @@ function setupNav() {
     }
 }
 
+/** Open an existing settings destination without selecting or saving a preference. */
+function applyPendingReleaseNavigation() {
+    const destination = pendingReleaseNavigation;
+    if (!destination) return false;
+    if (!document.getElementById(destination.target)?.classList.contains('active')) {
+        pendingReleaseNavigation = null;
+        return false;
+    }
+    if (destination.tab) {
+        if (!blockingEditor) return false;
+        pendingReleaseNavigation = null;
+        blockingEditor.navigate(destination.tab, destination.editor);
+        return true;
+    }
+    const control = document.getElementById(destination.focusId);
+    if (!control || control.disabled) return false;
+    pendingReleaseNavigation = null;
+    control.focus({ preventScroll: true });
+    return true;
+}
+
+/** Fixed, decorative size examples. They do not depend on the user's preferences. */
+function renderReleaseBadgeSamples() {
+    for (const badge of document.querySelectorAll('[data-release-badge-size]')) {
+        const badgeSize = badge.dataset.releaseBadgeSize;
+        if (!BADGE_SIZES.includes(badgeSize)) continue;
+        const details = document.createElement('span');
+        details.className = 'x-badge-details';
+        for (const [className, artwork] of [
+            ['x-flag', flagImage('Switzerland')],
+            ['x-device', deviceIcon('Switzerland App Store')]
+        ]) {
+            const icon = document.createElement('span');
+            icon.className = className;
+            icon.append(artwork);
+            details.append(icon);
+        }
+        badge.replaceChildren(details);
+        badge.setAttribute('aria-hidden', 'true');
+        applyBadgeAppearance(badge, { badgeSize, showBadgeBackground: true });
+    }
+}
+
 function applySettingsToInputs() {
     for (const [id, key, fallback] of TOGGLES) {
         const input = document.getElementById(id);
@@ -152,7 +218,56 @@ function applySettingsToInputs() {
             ? currentSettings[key] === 'click'
             : (currentSettings[key] ?? fallback) === true;
     }
+    elements.optBadgeSize.value = normalizeBadgeSize(currentSettings.badgeSize);
+    renderBadgePreview();
     blockingEditor?.updateSettings(currentSettings, snapshots.snapshot()[MESSAGE_TYPES.SETTINGS_UPDATED]);
+}
+
+/** Use the actual badge classes and artwork, without interactive controls or lookups. */
+function renderBadgePreview(settings = currentSettings) {
+    const badge = elements.badgePreviewBadge;
+    const details = document.createElement('span');
+    details.className = 'x-badge-details';
+    const shown = [];
+    const appendIcon = (parent, className, icon, description) => {
+        const span = document.createElement('span');
+        span.className = className;
+        if (icon) span.append(icon);
+        parent.append(span);
+        if (description) shown.push(description);
+    };
+    if (settings.showFlags !== false) {
+        appendIcon(details, 'x-flag', flagImage('Switzerland'), 'country');
+    }
+    if (settings.showDevices !== false) {
+        appendIcon(details, 'x-device', deviceIcon('Switzerland App Store'), 'device');
+    }
+    // The live badge only shows a location warning alongside a visible country.
+    if (settings.showFlags !== false && settings.showVpnIndicator !== false) {
+        appendIcon(details, 'x-vpn', glyph('vpn', 13), 'location warning');
+    }
+    badge.replaceChildren(details);
+    const hasContent = settings.showFlags !== false || settings.showDevices !== false;
+    if (hasContent) {
+        if (settings.showCaptureButton !== false) {
+            appendIcon(badge, 'x-sep');
+            appendIcon(badge, 'x-capture-btn', glyph('share', 14), 'share');
+        }
+        if (settings.showInfoIcon !== false) {
+            if (settings.showCaptureButton === false) appendIcon(badge, 'x-sep');
+            appendIcon(badge, 'x-hover-hint', glyph('info', 14), 'info');
+        }
+    }
+    applyBadgeAppearance(badge, settings);
+    badge.hidden = !hasContent;
+    elements.badgePreviewExample.hidden = false;
+    elements.badgePreviewDescription.textContent = hasContent
+        ? 'Example account with a location warning.'
+        : 'Enable country flags or device icons to show a badge.';
+    const size = normalizeBadgeSize(settings.badgeSize);
+    elements.badgePreviewExample.setAttribute('aria-label', hasContent
+        ? `${size} badge, background ${settings.showBadgeBackground !== false ? 'on' : 'off'}: ${shown.join(', ')}.`
+        : 'No badge. Country flags and device icons are disabled.');
 }
 
 function acceptSettings(data, revision) {
@@ -231,6 +346,8 @@ async function loadConfiguration() {
     } finally {
         host.removeAttribute('aria-busy');
         for (const [id] of TOGGLES) document.getElementById(id).disabled = !settingsLoaded;
+        elements.optBadgeSize.disabled = !settingsLoaded;
+        applyPendingReleaseNavigation();
     }
 }
 
@@ -277,7 +394,12 @@ async function watchCloudStats() {
         if (typeof total === 'number') elements.cloudTotalEntries.textContent = total.toLocaleString();
     };
     const onChanged = (changes, area) => {
-        if (area === 'local') showTotal(changes?.[STORAGE_KEYS.CLOUD_SERVER_STATS]?.newValue);
+        if (area !== 'local') return;
+        showTotal(changes?.[STORAGE_KEYS.CLOUD_SERVER_STATS]?.newValue);
+        if (changes?.[STORAGE_KEYS.THEME]?.newValue) applyTheme(changes[STORAGE_KEYS.THEME].newValue);
+        if (changes?.[STORAGE_KEYS.CLOUD_CACHE_ENABLED]) {
+            void loadCloudCacheStatus(changes[STORAGE_KEYS.CLOUD_CACHE_ENABLED].newValue);
+        }
     };
     try {
         browserAPI.storage.onChanged.addListener(onChanged);
@@ -317,12 +439,22 @@ function setupEventListeners() {
     for (const [id, key] of TOGGLES) {
         const input = document.getElementById(id);
         input.addEventListener('change', async () => {
+            if (!settingsLoaded) return;
             input.disabled = true;
             const value = key === 'hovercardTrigger' ? (input.checked ? 'click' : 'hover') : input.checked;
+            renderBadgePreview({ ...currentSettings, [key]: value });
             await saveSettings({ [key]: value });
             input.disabled = false;
         });
     }
+    elements.optBadgeSize.addEventListener('change', async () => {
+        if (!settingsLoaded || !BADGE_SIZES.includes(elements.optBadgeSize.value)) return;
+        const badgeSize = elements.optBadgeSize.value;
+        elements.optBadgeSize.disabled = true;
+        renderBadgePreview({ ...currentSettings, badgeSize });
+        await saveSettings({ badgeSize });
+        elements.optBadgeSize.disabled = false;
+    });
 
     elements.optCloudCache.addEventListener('change', async () => {
         const enabled = elements.optCloudCache.checked;
@@ -378,20 +510,21 @@ async function exportBackup() {
         // Read every committed store. A failed read must never create an incomplete backup.
         const sources = [
             ['settings', MESSAGE_TYPES.GET_SETTINGS],
-            ...LISTS.map(source => [source.field, source.get]),
-            ['cache', MESSAGE_TYPES.GET_CACHE]
+            ...FILTER_SOURCES.map(source => [source.field, source.get]),
+            ['cache', MESSAGE_TYPES.GET_CACHE],
+            ['theme', MESSAGE_TYPES.GET_THEME],
+            ['cloudCacheEnabled', MESSAGE_TYPES.GET_CLOUD_CACHE_STATUS]
         ];
         const responses = await Promise.all(sources.map(([, type]) => browserAPI.runtime.sendMessage({ type, payload: {} })));
-        const data = { exportedAt: new Date().toISOString(), version: VERSION, exportFormat: '2.3' };
+        const data = {};
         for (const [index, [key]] of sources.entries()) {
             const response = responses[index];
-            const valid = key === 'settings'
-                ? response?.data && typeof response.data === 'object' && !Array.isArray(response.data)
-                : Array.isArray(response?.data);
-            if (!response?.success || !valid) throw new Error(`Could not read ${key} for export`);
-            data[key] = response.data;
+            if (!response?.success) throw new Error(`Could not read ${key} for export`);
+            data[key] = key === 'theme' ? response.theme : key === 'cloudCacheEnabled' ? response.enabled : response.data;
         }
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const backup = { exportedAt: new Date().toISOString(), version: VERSION,
+            exportFormat: BACKUP_FORMAT, ...prepareBackupImport(data) };
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -422,25 +555,26 @@ async function handleImportFile(file) {
             showStatus('This does not appear to be an X-Posed backup file.', true);
             return;
         }
-        const entries = LISTS.filter(source => Array.isArray(data[source.field]))
+        const payload = prepareBackupImport(data);
+        const entries = LISTS.filter(source => Array.isArray(payload[source.field]))
             .map(source => `${data[source.field].length} ${source.label}`);
-        if (data.settings && typeof data.settings === 'object') entries.unshift('Settings');
-        if (Array.isArray(data.cache)) entries.push(`${data.cache.length} cached accounts`);
+        if (payload.settings) entries.unshift('Settings');
+        if (Object.hasOwn(payload, 'theme')) entries.push(`Theme: ${payload.theme}`);
+        if (Object.hasOwn(payload, 'cloudCacheEnabled')) entries.push(`Community cache: ${payload.cloudCacheEnabled ? 'on' : 'off'}`);
+        if (Array.isArray(payload.cache)) entries.push(`${payload.cache.length} cached accounts`);
         if (!confirm([
             `Import backup from ${data.version ? `v${data.version}` : 'X-Posed'}?`,
             ...entries,
-            'Included settings and filter lists will replace their current values. Fields missing from this backup will be kept. Cached accounts will be merged.',
+            'Included settings, preferences and filter lists will replace their current values. Fields missing from this backup will be kept. Cached accounts will be merged.',
             'Continue?'
         ].join('\n\n'))) return;
-        const payload = Object.fromEntries(
-            ['settings', ...LISTS.map(source => source.field), 'cache']
-                .filter(key => Object.hasOwn(data, key)).map(key => [key, data[key]])
-        );
         const response = await browserAPI.runtime.sendMessage({ type: MESSAGE_TYPES.IMPORT_DATA, payload });
         if (!response?.success) throw new Error(response?.error || 'Import failed');
         const loaded = await loadConfiguration();
-        await Promise.all([loadCacheStats(), loadStatistics()]);
-        showStatus(loaded ? 'Backup imported. Your settings and filters are up to date.'
+        await Promise.all([loadCacheStats(), loadStatistics(), loadTheme(), loadCloudCacheStatus()]);
+        const skipped = response.skippedCache > 0
+            ? ` ${response.skippedCache} cached accounts were skipped because they were outdated, invalid or already up to date.` : '';
+        showStatus(loaded ? `Backup imported. Your settings and filters are up to date.${skipped}`
             : 'Backup imported, but this page could not reload every setting. Please reload the page.', !loaded);
     } catch (error) {
         showStatus(`Import failed: ${error.message}`, true);
@@ -552,7 +686,7 @@ async function loadStatistics() {
 /**
  * Load cloud cache status
  */
-async function loadCloudCacheStatus() {
+async function loadCloudCacheStatus(committedEnabled) {
     const retry = document.getElementById('cloud-status-retry');
     if (retry) retry.disabled = true;
     try {
@@ -561,11 +695,14 @@ async function loadCloudCacheStatus() {
         });
 
         if (!response?.success) throw new Error('Could not read cloud status');
-        updateCloudCacheUI(response.enabled, response.configured, response.stats);
+        // A storage notification can precede the worker's in-memory update.
+        // Its committed preference takes precedence over that older status reply.
+        const enabled = typeof committedEnabled === 'boolean' ? committedEnabled : response.enabled;
+        updateCloudCacheUI(enabled, response.configured, response.stats);
         retry?.remove();
 
         // Use the background's cached statistics. There is no cloud polling here.
-        if (response.enabled && response.configured) {
+        if (enabled && response.configured) {
             void fetchCloudServerStats();
         }
     } catch (error) {

@@ -6,6 +6,7 @@
     <title>X-Posed Settings</title>
     <link rel="stylesheet" href="../styles/graphite-theme.css">
     <link rel="stylesheet" href="../styles/graphite.css">
+    <link rel="stylesheet" href="../styles/badges.css">
     <link rel="stylesheet" href="options.css">
 </head>
 <body>
@@ -14,61 +15,52 @@
         <div class="whats-new-banner" id="whats-new-banner" role="region" aria-labelledby="whats-new-title" style="display: none;">
             <button type="button" class="whats-new-close" id="whats-new-close" aria-label="Dismiss what's new" data-settings-icon="close"></button>
             <div class="whats-new-content">
-                <h2 id="whats-new-title">What's New in X-Posed v<span data-release-version>4.0.0</span></h2>
-                <p class="whats-new-subtitle">X-Posed kept growing. It was time for a leaner, cleaner design that gives all those features room to breathe.</p>
+                <h2 id="whats-new-title">What's new in X-Posed <span data-release-version>4.1.0</span></h2>
+                <p class="whats-new-subtitle">More control. Less clutter.</p>
 
                 <div class="whats-new-features">
-                    <div class="whats-new-feature">
-                        <span class="feature-icon" data-settings-icon="settings" aria-hidden="true"></span>
-                        <div class="feature-info">
-                            <strong>A new design, everywhere</strong>
-                            <span>Settings, popup, blocking, badges, account cards, Share and notifications now share one compact light/dark design. Clearer counts, quieter badges and consistent highlights.</span>
+                    <article class="whats-new-feature">
+                        <h3>Badges, your way</h3>
+                        <p>Three sizes, an icons-only look, and a live preview to find your fit.</p>
+                        <div class="whats-new-badge-samples" role="group" aria-label="Badge size examples">
+                            <div><span class="x-info-badge" data-release-badge-size="small"></span><span>Small</span></div>
+                            <div><span class="x-info-badge" data-release-badge-size="medium"></span><span>Medium</span></div>
+                            <div><span class="x-info-badge" data-release-badge-size="large"></span><span>Large</span></div>
                         </div>
-                    </div>
-                    <div class="whats-new-feature">
-                        <span class="feature-icon" data-settings-icon="shield" aria-hidden="true"></span>
-                        <div class="feature-info">
-                            <strong>Filters, without the clutter</strong>
-                            <span>A clear <strong>Add filter</strong> flow, searchable saved rules, and dedicated <strong>Always Show</strong> and <strong>Behavior</strong> tabs. Your settings stay intact. An optional browser shortcut switches Hide and Highlight.</span>
-                        </div>
-                    </div>
-                    <div class="whats-new-feature">
-                        <span class="feature-icon" data-settings-icon="share" aria-hidden="true"></span>
-                        <div class="feature-info">
-                            <strong>A whole website, or one exact URL</strong>
-                            <span>Match a domain and its subdomains, or just the exact URL you provide. Check profile websites and bio links, with optional matching in self-written profile location text.</span>
-                        </div>
-                    </div>
-                    <div class="whats-new-feature">
-                        <span class="feature-icon" data-settings-icon="chart" aria-hidden="true"></span>
-                        <div class="feature-info">
-                            <strong>See what your filters catch</strong>
-                            <span>Local totals for unique, identifiable matching posts, location/device breakdowns, and world maps for Filtering and Cached accounts. Filtering counts start as you browse. No extra X or cloud requests.</span>
-                        </div>
-                    </div>
+                        <a href="#panel-display" class="whats-new-feature-link whats-new-open" data-target="panel-display" data-focus-id="opt-badge-size">Customize badges <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
+                    </article>
+                    <article class="whats-new-feature">
+                        <h3>More ways to filter</h3>
+                        <p>Filter by accounts followed, total posts, or digits in handles and display names.</p>
+                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="add" data-blocking-editor="accountCounts">Explore filters <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
+                    </article>
+                    <article class="whats-new-feature">
+                        <h3>Keep the people you follow</h3>
+                        <p>Let followed accounts bypass your filters when X confirms their follow status. Just enable Always Show.</p>
+                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="allowed">Always Show <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
+                    </article>
                 </div>
-                <p class="whats-new-fixes"><strong>Plus a good pile of fixes:</strong> steadier account names, better quote captures and keyboard controls, safer settings saves across tabs, and less repeated work while you scroll. Your own posts stay exempt from language filters too.</p>
+                <p class="whats-new-improvements"><strong>And plenty of bug fixes</strong> for a smoother everyday experience.</p>
                 <div class="whats-new-actions">
-                    <a href="#panel-blocking" class="btn btn-primary whats-new-open" data-target="panel-blocking">Manage filters</a>
-                    <a href="#panel-stats" class="btn whats-new-open" data-target="panel-stats">Explore statistics</a>
-                    <a href="https://github.com/xaitax/x-account-location-device/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer" class="whats-new-changelog">Full changelog</a>
+                    <a href="#panel-general" class="btn btn-primary whats-new-open" data-target="panel-general">Continue to settings</a>
+                    <a href="https://github.com/xaitax/x-account-location-device/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer" class="whats-new-changelog">Full changelog &amp; credits</a>
                 </div>
                 <section class="whats-new-cta" aria-labelledby="whats-new-support-title">
                     <h3 id="whats-new-support-title" class="whats-new-support-title">
                         <span class="settings-icon" data-settings-icon="heart" aria-hidden="true"></span>
                         Made possible by you
                     </h3>
-                    <p><strong>A huge thank you to everyone who has donated.</strong> Your generosity helps keep X-Posed free and the community cache of over four million accounts running. September's server bill is <strong>US$273.32</strong>. There is absolutely no need to donate, but it helps tremendously.</p>
-                    <p><strong>You asked for crypto, so it's here:</strong> Bitcoin, Ethereum and USDC on Ethereum are now available alongside Ko-fi. Thank you for the support, bug reports and ideas that made this release possible.</p>
+                    <p><strong>A huge thank you to everyone who has donated.</strong> You keep X-Posed free and the community cache running. September's server bill: <strong>US$273.32</strong>. Donations are entirely optional, but help tremendously.</p>
                     <div class="whats-new-support-actions">
                         <a href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener noreferrer" class="btn whats-new-support-action">
                             <span class="settings-icon" data-settings-icon="coffee" aria-hidden="true"></span>
                             Buy me a coffee
                         </a>
                         <a href="#panel-about" class="btn whats-new-support-action whats-new-open" data-target="panel-about">
-                            Crypto donation options
+                            Crypto options
                             <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span>
                         </a>
+                        <span class="whats-new-support-note">Bitcoin, Ethereum and USDC on Ethereum, added by request.</span>
                     </div>
                 </section>
             </div>
@@ -180,6 +172,37 @@
                     <p class="section-description">Choose what appears beside an account and how you open its details.</p>
                     <h3 class="settings-subtitle">Badges</h3>
                     <div class="settings-group">
+                        <div class="badge-preview">
+                            <div class="option-info">
+                                <span class="option-label">Badge preview</span>
+                                <span class="option-description" id="badge-preview-description">Loading your badge preview...</span>
+                            </div>
+                            <div class="badge-preview-example" id="badge-preview-example" role="img" aria-label="Badge preview loading" hidden>
+                                <span class="badge-preview-handle">@example</span>
+                                <span class="x-info-badge" id="badge-preview-badge"></span>
+                            </div>
+                        </div>
+                        <div class="option-row">
+                            <div class="option-info">
+                                <label class="option-label" for="opt-badge-size">Badge size</label>
+                                <span class="option-description" id="badge-size-help">Choose the size of the icons and spacing beside usernames.</span>
+                            </div>
+                            <select class="option-select" id="opt-badge-size" aria-describedby="badge-size-help" disabled>
+                                <option value="small">Small</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="large">Large</option>
+                            </select>
+                        </div>
+                        <div class="option-row">
+                            <div class="option-info">
+                                <span class="option-label">Show badge background</span>
+                                <span class="option-description" id="badge-background-help">Turn off the background and border for icons only.</span>
+                            </div>
+                            <label class="toggle">
+                                <input type="checkbox" id="opt-badge-background" aria-label="Show badge background" aria-describedby="badge-background-help" checked disabled>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                         <div class="option-row">
                             <div class="option-info">
                                 <span class="option-label">Show Country Flags</span>
@@ -362,7 +385,7 @@
                     </div>
                 </div>
 
-                <p class="section-hint">Export Data includes your settings, saved filters, Always Show accounts and local cache. Import a previous export to restore them.</p>
+                <p class="section-hint">Export Data includes all settings and filters, Always Show accounts, your theme, community-cache preference and local account cache. Statistics and login/session data are not included. Missing fields in older backups keep their current values.</p>
                 <div class="btn-group">
                     <button class="btn btn-secondary" id="btn-clear-cache">
                         Clear Cache
@@ -428,7 +451,7 @@
                 </h2>
 
                 <div class="about-info">
-                    <p><strong>X-Posed</strong> v<span id="version">4.0.0</span></p>
+                    <p><strong>X-Posed</strong> v<span id="version">4.1.0</span></p>
                     <p class="text-muted">See where X users are located and what devices they use.</p>
                     
                     <div class="about-links">

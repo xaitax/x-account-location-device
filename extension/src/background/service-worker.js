@@ -9,6 +9,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
+import { prepareBackupImport } from '../shared/backup.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, affiliationWasChecked } from '../shared/constants.js';
 import { userCache, filterStores, blockedAffiliations, settings, headersStorage, initializeStorage } from '../shared/storage.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
@@ -821,14 +822,23 @@ async function handleSyncLocalToCloud() {
 }
 
 /**
- * Import data handler - imports settings, blocked countries, blocked regions, and cache from exported JSON
+ * Restore portable settings, filter lists and dated account-cache observations.
  */
 async function handleImportData(payload) {
+    payload = prepareBackupImport(payload);
+    // Reject malformed rules before replacing any existing settings or lists.
+    for (const { field } of FILTER_SOURCES) {
+        if (payload[field]?.some(value => !filterStores[field].normalize(value))) {
+            throw new TypeError(`Backup ${field} contains an invalid filter.`);
+        }
+    }
     const { settings: importSettings, cache: importCache } = payload;
     const results = {
         settings: false,
+        theme: false,
+        cloudCacheEnabled: false,
         ...Object.fromEntries(FILTER_SOURCES.map(source => [source.field, { count: 0 }])),
-        cache: { count: 0 }
+        cache: { count: 0, skipped: 0 }
     };
     
     let failure = null;
@@ -850,18 +860,57 @@ async function handleImportData(payload) {
             results[source.field].count = source.kind === 'links' ? store.size : values.length;
         }
 
+        if (Object.hasOwn(payload, 'theme')) {
+            const response = await handleSetTheme({ theme: payload.theme });
+            if (!response.success) throw new Error(response.error || 'Could not restore theme.');
+            results.theme = true;
+        }
+        if (Object.hasOwn(payload, 'cloudCacheEnabled')) {
+            await cloudCache.setEnabled(payload.cloudCacheEnabled);
+            results.cloudCacheEnabled = true;
+        }
+
         // Import cache entries if provided
         if (Array.isArray(importCache)) {
+            // Handles are case-insensitive, but existing cache keys preserve casing.
+            // Keep those keys usable without introducing duplicate aliases on restore.
+            const currentAccounts = new Map();
+            userCache.forEach((screenName, value) => {
+                const key = screenName.toLowerCase();
+                const current = currentAccounts.get(key) || { keys: [], timestamp: 0 };
+                current.keys.push(screenName);
+                if (Number.isFinite(value.timestamp)) current.timestamp = Math.max(current.timestamp, value.timestamp);
+                currentAccounts.set(key, current);
+            });
             for (const entry of importCache) {
-                if (entry?.screenName) {
-                    // Older exports have no observation time. Do not give them a
-                    // new full cache lifetime simply because they were imported.
-                    const accepted = userCache.set(entry.screenName, {
-                        ...entry,
-                        timestamp: entry.timestamp ?? null
-                    });
-                    if (accepted) results.cache.count++;
+                const valid = entry && typeof entry === 'object' && !Array.isArray(entry) &&
+                    typeof entry.screenName === 'string' && /^[a-zA-Z0-9_]{1,15}$/.test(entry.screenName) &&
+                    ['location', 'device'].every(key => entry[key] === null || entry[key] === undefined || typeof entry[key] === 'string') &&
+                    (entry.locationAccurate === undefined || typeof entry.locationAccurate === 'boolean') &&
+                    (entry.fromCloud === undefined || typeof entry.fromCloud === 'boolean') &&
+                    Number.isFinite(entry.timestamp) && entry.timestamp > 0 && entry.timestamp <= Date.now();
+                if (!valid) { results.cache.skipped++; continue; }
+                const key = entry.screenName.toLowerCase();
+                const current = currentAccounts.get(key);
+                // Restoring an old backup must never age a newer live observation.
+                if (Number.isFinite(current?.timestamp) && current.timestamp >= entry.timestamp) {
+                    results.cache.skipped++;
+                    continue;
                 }
+                const keys = current?.keys || [entry.screenName];
+                let accepted = false;
+                for (const screenName of keys) {
+                    if (userCache.set(screenName, { ...entry, screenName })) accepted = true;
+                }
+                if (accepted) {
+                    currentAccounts.set(key, { keys, timestamp: entry.timestamp });
+                    results.cache.count++;
+                } else results.cache.skipped++;
+            }
+            // MV3 may suspend before the regular debounced save. Acknowledge only
+            // after persistence, and surface failure while retaining retry behavior.
+            if (results.cache.count && !(await userCache.save())) {
+                throw new Error('Could not save the restored account cache. Earlier settings or filters may already have been restored.');
             }
         }
         
@@ -878,6 +927,7 @@ async function handleImportData(payload) {
             revisions[key] = revision;
             return { type, payload: data, revision };
         });
+        if (results.theme) messages.push({ type: MESSAGE_TYPES.THEME_UPDATED, payload: payload.theme });
         broadcastToAll(messages);
     }
 
@@ -886,10 +936,13 @@ async function handleImportData(payload) {
         ...(failure ? { error: failure.message } : {}),
         revisions,
         importedSettings: results.settings,
+        importedTheme: results.theme,
+        importedCloudCacheEnabled: results.cloudCacheEnabled,
         ...Object.fromEntries(FILTER_SOURCES.map(({ field }) => [
             `imported${field[0].toUpperCase()}${field.slice(1)}`, results[field].count
         ])),
-        importedCache: results.cache.count
+        importedCache: results.cache.count,
+        skippedCache: results.cache.skipped
     };
 }
 

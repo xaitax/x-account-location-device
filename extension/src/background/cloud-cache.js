@@ -106,10 +106,11 @@ class CloudCacheClient {
      * Set cloud cache enabled state
      */
     async setEnabled(enabled) {
-        this.enabled = enabled;
+        if (typeof enabled !== 'boolean') throw new TypeError('Cloud cache preference must be a boolean');
         await browserAPI.storage.local.set({
             [STORAGE_KEYS.CLOUD_CACHE_ENABLED]: enabled
         });
+        this.enabled = enabled;
         console.log(`☁️ Cloud Cache: ${enabled ? 'enabled' : 'disabled'}`);
 
         // Warm the server-stats cache so Options can display instantly.

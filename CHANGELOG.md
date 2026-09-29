@@ -2,6 +2,34 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [4.1.0] - 2026-09-29
+
+More control over your feed, customizable badges, and plenty of bug fixes for a smoother everyday experience.
+
+### Features
+
+- **Customizable badges:** choose Small, Medium or Large, or remove the background and border for icons only. A live preview in **Display → Badges** reflects your choices.
+- **Keep followed accounts visible:** an optional toggle in **Blocking → Always Show** exempts accounts X confirms you follow. Off by default; unknown follow status keeps normal filtering, and quoted authors are checked separately. No extra requests. Follow status stays in your current session and is never shared with Community Cache.
+- **Activity & name-pattern filters:** set minimums for accounts followed (Following), Total posts, or digits in handles and display names. Each rule is independent, with presets and custom minimums under **Activity & names**. All are off until added. Activity filters use profile details X already loads; digit filters also work with profile details disabled.
+
+### Fixes
+
+- **Compact badges:** lighter translucent backgrounds and softer borders. Account-suggestion badges fit their visible icons instead of stretching into partly empty boxes.
+- **Account-card polish:** consistent location/device typography and icon sizes, stable names while details load, and X's emoji artwork and symbol fonts instead of changed or missing characters.
+- **Clearer, consistent location warnings:** a single-line notice with a distinct “Why?” tooltip. Badges and cards stay in sync when newer accuracy information arrives, without closing the card or losing keyboard focus.
+- **Backup and restore fixes:** fixed missing theme and community-cache preferences; older backups preserve settings they omit. Restores validate configuration first, preserve newer cached observations, report skipped records and wait for cache storage before reporting success. Restored preferences update across open settings pages, and failed community-cache preference saves keep the previous choice.
+
+### Maintenance
+
+- **Community cache, server-side:** fewer unnecessary storage writes and clearer count-refresh diagnostics, deployed separately from the extension update.
+
+### Thank you
+
+- **@emilianomartinezfoschi** for requesting badge customization [#69](https://github.com/xaitax/x-account-location-device/issues/69), and **@SargeJoseph** for suggesting the followed-account exception [#58](https://github.com/xaitax/x-account-location-device/issues/58).
+- **@vrboopbop** for requesting activity filtering [#67](https://github.com/xaitax/x-account-location-device/issues/67) and handle filtering [#56](https://github.com/xaitax/x-account-location-device/issues/56). This release addresses the handle portion of #56, not avatar filtering.
+
+A huge thank you to everyone who donates, tests or shares ideas. Donations are never required, but they help tremendously with September's **US$273.32** server bill.
+
 ## [4.0.0] - 2026-09-27
 
 X-Posed's growing functionality needed a leaner, cleaner home. Version 4.0 introduces a new design, making existing controls easier to find and leaving room for what comes next. Existing settings and filters are preserved.
@@ -14,7 +42,7 @@ X-Posed's growing functionality needed a leaner, cleaner home. Version 4.0 intro
 
 ### Features
 
-- **Domain and exact-URL filters:** match profile websites and bio links. Bare domains include subdomains; URLs keep their specific destination. Bio and link filters can optionally include self-written profile location text. Rules are included in backups.
+- **Domain and exact-URL filters:** match profile websites and bio links. Bare domains include subdomains; URLs keep their specific destination. Bio and link filters can optionally include self-written profile location text.
 - **Local filtering statistics and maps:** count identifiable hidden and highlighted posts once across tabs and restarts, with location/device breakdowns and a separate reset. Filtering and Cached accounts each get a country heatmap and exact-count lists; regions and unknowns remain separate. No history backfill or extra X/cloud requests.
 - **Optional keyboard shortcut:** assign a browser extension shortcut to switch between Hide and Highlight. No shortcut is assigned by default.
 - **Crypto donations, by request:** Bitcoin, Ethereum and USDC on Ethereum join Ko-fi, with network labels and copy-address controls in About, plus addresses in the README.
@@ -76,14 +104,14 @@ A huge thank you to everyone who has donated. September's server bill is **US$27
 
 ### Bug Fixes
 - **Profiles could show a completely different account** ([#40](https://github.com/xaitax/x-account-location-device/issues/40), reported by **@Martin-L-H**): when a display name was itself written like a handle, the profile header resolved to that account instead of the real one — showing its country and device, and applying every filter to the wrong person. Posts were unaffected, which is why it went unnoticed.
-- **Backups containing blocked affiliations failed to import**, stopping partway and leaving the allowlist and cached accounts behind. Every filter, setting and list now imports and exports in full.
+- **Backups containing blocked affiliations:** imports no longer stop partway and skip the allowlist and cached accounts.
 - **Added the missing "Caribbean" region**, which X reports but the Regions tab did not offer.
 - Hardened the fallback lookup used when the extension can't authenticate, so it can no longer accept data belonging to a different account.
 
 ## [3.4.0] - 2026-07-27
 
 ### New
-- **Block by affiliation**: X shows the parent organisation on affiliated accounts, so blocking one organisation hides every one of its staff accounts at once. Part of the name is enough. Find it in **Settings → Blocking → Affiliations**, and it's part of import/export.
+- **Block by affiliation**: X shows the parent organisation on affiliated accounts, so blocking one organisation hides every one of its staff accounts at once. Part of the name is enough. Find it in **Settings → Blocking → Affiliations**.
 - **Hovering an account now records more about it**: opening an info card reads its affiliation, when the account was created, its account ID and how often the handle has changed, and (with the community cache on) shares those so the next person gets them instantly. So if an account slips past the affiliation filter, hover it once and it stays known. Nothing is ever looked up in the background just to check, so none of this eats into your rate limit.
 - **Followers, Verified followers and Following are flagged too**: accounts matching any of your filters now get an amber accent in those lists. They are only ever flagged there, never hidden, so the lists stay complete and the counts still add up.
 - **Quoted posts are filtered too** ([#32](https://github.com/xaitax/x-account-location-device/issues/32), requested by **@jackvanwinkle**): a blocked country, region, or tag now collapses the quote card as well, with a "click to show" placeholder suggested by **@TMCAtom**. Only the quote is affected, and highlight mode flags it in amber instead.
@@ -97,7 +125,7 @@ A huge thank you to everyone who has donated. September's server bill is **US$27
 ## [3.3.0] - 2026-07-06
 
 ### New
-- **Always-Show Accounts (allowlist)** ([#26](https://github.com/xaitax/x-account-location-device/issues/26), requested by **@JansthcirlU**): add accounts that should *never* be hidden or highlighted by any filter, whether by country, region, tag, language, or VPN, on the timeline and on their own profile. Ideal for people you follow from a blocked country or friends who post through a VPN. Manage them in the new **Settings → Always-Show** section (just type a handle, the @ is added for you); included in import/export.
+- **Always-Show Accounts (allowlist)** ([#26](https://github.com/xaitax/x-account-location-device/issues/26), requested by **@JansthcirlU**): add accounts that should *never* be hidden or highlighted by any filter, whether by country, region, tag, language, or VPN, on the timeline and on their own profile. Ideal for people you follow from a blocked country or friends who post through a VPN. Manage them in the new **Settings → Always-Show** section (just type a handle, the @ is added for you).
 
 ## [3.2.0] - 2026-07-01
 
@@ -107,7 +135,7 @@ A huge thank you to everyone who has donated. September's server bill is **US$27
 - **Popup community-cache total** now updates live from the same source as the settings dashboard, so the two no longer show different numbers.
 
 ### New
-- **Language filter** ([#25](https://github.com/xaitax/x-account-location-device/issues/25), requested by **@nightkall**): block or highlight posts by the language they're written in, using X's own per-post language detection (so it works for every language, not just non-Latin scripts). Manage it from the blocking modal's new **Languages** tab, from **Settings → Blocking → Languages**, and it's included in import/export. Honors your hide-vs-highlight preference; quoted-tweet and media/emoji-only posts are never mis-blocked.
+- **Language filter** ([#25](https://github.com/xaitax/x-account-location-device/issues/25), requested by **@nightkall**): block or highlight posts by the language they're written in, using X's own per-post language detection (so it works for every language, not just non-Latin scripts). Manage it from the blocking modal's new **Languages** tab or **Settings → Blocking → Languages**. Honors your hide-vs-highlight preference; quoted-tweet and media/emoji-only posts are never mis-blocked.
 - **"Open Changelog on Update" toggle** ([#24](https://github.com/xaitax/x-account-location-device/issues/24)): turn off the automatic "What's New" tab that opens after an update (Settings → General Settings). On by default; opted-out users still see the in-page "What's New" banner next time they open Options.
 
 ## [3.1.0] - 2026-06-19
@@ -193,7 +221,6 @@ A complete visual redesign, plus all the features and fixes from the 2.6 line, s
   - Tags are matched against the user's display name (not username)
   - New "Tags" tab in the blocking modal and options page
   - Works alongside existing country and region blocking
-  - Tags included in Export/Import for backup and restore
 
 ### 🎨 UI/UX
 - Added count badges to blocking modal tabs showing number of blocked items
@@ -228,12 +255,10 @@ A complete visual redesign, plus all the features and fixes from the 2.6 line, s
   - New tabbed interface in sidebar modal and options page (Countries | Regions)
   - Geographic globe emojis: 🌍 Africa/Europe/West Asia, 🌎 Americas, 🌏 Asia/Oceania
   - Blocked regions can be managed separately from blocked countries
-  - Export/Import now includes blocked regions
 - **Highlight Mode**: NEW alternative to hiding blocked tweets
   - Toggle in Options page: "Hide blocked tweets" vs "Highlight blocked tweets"
   - Highlighted tweets shown with subtle amber left border instead of being hidden
   - Useful for users who want to see content but be warned about location
-  - Setting syncs with Export/Import
 
 ---
 

@@ -1,0 +1,114 @@
+/* Shared by on-X badges and the settings preview. Never restyles X's own elements. */
+.x-info-badge, .x-info-badge * { box-sizing: border-box; }
+.x-info-badge {
+    --xp-badge-icon: 15px;
+    --xp-badge-height: 25px;
+    --xp-badge-gap: 6px;
+    --xp-badge-padding: 2px;
+    --xp-badge-details-padding: 4px;
+    --xp-badge-touch: 0px;
+    --xp-badge-control: calc(var(--xp-badge-height) - 2px);
+    margin: 0 4px 0 6px;
+    display: inline-flex;
+    inline-size: max-content;
+    align-items: center;
+    vertical-align: middle;
+    flex: 0 0 auto;
+    gap: 0;
+    font-family: var(--xp-font-ui);
+    font-size: var(--xp-badge-icon);
+    font-weight: 600;
+    line-height: 1;
+    color-scheme: var(--xp-color-scheme);
+    color: var(--xp-text-dim);
+    background: var(--xp-badge-fill);
+    padding: 0 var(--xp-badge-padding);
+    min-height: var(--xp-badge-height);
+    border-radius: 6px;
+    border: 1px solid var(--xp-badge-line);
+    cursor: pointer;
+    transition: background-color .12s ease, border-color .12s ease;
+}
+.x-info-badge[data-size="small"] {
+    --xp-badge-icon: 13px;
+    --xp-badge-height: 23px;
+    --xp-badge-gap: 4px;
+    --xp-badge-padding: 1px;
+    --xp-badge-details-padding: 3px;
+}
+.x-info-badge[data-size="large"] {
+    --xp-badge-icon: 17px;
+    --xp-badge-height: 29px;
+    --xp-badge-gap: 8px;
+    --xp-badge-padding: 3px;
+    --xp-badge-details-padding: 5px;
+}
+.x-info-badge:hover, .x-info-badge:focus-within {
+    background: var(--xp-badge-hover-fill);
+    border-color: var(--xp-badge-hover-line);
+}
+.x-info-badge[data-background="false"] {
+    padding-inline: 0;
+    --xp-badge-details-padding: 2px;
+    background: transparent;
+    border-color: transparent;
+}
+.x-info-badge .x-badge-details {
+    appearance: none;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: var(--xp-badge-gap);
+    min-height: max(var(--xp-badge-control), var(--xp-badge-touch));
+    margin: 0;
+    padding: 0 var(--xp-badge-details-padding);
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+.x-info-badge .x-badge-details:hover { color: var(--xp-text); }
+.x-info-badge .x-badge-details:focus-visible,
+.x-info-badge .x-capture-btn:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: 2px; }
+.x-info-badge .x-flag { display: inline-flex; align-items: center; justify-content: center; width: var(--xp-badge-icon); height: var(--xp-badge-icon); line-height: 1; }
+.x-info-badge .x-flag-emoji { width: var(--xp-badge-icon); height: var(--xp-badge-icon); display: block; border-radius: 2px; }
+.x-info-badge .x-device { display: inline-flex; color: inherit; }
+.x-info-badge .x-device svg { width: var(--xp-badge-icon); height: var(--xp-badge-icon); display: block; }
+.x-info-badge .x-vpn { display: inline-flex; color: var(--xp-alert); }
+.x-info-badge .x-vpn svg { width: calc(var(--xp-badge-icon) - 2px); height: calc(var(--xp-badge-icon) - 2px); display: block; }
+.x-info-badge .x-sep { width: 1px; height: calc(var(--xp-badge-icon) - 4px); margin: 0 3px; background: var(--xp-badge-line); }
+
+/* Details and Share remain independent, stable targets at each size. */
+.x-info-badge .x-hover-hint,
+.x-info-badge .x-capture-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: max(var(--xp-badge-control), var(--xp-badge-touch));
+    height: max(var(--xp-badge-control), var(--xp-badge-touch));
+    flex-shrink: 0;
+    color: var(--xp-text-dim);
+}
+.x-info-badge .x-capture-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color .12s ease, background .12s ease;
+}
+.x-info-badge .x-hover-hint svg,
+.x-info-badge .x-capture-btn svg { width: calc(var(--xp-badge-icon) - 1px); height: calc(var(--xp-badge-icon) - 1px); display: block; }
+.x-info-badge .x-hover-hint:hover { color: var(--xp-accent); }
+.x-info-badge .x-capture-btn:hover { color: var(--xp-accent); background: var(--xp-badge-hover-fill); }
+@media (pointer: coarse) {
+    .x-info-badge { --xp-badge-touch: 28px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .x-info-badge, .x-info-badge .x-capture-btn { transition: none; }
+}

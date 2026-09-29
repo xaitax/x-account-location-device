@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X-Posed: Account Location & Device Info",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.",
   
   "icons": {
@@ -44,7 +44,7 @@
         "*://*.twitter.com/*"
       ],
       "js": ["content.js"],
-      "css": ["styles/graphite-theme.css", "styles/content.css", "styles/graphite.css", "styles/notifications.css"],
+      "css": ["styles/graphite-theme.css", "styles/badges.css", "styles/content.css", "styles/graphite.css", "styles/notifications.css"],
       "run_at": "document_start"
     },
     {
@@ -64,6 +64,7 @@
       "resources": [
         "page-script.js",
         "styles/graphite-theme.css",
+        "styles/badges.css",
         "styles/content.css",
         "styles/graphite.css",
         "styles/notifications.css"

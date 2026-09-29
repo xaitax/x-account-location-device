@@ -36,6 +36,12 @@
     --xp-card-alert: var(--xp-alert);
     --xp-card-alert-soft: #362c1f;
 
+    /* Inline badges stay lighter than account cards, including on highlighted posts. */
+    --xp-badge-fill: rgba(165, 175, 182, .07);
+    --xp-badge-line: rgba(165, 175, 182, .14);
+    --xp-badge-hover-fill: rgba(165, 175, 182, .12);
+    --xp-badge-hover-line: rgba(165, 175, 182, .3);
+
     /* Filter matches and native navigation keep their independent treatments. */
     --xp-filter-accent: #c3a06c;
     --xp-filter-surface: rgba(195, 160, 108, .06);
@@ -86,6 +92,11 @@
     --xp-card-accent-soft: #e6f3ed;
     --xp-card-alert: #85500d;
     --xp-card-alert-soft: #fff3df;
+
+    --xp-badge-fill: rgba(32, 39, 42, .035);
+    --xp-badge-line: rgba(32, 39, 42, .12);
+    --xp-badge-hover-fill: rgba(32, 39, 42, .07);
+    --xp-badge-hover-line: rgba(32, 39, 42, .24);
 
     --xp-filter-accent: #906124;
     --xp-filter-surface: rgba(144, 97, 36, .045);

@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md">Version 4.0.0</a> ·
+  <a href="CHANGELOG.md">Version 4.1.0</a> ·
   <a href="#features">Features</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#filtering">Filtering</a> ·
@@ -41,13 +41,13 @@ X-Posed is a free, open-source browser extension for Chrome and Firefox. It brin
 
 Install the extension, reload X, and browse while signed in. Open an account badge for details, or choose **Manage filters** in the extension popup to configure your timeline.
 
-This README describes version 4.0.0. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
+This README describes source version 4.1.0. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
 
 **iPhone and iPad:** a separate [X-Posed Location companion app](https://apps.apple.com/us/app/x-posed-location/id6755918713) offers username lookups. It is not the browser extension and does not provide the same timeline features.
 
 ## Features
 
-- **Account context, inline.** Country flags, Apple/Android/Web source icons and location warnings beside usernames. Choose which indicators you see.
+- **Account context, inline.** Country flags, Apple/Android/Web source icons and location warnings beside usernames. Choose which indicators you see, select Small/Medium/Large badges, or turn off the background for icons only. Preview changes in **Settings → Display**.
 - **Compact account details.** Open a badge for country, connection source, account age, verification, handle changes, affiliation and follower, following, post and media counts, where available. Hover, click and touch controls are supported.
 - **Your timeline, your filters.** Hide matching posts or keep them visible with a subtle highlight. Search saved rules and exempt accounts with **Always Show**.
 - **Local statistics.** See how many identifiable posts your filters catch, with country, region and device breakdowns. Explore world maps for filtering activity and locally cached accounts.
@@ -55,13 +55,13 @@ This README describes version 4.0.0. Browser-store updates roll out separately. 
 - **Consistent controls.** Light and dark themes, a compact popup, the optional Blocking link in X's sidebar, settings backups and a configurable Hide/Highlight keyboard shortcut.
 - **Community cache.** Reuse public account records shared by the community to reduce repeat X lookups. You can turn it off and continue using direct X lookups and your local cache.
 
-Version 4.0 introduces a new design across the extension, with clearer navigation and room for its growing functionality. Read the [changelog](CHANGELOG.md) for the release details.
+Version 4.1 adds activity and name-pattern filters, an option to always show accounts you follow, clearer account details and more reliable backups. Read the [changelog](CHANGELOG.md) for the release details.
 
 ## Filtering
 
 Open **Manage filters** from the popup, **Settings → Blocking**, or the optional **Blocking** link in X's sidebar. Choose **Add filter**, select a type, and add your rules. Use **Saved filters** to search or remove them, **Always Show** for exceptions, and **Behavior** for data-source preferences.
 
-Choose **Hide** to remove matching posts or **Highlight** to keep them readable. Changes save automatically and recheck posts already on the page. A match on any applicable rule is enough.
+Choose **Hide** to remove matching posts or **Highlight** to keep them readable. Saved changes recheck posts already on the page. A match on any applicable rule is enough.
 
 | Filter | Matches |
 | --- | --- |
@@ -71,6 +71,7 @@ Choose **Hide** to remove matching posts or **Highlight** to keep them readable.
 | Account labels | Parody, Commentary, Fan, or the account's grey government/multilateral checkmark |
 | Organization affiliation | An observed organization name or handle |
 | Post language | The language X assigns to the displayed post text |
+| Activity & names | Minimum Following or Total posts, plus separate handle and display-name digit rules |
 | Location warnings | Accounts whose location X marks as potentially inaccurate |
 
 Filters affect what you see locally. They do not block or mute accounts on X.
@@ -79,6 +80,7 @@ Filters affect what you see locally. They do not block or mute accounts on X.
 
 - **Countries and regions are separate.** Selecting Europe does not select individual European countries. Under **Behavior → Country source**, **Device country, when available** uses a country from the connection-source label, falling back to the account location. This affects both flags and country/region filters.
 - **Always Show takes priority.** Exempt accounts from its tab or their account card. Your own recognized account is exempt too. New installs include `@xaitax` in Always Show; removing it is respected.
+- **Accounts you follow can be exempt too.** Enable **Always Show → Always show accounts I follow**, off by default. It applies as X loads follow status; already-loaded accounts may need a refresh or further browsing. Confirmed followed accounts bypass filters, while unknown status uses normal filtering. No extra requests are made, and **Use profile details** can remain off. Follow status stays in page-session memory, is cleared when the signed-in account changes, and is never uploaded or backed up. Only the preference is included in backups. Quoted authors are checked independently.
 - **Quotes keep their own rules.** A matching quoted account can collapse independently, with a **Show quoted post** control and the matching reasons. Language and location-warning filters apply to the enclosing post, not independently to its quoted author.
 - **Opened posts stay readable.** A main post identified by its own permalink is highlighted rather than hidden when deliberately opened. Replies retain their normal rules. Matching accounts in people lists are highlighted, never removed.
 - **Missing information is not guessed.** Language filtering uses X's displayed-text language marker; auto-translation can make the original language unavailable. Unknown languages are not filtered, and government status requires the account's own grey checkmark.
@@ -90,6 +92,23 @@ Under **Add filter → Domains & URLs**, `example.com` matches that site and its
 Exact rules preserve the hostname, scheme, path case, trailing slash, query and fragment after standard URL parsing. They do not include child pages. Redirects and short links are not followed; unavailable destinations stay unknown. Existing domain rules remain domain rules.
 
 Bio-text and link filters each have a default-off option to also check self-written **profile location text**. This is separate from X's account-country label. **Behavior → Use profile details** controls access to the profile data X already loads, without requesting missing profiles.
+
+### Activity & names
+
+Under **Add filter → Activity & names**, choose a rule from two groups:
+
+- **Activity:** Following and Total posts, with presets and custom minimums.
+- **Name patterns:** Handle digits and Display-name digits, each with its own minimum.
+
+All four rules are independent and off until added. Each has one editable threshold: **5,000 or more** includes exactly 5,000. Following means accounts followed, not followers; Total posts is X's reported total, not a daily rate.
+
+Following and Total posts use counts X already loads and update when new counts are observed. Unknown counts do not match. Turning off **Behavior → Use profile details** leaves these two rules saved but inactive.
+
+**Handle digits** counts all digits in the actual `@handle`, not the display name. The suggested minimum is **5**, adjustable from **1 to 15**: `@alex1990` has four digits, while `@a1b2c3d4e5` has five.
+
+**Display-name digits** is a separate rule, also suggested at **5**, adjustable from **1 to 50**. It counts decimal digits, including styled and non-Latin digits, in the displayed name. Digits in a name and handle are never added together; missing names do not match.
+
+Both digit rules work even with profile details disabled. All four rules need no additional lookups, are included in backups and respect the usual exceptions.
 
 ### Location warnings and keyboard shortcut
 
@@ -107,8 +126,8 @@ You can assign **Switch matching posts between Hide and Highlight** in your brow
 | --- | --- |
 | Statistics → Filtering → Reset counts | Removes filtering totals and deduplication fingerprints, without changing filters or cached accounts |
 | Data & Cache → Clear Cache | Clears locally cached account details, not community records or filtering statistics |
-| Data & Cache → Export Data | Backs up settings, filters, Always Show accounts and local cached accounts, but not X headers or statistics |
-| Data & Cache → Import Data | Restores an export; old cache entries without usable timestamps are skipped while settings and filters still import |
+| Data & Cache → Export Data | Backs up all settings and filters, Always Show accounts, theme, community-cache preference and local cached accounts, but not X headers or statistics |
+| Data & Cache → Import Data | Validates settings and filters before restoring them, preserves fields missing from older backups, and skips outdated or invalid cached accounts without replacing newer observations |
 
 The local account cache holds up to 50,000 accounts for up to 60 days. Downloading a shared record preserves its remaining lifetime rather than making it fresh again. Treat exported files as private.
 

@@ -5,6 +5,7 @@ import { normalizeLinkRule, normalizeDomain, normalizeExactUrl, findBlockedDomai
 import { createSnapshotTracker } from '../shared/state-sync.js';
 import { createBlockingModeControl } from '../shared/blocking-mode-control.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
+import { ACCOUNT_COUNT_FILTERS, isAccountCountThreshold } from '../shared/account-counts.js';
 import { flagImage } from './icons.js';
 import { dialogIcon as glyph } from './dialog-icons.js';
 
@@ -19,7 +20,42 @@ const SOURCES = [
     { key: 'languages', title: 'Post languages', label: 'Post language', icon: 'languages', hint: 'The language X detects in a post.' },
     { key: 'allowedUsers', title: 'Always Show', label: 'Account', icon: 'shield' }
 ].map(view => ({ ...FILTER_SOURCES.find(source => source.kind === view.key), ...view }));
-const FILTERS = SOURCES.filter(source => source.key !== 'allowedUsers');
+// This is a presentation label. Keep the source and setting keys stable for backups.
+const COUNT_SOURCE = { key: 'accountCounts', title: 'Activity & names', icon: 'chart', hint: 'Following, total posts and digits in account names.' };
+const FILTERS = [...SOURCES.filter(source => source.key !== 'allowedUsers'), COUNT_SOURCE];
+const countFormat = new Intl.NumberFormat('en-US');
+const COUNT_EDITOR_DETAILS = {
+    minFollowing: {
+        title: 'Following', icon: 'users', hint: 'Accounts they follow',
+        label: 'Following at least',
+        help: 'The number of accounts this account follows, not its followers.',
+        preview: value => `Matches accounts following ${countFormat.format(value)} or more accounts.`
+    },
+    minPosts: {
+        title: 'Total posts', icon: 'chart', hint: 'Total posts reported by X',
+        label: 'Total posts at least',
+        help: 'The total post count reported by X, not posts per day.',
+        preview: value => `Matches accounts with ${countFormat.format(value)} or more total posts.`
+    },
+    minHandleDigits: {
+        title: 'Handle digits', icon: 'atSign', hint: 'Numbers in the @handle',
+        label: 'Minimum digits in handle',
+        help: 'Counts digits anywhere in the @handle, not the display name. They do not need to be consecutive.',
+        preview: value => `Matches handles containing ${value} or more digits.`,
+        source: 'handle'
+    },
+    minDisplayNameDigits: {
+        title: 'Display-name digits', icon: 'tag', hint: 'Numbers in the visible name',
+        label: 'Minimum digits in display name',
+        help: 'Counts digits anywhere in the display name, including styled digits. The @handle is counted separately.',
+        preview: value => `Matches display names containing ${value} or more digits.`,
+        source: 'display name'
+    }
+};
+const COUNT_EDITOR_GROUPS = [
+    { key: 'activity', title: 'Activity', rules: ['minFollowing', 'minPosts'] },
+    { key: 'names', title: 'Name patterns', rules: ['minHandleDigits', 'minDisplayNameDigits'] }
+];
 const CATALOGS = {
     countries: COUNTRY_LIST.map(value => ({ value, label: formatCountryName(value) })),
     regions: REGION_LIST.map(region => ({ value: region.key, label: region.name })),
@@ -100,7 +136,7 @@ function createBlockingSurface(config, container = null) {
     let deferredFocusId = '';
     const pending = new Set();
     const drafts = Object.create(null);
-    const view = { tab: 'add', editor: null, query: '', source: 'all', catalogQuery: '', selectedOnly: false, userQuery: '', linkMode: 'auto', clearKind: null };
+    const view = { tab: 'add', editor: null, query: '', source: 'all', catalogQuery: '', selectedOnly: false, userQuery: '', linkMode: 'auto', clearKind: null, countMetric: ACCOUNT_COUNT_FILTERS[0].key };
 
     const overlay = embedded ? null : el('div', `${CSS_CLASSES.MODAL_OVERLAY} xp-graphite-overlay`);
     const modal = createElement('div', {
@@ -247,17 +283,23 @@ function createBlockingSurface(config, container = null) {
         render(false);
         body.scrollTop = 0;
         const previousSource = tab === 'add' && !editor && previousEditor ? findById(`x-g-source-${previousEditor}`) : null;
-        const target = previousSource || body.querySelector('input, select, .xp-g-source, #x-g-editor-title') || body;
+        const target = previousSource || body.querySelector('.xp-g-count-selector input:checked') ||
+            body.querySelector('input, select, .xp-g-source, #x-g-editor-title') || body;
         if (!embedded || modal.getClientRects().length) target.focus({ preventScroll: true });
     }
 
     function sourceLabel(kind, value) {
+        if (kind === COUNT_SOURCE.key) {
+            const metric = ACCOUNT_COUNT_FILTERS.find(item => item.key === value);
+            return `${metric.label}: ${countFormat.format(settings[value])} or more`;
+        }
         if (kind === 'countries') return formatCountryName(value);
         if (kind === 'allowedUsers') return `@${value}`;
         return CATALOGS[kind]?.find(item => item.value === value)?.label || value;
     }
 
     function makeRow(source, value) {
+        if (source.key === COUNT_SOURCE.key) return makeCountRow(value);
         const row = el('div', 'xp-g-row');
         const label = source.key === 'links' ? (value.includes('://') ? 'Exact URL' : 'Domain') : source.label;
         const kind = el('span', 'xp-g-kind', label);
@@ -269,6 +311,41 @@ function createBlockingSurface(config, container = null) {
         remove.id = `x-g-remove-${source.key}-${encodeURIComponent(value)}`;
         remove.disabled = pending.has(`${source.key}:${value}`) || pending.has(`${source.key}:undefined`);
         row.append(kind, content, remove);
+        return row;
+    }
+
+    function filterValues(source) {
+        return source.key === COUNT_SOURCE.key
+            ? ACCOUNT_COUNT_FILTERS.filter(metric => isAccountCountThreshold(settings[metric.key], metric.max) && settings[metric.key] > 0).map(metric => metric.key)
+            : [...sets[source.key]];
+    }
+
+    function filterTotal() {
+        return FILTERS.reduce((total, source) => total + filterValues(source).length, 0);
+    }
+
+    function makeCountRow(key) {
+        const metric = ACCOUNT_COUNT_FILTERS.find(item => item.key === key);
+        const row = el('div', 'xp-g-row xp-g-count-row');
+        row.dataset.countKey = key;
+        const value = el('span', 'xp-g-value', `${countFormat.format(settings[key])} or more`);
+        if (metric.requiresProfile && settings.profileEnrichment === false) value.append(el('small', '', 'Inactive: profile details disabled'));
+        const actions = el('div', 'xp-g-row-actions');
+        const edit = button('Edit', () => {
+            view.countMetric = key;
+            delete drafts[key];
+            navigate('add', COUNT_SOURCE.key);
+        }, 'xp-g-button ghost');
+        edit.id = `x-g-edit-${key}`;
+        edit.setAttribute('aria-label', `Edit ${metric.label.toLowerCase()} filter`);
+        const remove = iconButton(`Remove ${metric.label.toLowerCase()} filter`, 'close', async () => {
+            const response = await changeSettings({ [key]: 0 });
+            if (response.success) { delete drafts[key]; render(); }
+        });
+        remove.id = `x-g-remove-${key}`;
+        edit.disabled = remove.disabled = pending.has('settings');
+        actions.append(edit, remove);
+        row.append(el('span', 'xp-g-kind', metric.label), value, actions);
         return row;
     }
 
@@ -293,7 +370,7 @@ function createBlockingSurface(config, container = null) {
         const container = el('div');
         const heading = el('div', 'xp-g-section-heading xp-g-library-heading');
         const headingText = el('div');
-        headingText.append(el('h3', '', 'Saved filters'), el('p', '', 'Review or remove the filters you have added.'));
+        headingText.append(el('h3', '', 'Saved filters'), el('p', '', 'Review and manage the filters you have added.'));
         const add = button('Add filter', () => navigate('add'), 'xp-g-button primary');
         add.prepend(glyph('plus', 16));
         heading.append(headingText, add);
@@ -310,12 +387,13 @@ function createBlockingSurface(config, container = null) {
         let shown = 0;
         for (const source of FILTERS) {
             if (view.source !== 'all' && view.source !== source.key) continue;
-            for (const value of [...sets[source.key]].sort((a, b) => sourceLabel(source.key, a).localeCompare(sourceLabel(source.key, b)))) {
-                if (query && !`${source.title} ${sourceLabel(source.key, value)} ${value}`.toLocaleLowerCase().includes(query)) continue;
+            for (const value of filterValues(source).sort((a, b) => sourceLabel(source.key, a).localeCompare(sourceLabel(source.key, b)))) {
+                const rawCount = source.key === COUNT_SOURCE.key ? settings[value] : '';
+                if (query && !`${source.title} ${sourceLabel(source.key, value)} ${value} ${rawCount}`.toLocaleLowerCase().includes(query)) continue;
                 list.append(makeRow(source, value)); shown++;
             }
         }
-        const total = FILTERS.reduce((count, source) => count + sets[source.key].size, 0);
+        const total = filterTotal();
         container.append(heading, toolbar, el('p', 'xp-g-summary', `${shown} ${shown === 1 ? 'filter' : 'filters'}${shown !== total ? ` of ${total} saved` : ' saved'}`), list);
         if (!shown) {container.append(total ? empty('No matching filters', 'Try another search or choose a different source.', 'Clear search', () => { view.query = ''; view.source = 'all'; render(); })
             : empty('No filters yet', 'Choose a country, a word, a link or another filter to get started.', 'Add your first filter', () => navigate('add')));}
@@ -332,7 +410,7 @@ function createBlockingSurface(config, container = null) {
             choice.id = `x-g-source-${source.key}`;
             const text = el('div'); text.append(el('strong', '', source.title), el('p', '', source.hint));
             const tail = el('span', 'xp-g-source-tail');
-            const count = sets[source.key].size;
+            const count = filterValues(source).length;
             if (count) {
                 const badge = el('span', 'xp-g-source-count', String(count));
                 badge.setAttribute('aria-label', `${count} saved`);
@@ -397,6 +475,24 @@ function createBlockingSurface(config, container = null) {
         return label;
     }
 
+    function settingSwitch(key, titleText, helpText, {
+        id = `x-g-setting-${key}`, helpId = `${id}-help`, defaultValue = false
+    } = {}) {
+        const row = el('div', 'xp-g-setting');
+        const text = el('div');
+        const label = el('label', '', titleText); label.htmlFor = id;
+        const help = el('p', '', helpText); help.id = helpId;
+        text.append(label, help);
+        const input = createElement('input', {
+            id, type: 'checkbox', className: 'xp-g-switch', role: 'switch', 'aria-describedby': helpId
+        });
+        input.checked = defaultValue ? settings[key] !== false : settings[key] === true;
+        input.disabled = pending.has('settings');
+        input.addEventListener('change', () => changeSettings({ [key]: input.checked }));
+        row.append(text, input);
+        return row;
+    }
+
     function normalizedDraft(kind) {
         const raw = (drafts[kind] || '').trim();
         if (kind === 'links') {
@@ -426,7 +522,7 @@ function createBlockingSurface(config, container = null) {
         input.setAttribute('aria-describedby', `${inputId}-help`);
         field.append(label, input);
         const help = el('p', 'xp-g-help', kind === 'links' ? 'A bare domain matches the whole site and subdomains. A URL with a path stays an exact URL.'
-            : kind === 'allowedUsers' ? 'Exact handles only. These accounts override all filters; this does not change whom you follow or block on X.'
+            : kind === 'allowedUsers' ? 'These accounts bypass all filters. Your follows and blocks on X stay unchanged.'
                 : kind === 'affiliations' ? 'Matches an organization name or handle observed by X-Posed. Some affiliation details appear after opening an account’s hovercard.'
                     : 'Matches text containing this value, case-insensitively. Emoji and punctuation are supported.');
         help.id = `${inputId}-help`;
@@ -489,27 +585,156 @@ function createBlockingSurface(config, container = null) {
         const busy = [...pending].some(key => key.startsWith(`${kind}:`));
         if (view.clearKind === kind) {
             container.classList.add('xp-g-notice', 'warning');
-            container.append(el('p', '', `Remove all ${count} ${kind === 'allowedUsers' ? 'Always Show exceptions' : `${source.title.toLowerCase()} filters`}? Other filter types will be kept.`));
+            container.append(el('p', '', kind === 'allowedUsers'
+                ? `Remove all ${count} saved accounts? Your follow preference and other filters will be kept.`
+                : `Remove all ${count} ${source.title.toLowerCase()} filters? Other filter types will be kept.`));
             const confirm = button('Remove all', () => mutate(kind, 'clear', undefined, () => { view.clearKind = null; }));
             confirm.disabled = busy;
             container.append(confirm, button('Cancel', () => { view.clearKind = null; render(); }, 'xp-g-button ghost'));
         } else {
-            const clear = button(`Clear ${source.title.toLowerCase()} (${count})`, () => { view.clearKind = kind; render(); }, 'xp-g-button ghost');
+            const clear = button(`Clear ${kind === 'allowedUsers' ? 'saved accounts' : source.title.toLowerCase()} (${count})`, () => { view.clearKind = kind; render(); }, 'xp-g-button ghost');
             clear.disabled = busy;
             container.append(clear);
         }
         return container;
     }
 
+    function renderCountEditor() {
+        const container = el('div', 'xp-g-count-editor');
+        const metric = ACCOUNT_COUNT_FILTERS.find(item => item.key === view.countMetric);
+        const details = COUNT_EDITOR_DETAILS[metric.key];
+        const busy = pending.has('settings');
+        const selector = el('fieldset', 'xp-g-count-selector');
+        selector.append(el('legend', '', 'Choose a rule to add or edit'));
+        const instructions = el('p', 'xp-g-help', 'Each rule works independently. Select one below, set a minimum, then save.');
+        instructions.id = 'x-g-count-instructions';
+        selector.setAttribute('aria-describedby', instructions.id);
+        const choices = el('div', 'xp-g-count-metrics');
+        for (const group of COUNT_EDITOR_GROUPS) {
+            const section = createElement('div', { className: 'xp-g-count-group', role: 'group', 'aria-labelledby': `x-g-count-group-${group.key}` });
+            const heading = el('h4', '', group.title);
+            heading.id = `x-g-count-group-${group.key}`;
+            section.append(heading);
+            for (const key of group.rules) {
+                const item = COUNT_EDITOR_DETAILS[key];
+                const choice = el('label', 'xp-g-count-choice');
+                const input = createElement('input', {
+                    id: `x-g-count-metric-${key}`, type: 'radio', name: 'x-g-account-rule', value: key,
+                    'aria-labelledby': `x-g-count-title-${key}`, 'aria-describedby': `x-g-count-hint-${key}`
+                });
+                input.checked = key === metric.key;
+                input.addEventListener('change', () => {
+                    if (!input.checked) return;
+                    view.countMetric = key;
+                    render();
+                });
+                const card = el('span', 'xp-g-source xp-g-count-choice-body');
+                const text = el('span', 'xp-g-count-choice-text');
+                const title = el('strong', '', item.title);
+                title.id = `x-g-count-title-${key}`;
+                const hint = el('small', '', item.hint);
+                hint.id = `x-g-count-hint-${key}`;
+                text.append(title, hint);
+                card.append(glyph(item.icon, 20), text);
+                choice.append(input, card);
+                section.append(choice);
+            }
+            choices.append(section);
+        }
+        selector.append(instructions, choices);
+        container.append(selector);
+        const saved = isAccountCountThreshold(settings[metric.key], metric.max) && settings[metric.key] > 0 ? settings[metric.key] : 0;
+        const raw = drafts[metric.key] ?? String(saved || metric.suggested);
+        const parsed = /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+        const valid = isAccountCountThreshold(parsed, metric.max) && parsed > 0;
+        const form = el('form');
+        const presets = createElement('div', { className: 'xp-g-count-presets', role: 'group', 'aria-label': `${metric.label} presets` });
+        for (const threshold of metric.presets) {
+            const preset = button(countFormat.format(threshold), () => { drafts[metric.key] = String(threshold); render(); });
+            preset.id = `x-g-count-preset-${threshold}`;
+            preset.setAttribute('aria-pressed', String(valid && parsed === threshold));
+            preset.disabled = busy;
+            presets.append(preset);
+        }
+        if (metric.presets.length) {
+            form.append(el('p', 'xp-g-help', 'Choose a preset or enter a custom minimum, then save your filter.'), presets);
+        } else {
+            form.append(el('p', 'xp-g-help', `Enter a minimum from 1 to ${metric.max}, then save your filter.`));
+        }
+        const field = el('div', 'xp-g-field');
+        const label = el('label', '', details.label);
+        label.htmlFor = 'x-g-count-input';
+        const input = createElement('input', { id: label.htmlFor, type: 'text', inputmode: 'numeric', className: 'xp-g-input', autocomplete: 'off', 'aria-describedby': 'x-g-count-help x-g-count-validation' });
+        input.value = raw;
+        input.disabled = busy;
+        input.addEventListener('input', event => { drafts[metric.key] = input.value; if (!event.isComposing) render(); });
+        input.addEventListener('compositionend', () => { drafts[metric.key] = input.value; render(); });
+        input.setAttribute('aria-invalid', String(Boolean(raw.trim()) && !valid));
+        field.append(label, input);
+        const help = el('p', 'xp-g-help', details.help);
+        help.id = 'x-g-count-help';
+        const validation = el('p', 'xp-g-notice error', raw.trim() && !valid
+            ? metric.max < Number.MAX_SAFE_INTEGER ? `Enter a whole number from 1 to ${metric.max}.` : 'Enter a positive whole number using digits only.'
+            : '');
+        validation.id = 'x-g-count-validation';
+        form.append(field, help, validation);
+        if (valid) {
+            const preview = el('div', 'xp-g-count-preview');
+            preview.append(glyph(details.icon, 18), el('span', '', details.preview(parsed)));
+            form.append(preview);
+        }
+        if (metric.requiresProfile && settings.profileEnrichment === false) {
+            const notice = el('div', 'xp-g-notice warning');
+            notice.append(el('p', '', 'Profile details are disabled. Following and Total posts filters stay saved but inactive until you enable them in Behavior.'));
+            const behavior = button('Open Behavior', () => navigate('behavior'), 'xp-g-button ghost');
+            behavior.id = 'x-g-count-enable-profile';
+            notice.append(behavior);
+            form.append(notice);
+        }
+        const actions = el('div', 'xp-g-form-actions');
+        const save = button(saved ? 'Save changes' : 'Add filter', () => form.requestSubmit(), 'xp-g-button primary');
+        save.id = 'x-g-count-save';
+        save.disabled = busy || !valid || parsed === saved;
+        actions.append(save);
+        if (saved && parsed === saved) actions.append(el('span', 'xp-g-help', 'Already saved'));
+        form.append(actions);
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (save.disabled) return;
+            const submitted = drafts[metric.key];
+            const response = await changeSettings({ [metric.key]: parsed });
+            if (response.success && drafts[metric.key] === submitted) { delete drafts[metric.key]; render(); }
+        });
+        container.append(form, el('p', 'xp-g-help', metric.requiresProfile
+            ? 'Uses counts X already loads, without extra requests. Unknown counts do not match. Saved rules follow Hide or Highlight and respect Always Show.'
+            : `Uses the visible ${details.source}, even with profile details disabled. No extra requests. Saved rules follow Hide or Highlight and respect Always Show.`));
+        const values = filterValues(COUNT_SOURCE);
+        if (values.length) {
+            const existing = el('section', 'xp-g-existing');
+            existing.append(el('h4', '', 'Saved activity and name filters'));
+            const list = el('div', 'xp-g-list');
+            for (const key of values) list.append(makeCountRow(key));
+            existing.append(list);
+            container.append(existing);
+        }
+        return container;
+    }
+
     function renderUsers() {
         const container = el('div', 'xp-g-users');
-        container.append(el('p', 'xp-g-help', 'Always keep these accounts visible, even when they match your filters.'), renderTextEditor('allowedUsers'),
+        container.append(settingSwitch('alwaysShowFollowing', 'Always show accounts I follow',
+            'Applies when X provides follow status. Otherwise, your filters still apply.'));
+        const accounts = el('section');
+        const heading = el('div', 'xp-g-section-heading');
+        heading.append(el('h3', '', 'Specific accounts'));
+        accounts.append(heading, renderTextEditor('allowedUsers'),
             search('x-g-user-search', 'Search saved accounts', view.userQuery, value => { view.userQuery = value; }));
         const values = [...sets.allowedUsers].sort().filter(value => value.includes(view.userQuery.toLowerCase().replace(/^@/, '').trim()));
         const source = SOURCES.find(item => item.key === 'allowedUsers');
-        for (const value of values) container.append(makeRow(source, value));
-        if (!values.length) container.append(empty(sets.allowedUsers.size ? 'No matching accounts' : 'No exceptions yet', 'Add an exact handle above to always keep that account visible.'));
-        container.append(renderClear('allowedUsers'));
+        for (const value of values) accounts.append(makeRow(source, value));
+        if (!values.length) accounts.append(empty(sets.allowedUsers.size ? 'No matching accounts' : 'No saved accounts yet', 'Add an exact handle above to always keep that account visible.'));
+        accounts.append(renderClear('allowedUsers'));
+        container.append(accounts);
         return container;
     }
 
@@ -547,17 +772,10 @@ function createBlockingSurface(config, container = null) {
         ], 'Used for flags and country/region filters. Device country comes from the connected app; account location is used when it is unavailable.', false));
 
         const profile = el('section', 'xp-g-behavior-section');
-        const row = el('div', 'xp-g-setting');
-        const text = el('div');
-        const label = el('label', '', 'Use profile details'); label.htmlFor = 'x-g-behavior-profileEnrichment';
-        const help = el('p', '', 'Read bios, links and account details that X already loads. No extra requests are made; these details stay on this device.');
-        help.id = 'x-g-profile-help';
-        text.append(label, help);
-        const input = createElement('input', { id: label.htmlFor, type: 'checkbox', className: 'xp-g-switch', role: 'switch', 'aria-describedby': help.id });
-        input.checked = settings.profileEnrichment !== false;
-        input.disabled = pending.has('settings');
-        input.addEventListener('change', () => changeSettings({ profileEnrichment: input.checked }));
-        row.append(text, input); profile.append(row); container.append(profile);
+        profile.append(settingSwitch('profileEnrichment', 'Use profile details',
+            'Read bios, links and account counts that X already loads. No extra requests are made; these details stay on this device. Following and Total posts filters are inactive when this is off. Digit rules for handles and display names do not need profile details.',
+            { id: 'x-g-behavior-profileEnrichment', helpId: 'x-g-profile-help', defaultValue: true }));
+        container.append(profile);
 
         const notes = el('section', 'xp-g-rule-notes');
         const list = el('ul');
@@ -582,7 +800,7 @@ function createBlockingSurface(config, container = null) {
             ? (focused === body && deferredFocusId ? deferredFocusId : focused.id) : '';
         const selection = focusId && typeof focused.selectionStart === 'number' ? [focused.selectionStart, focused.selectionEnd] : null;
         const scrollTop = body.scrollTop;
-        const count = FILTERS.reduce((total, source) => total + sets[source.key].size, 0);
+        const count = filterTotal();
         // Keep the tab nodes stable so keyboard focus survives broadcasts.
         if (!tabs.children.length) {for (const [key, text] of [['add', 'Add filter'], ['saved', 'Saved filters'], ['allowed', 'Always Show'], ['behavior', 'Behavior']]) {
             const tab = button('', () => navigate(key));
@@ -609,7 +827,7 @@ function createBlockingSurface(config, container = null) {
         body.setAttribute('aria-labelledby', `x-g-tab-${view.tab}`);
         const fragment = document.createDocumentFragment();
         if (view.editor) {
-            const source = SOURCES.find(item => item.key === view.editor);
+            const source = FILTERS.find(item => item.key === view.editor);
             const breadcrumb = createElement('nav', { className: 'xp-g-breadcrumb', 'aria-label': 'Filter navigation' });
             const trail = el('ol');
             const parent = el('li');
@@ -625,9 +843,10 @@ function createBlockingSurface(config, container = null) {
             trail.append(parent, current);
             breadcrumb.append(trail);
             fragment.append(breadcrumb);
-            if (CATALOGS[view.editor]) fragment.append(renderCatalog(view.editor));
+            if (view.editor === COUNT_SOURCE.key) fragment.append(renderCountEditor());
+            else if (CATALOGS[view.editor]) fragment.append(renderCatalog(view.editor));
             else fragment.append(renderTextEditor(view.editor));
-            fragment.append(renderClear(view.editor));
+            if (view.editor !== COUNT_SOURCE.key) fragment.append(renderClear(view.editor));
         } else fragment.append(view.tab === 'add' ? renderChooser() : view.tab === 'saved' ? renderLibrary() : view.tab === 'allowed' ? renderUsers() : renderBehavior());
         body.replaceChildren(fragment);
         body.scrollTop = preserveFocus ? scrollTop : 0;
@@ -642,7 +861,8 @@ function createBlockingSurface(config, container = null) {
                 body.focus({ preventScroll: true });
             }
         }
-        status.textContent = statusText;
+        status.textContent = view.editor === COUNT_SOURCE.key && statusText === 'Changes save automatically'
+            ? 'Rules change only when saved' : statusText;
         status.classList.toggle('error', statusError);
     }
 

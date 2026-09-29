@@ -14,6 +14,7 @@ import { LRUCache } from '../shared/lru-cache.js';
 import { deviceIcon, flagImage } from './icons.js';
 import { dialogIcon } from './dialog-icons.js';
 import { getProfile } from './profile-cache.js';
+import { renderDisplayName, resolveDisplayNamePresentation } from './display-name.js';
 
 /**
  * Thousands-separated count, or null when we have no number.
@@ -46,6 +47,41 @@ function formatCompactCount(value) {
 }
 
 const CARD_ID = 'x-posed-hovercard';
+
+/** Source timestamps order observations; the time a hover cache was filled does not. */
+export function hasNewerObservation(current, candidate) {
+    const now = Date.now();
+    const observedAt = info => Number.isFinite(info?.timestamp) && info.timestamp > 0 && info.timestamp <= now
+        ? info.timestamp : null;
+    const currentTime = observedAt(current);
+    const candidateTime = observedAt(candidate);
+    return currentTime !== null && (candidateTime === null || currentTime > candidateTime);
+}
+
+function resolveHovercardInfo(candidate, initialInfo) {
+    if (!hasNewerObservation(initialInfo, candidate)) return candidate;
+    const meta = candidate?.meta && !candidate.meta.partial && initialInfo.meta?.partial
+        ? candidate.meta : { ...candidate?.meta, ...initialInfo.meta };
+    // Reuse rich metadata without rolling a newer badge back to older signals.
+    // Select accuracy with its location/device, including a missing accuracy field.
+    return {
+        ...candidate, ...initialInfo,
+        location: initialInfo.location,
+        device: initialInfo.device,
+        locationAccurate: initialInfo.locationAccurate,
+        meta
+    };
+}
+
+function syncBadgeInfo(screenName, info, initialInfo) {
+    if (!info || (info.location === initialInfo?.location && info.device === initialInfo?.device &&
+        (info.locationAccurate === false) === (initialInfo?.locationAccurate === false))) return;
+    try {
+        document.dispatchEvent(new CustomEvent('xposed:authoritative-info', {
+            detail: { screenName, info }
+        }));
+    } catch { /* CustomEvent unsupported: non-fatal. */ }
+}
 
 function isSafeHttpsUrl(url) {
     return typeof url === 'string' && url.startsWith('https://');
@@ -109,18 +145,99 @@ function createTag({ label, tone = 'neutral', title = '' }) {
     return tag;
 }
 
-function createRow({ icon, label, value, primary = false }) {
+function createSignalValue(icon, text) {
+    const value = createEl('span', 'x-posed-signal-value');
+    if (icon) value.appendChild(icon);
+    value.appendChild(createEl('span', '', safeText(text, 80)));
+    return value;
+}
+
+function setLocationWarningHelp(card, open) {
+    const button = card?.querySelector('.x-posed-warning-why');
+    const help = card?.querySelector('.x-posed-warning-help');
+    if (!button || !help) return;
+    button.setAttribute('aria-expanded', String(open));
+    help.hidden = !open;
+    if (!open) {
+        delete button.dataset.pinned;
+        return;
+    }
+
+    // Keep the explanation inside the card, outside its scrolling body so
+    // short/partial cards cannot clip it. It never changes the notice's height.
+    const cardRect = card.getBoundingClientRect();
+    const warningRect = button.parentElement.getBoundingClientRect();
+    help.style.removeProperty('max-height');
+    const height = help.getBoundingClientRect().height;
+    const roomAbove = Math.max(0, warningRect.top - cardRect.top - 14);
+    const roomBelow = Math.max(0, card.clientHeight - (warningRect.bottom - cardRect.top) - 14);
+    const above = height <= roomAbove || roomAbove >= roomBelow;
+    help.dataset.placement = above ? 'above' : 'below';
+    help.style.maxHeight = `${above ? roomAbove : roomBelow}px`;
+    help.style.top = `${above
+        ? warningRect.top - cardRect.top - help.getBoundingClientRect().height - 6
+        : warningRect.bottom - cardRect.top + 6}px`;
+    const helpRect = help.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const pointerX = Math.max(12, Math.min(helpRect.width - 12, buttonRect.left + buttonRect.width / 2 - helpRect.left));
+    help.style.setProperty('--xp-help-pointer-x', `${pointerX}px`);
+}
+
+function createLocationWarning(card) {
+    const warning = createEl('div', 'x-posed-card-warning');
+    const copy = createEl('span', 'x-posed-warning-copy', 'Location may be inaccurate');
+    const button = createEl('button', 'x-posed-warning-why', 'Why?');
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Why location may be inaccurate');
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-controls', 'x-posed-location-help');
+    button.setAttribute('aria-describedby', 'x-posed-location-help');
+    const help = createEl('div', 'x-posed-warning-help');
+    help.appendChild(createEl('span', 'x-posed-warning-help-copy',
+        'X’s partner flags possible VPN/proxy use. Internet providers can use proxies automatically. This is not proof of VPN use.'));
+    help.id = 'x-posed-location-help';
+    help.setAttribute('role', 'tooltip');
+    help.hidden = true;
+
+    let leaveTimer;
+    const showHelp = () => {
+        clearTimeout(leaveTimer);
+        setLocationWarningHelp(card, true);
+    };
+    const hideUnlessReading = event => {
+        if (button.dataset.pinned || document.activeElement === button ||
+            button.contains(event.relatedTarget) || help.contains(event.relatedTarget)) return;
+        clearTimeout(leaveTimer);
+        leaveTimer = setTimeout(() => {
+            if (warning.isConnected && !button.dataset.pinned && document.activeElement !== button) {
+                setLocationWarningHelp(card, false);
+            }
+        }, 120);
+    };
+    button.addEventListener('mouseenter', showHelp);
+    button.addEventListener('mouseleave', hideUnlessReading);
+    help.addEventListener('mouseenter', () => clearTimeout(leaveTimer));
+    help.addEventListener('mouseleave', hideUnlessReading);
+    button.addEventListener('focus', () => {
+        if (button.matches(':focus-visible')) showHelp();
+    });
+    button.addEventListener('blur', () => setLocationWarningHelp(card, false));
+    button.addEventListener('click', () => {
+        const open = !button.dataset.pinned;
+        setLocationWarningHelp(card, open);
+        if (open) button.dataset.pinned = 'true';
+    });
+    warning.append(dialogIcon('warn', 15), copy, button);
+    card.appendChild(help);
+    return warning;
+}
+
+function createRow({ label, value, primary = false }) {
     let cls = 'x-posed-row';
     if (primary) cls += ' x-posed-row--primary';
     const row = createEl('div', cls);
 
     const left = createEl('div', 'x-posed-row-left');
-    if (icon) {
-        const iconEl = createEl('span', 'x-posed-row-icon');
-        if (icon instanceof Node) iconEl.appendChild(icon);
-        else iconEl.textContent = icon;
-        left.appendChild(iconEl);
-    }
     const labelEl = createEl('span', 'x-posed-row-label', label);
     left.appendChild(labelEl);
 
@@ -229,12 +346,13 @@ function describeHovercardError(response) {
     }
 }
 
-function buildCardContent({ screenName, displayName = '', fallbackName = '', info, loading = false, errorText = '', allowlistControl = null, onClose }) {
+function buildCardContent({ screenName, displayName = '', displayNamePresentation = null, fallbackName = '', info, loading = false, errorText = '', allowlistControl = null, onClose }) {
     const card = ensureCard();
     const focusedElement = card.contains(document.activeElement) ? document.activeElement : null;
     const focusedClose = focusedElement?.classList.contains('x-posed-card-close');
     const focusedLink = focusedElement?.classList.contains('x-posed-link');
     const focusedBody = focusedElement?.classList.contains('x-posed-card-body');
+    const focusedWarning = focusedElement?.classList.contains('x-posed-warning-why');
     const accountKey = String(screenName || '').toLowerCase();
     const scrollTop = card.dataset.xScreenName === accountKey
         ? card.querySelector('.x-posed-card-body')?.scrollTop || 0 : 0;
@@ -247,12 +365,12 @@ function buildCardContent({ screenName, displayName = '', fallbackName = '', inf
     // Header
     const header = createEl('div', 'x-posed-card-header');
 
-    // The cached profile image can be stale or blurry. Lead with the name and
-    // account signals without adding another image request.
+    // The cached profile image can be stale or blurry. Lead with the visible
+    // name and account signals without fetching another profile avatar.
     const titleWrap = createEl('div', 'x-posed-title');
     const nameLine = createEl('div', 'x-posed-name-line');
-    const name = safeText(displayName || meta.name || fallbackName || screenName, 60);
-    const nameEl = createEl('span', 'x-posed-name', name);
+    const nameEl = createEl('span', 'x-posed-name');
+    renderDisplayName(nameEl, displayName || meta.name || fallbackName || screenName, displayNamePresentation);
     const handleEl = createEl('span', 'x-posed-handle', `@${safeText(screenName, 20)}`);
     nameLine.appendChild(nameEl);
 
@@ -297,26 +415,24 @@ function buildCardContent({ screenName, displayName = '', fallbackName = '', inf
     // account metadata is unavailable.
     const signals = createEl('div', 'x-posed-card-signals');
     if (info?.location) {
-        const locVal = createEl('span', 'x-posed-loc');
-        const fimg = flagImage(info.location);
-        if (fimg) locVal.appendChild(fimg);
-        locVal.appendChild(document.createTextNode(safeText(info.location, 80)));
-        signals.appendChild(createRow({ icon: dialogIcon('globe', 14), label: 'Location', value: locVal, primary: true }));
+        signals.appendChild(createRow({
+            label: 'Location',
+            value: createSignalValue(flagImage(info.location), info.location),
+            primary: true
+        }));
     }
 
     if (info?.device) {
-        signals.appendChild(createRow({ icon: deviceIcon(info.device, 14), label: 'Connected via', value: safeText(info.device, 80), primary: true }));
+        signals.appendChild(createRow({
+            label: 'Connected via',
+            value: createSignalValue(deviceIcon(info.device, 20), info.device),
+            primary: true
+        }));
     }
     if (signals.childNodes.length) body.appendChild(signals);
 
     if (info?.locationAccurate === false) {
-        const warning = createEl('div', 'x-posed-card-warning');
-        warning.title = 'X reports that this account’s location may not be accurate.';
-        const copy = createEl('span', 'x-posed-warning-copy', 'Location may be inaccurate.');
-        copy.setAttribute('aria-hidden', 'true');
-        warning.append(dialogIcon('warn', 15), copy,
-            createEl('span', 'x-posed-sr-only', warning.title));
-        body.appendChild(warning);
+        body.appendChild(createLocationWarning(card));
     }
 
     // Follower / following / post counts, harvested from the profile data X already ships
@@ -434,6 +550,7 @@ function buildCardContent({ screenName, displayName = '', fallbackName = '', inf
     if (focusedElement?.isConnected) focusedElement.focus({ preventScroll: true });
     else if (focusedClose) closeButton.focus({ preventScroll: true });
     else if (focusedBody) body.focus({ preventScroll: true });
+    else if (focusedWarning) (card.querySelector('.x-posed-warning-why') || closeButton).focus({ preventScroll: true });
     else if (focusedLink) (card.querySelector('.x-posed-link') || closeButton).focus({ preventScroll: true });
     return card;
 }
@@ -480,7 +597,7 @@ class HovercardController {
      * @param {boolean} [opts.clickToOpen] - open on click instead of hover (issue #38).
      *   Touch devices always use click regardless, since they have no hover at all.
      */
-    attach(badgeEl, { screenName, displayName = '', info, csrfToken = null, clickToOpen = false }) {
+    attach(badgeEl, { screenName, displayName = '', displayNamePresentation = null, info, csrfToken = null, clickToOpen = false }) {
         if (!badgeEl || badgeEl.dataset.xPosedHovercardAttached === 'true') return;
         badgeEl.dataset.xPosedHovercardAttached = 'true';
         const detailsButton = badgeEl.querySelector('.x-badge-details');
@@ -500,14 +617,14 @@ class HovercardController {
                 this.card?.classList.contains('x-posed-hovercard-visible');
             if (open && this._clickMode) this.hide();
             else {
-                this.show(badgeEl, { screenName, displayName, info, csrfToken, clickToOpen: true });
+                this.show(badgeEl, { screenName, displayName, displayNamePresentation, info, csrfToken, clickToOpen: true });
                 if (e.detail === 0) this.card?.querySelector('.x-posed-card-close')?.focus({ preventScroll: true });
             }
         });
         if (!useClick) {
             const onEnter = () => {
                 if (this._clickMode && this.card?.classList.contains('x-posed-hovercard-visible')) return;
-                this.show(badgeEl, { screenName, displayName, info, csrfToken });
+                this.show(badgeEl, { screenName, displayName, displayNamePresentation, info, csrfToken });
             };
             const onLeave = () => this.hideSoon();
             badgeEl.addEventListener('mouseenter', onEnter);
@@ -520,7 +637,7 @@ class HovercardController {
         badgeEl.classList.add('x-posed-has-hovercard');
     }
 
-    show(anchorEl, { screenName, displayName = '', info, csrfToken = null, clickToOpen = false }) {
+    show(anchorEl, { screenName, displayName = '', displayNamePresentation = null, info, csrfToken = null, clickToOpen = false }) {
         if (!anchorEl || !anchorEl.isConnected) return;
 
         // Click-opened cards must not close on mouseleave. The reader deliberately
@@ -544,11 +661,12 @@ class HovercardController {
         // Seed the header from the name already visible on X. Keep this local to
         // the card view so enrichment cannot replace it with a handle or a stale
         // cached name, and never write observed DOM text into the account cache.
-        const headerName = safeText(displayName, 60);
+        const headerName = displayName;
+        const presentation = resolveDisplayNamePresentation(displayNamePresentation);
 
         // Show immediate card (using whatever we currently know)
         this.card = buildCardContent({
-            screenName, displayName: headerName, info, loading: true,
+            screenName, displayName: headerName, displayNamePresentation: presentation, info, loading: true,
             allowlistControl: this.allowlistState?.element, onClose: this._handleClose
         });
         this.card.classList.add('x-posed-hovercard-visible');
@@ -557,7 +675,7 @@ class HovercardController {
 
         // Request rich metadata only when the card opens, with short TTL caching.
         // Pass the badge's known info so an error card can still show it (issue #14).
-        this._fetchAndUpdate(anchorEl, screenName, csrfToken, info, viewId, headerName).catch(() => {});
+        this._fetchAndUpdate(anchorEl, screenName, csrfToken, info, viewId, headerName, presentation).catch(() => {});
 
         // Keep visible if hovering card in hover mode.
         this.card.removeEventListener('mouseenter', this._handleCardEnter);
@@ -623,8 +741,30 @@ class HovercardController {
         if (returnFocus && detailsButton?.isConnected) detailsButton.focus({ preventScroll: true });
     }
 
+    /** Retain an open view when authoritative information rebuilds its badge. */
+    replaceAnchor(previous, replacement, focusSelector = null) {
+        if (!previous || this.currentAnchor !== previous) return;
+        const author = replacement?.closest('[data-x-screen-name]')?.dataset.xScreenName?.toLowerCase();
+        if (!replacement?.isConnected || author !== this.currentScreenName) {
+            this.hide();
+            return;
+        }
+        previous.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'false');
+        this.currentAnchor = replacement;
+        replacement.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'true');
+        this._handleCardEnter();
+        if (focusSelector) replacement.querySelector(focusSelector)?.focus({ preventScroll: true });
+        positionCard(this.card, replacement);
+    }
+
     _handleKeyDown(event) {
         if (event.key !== 'Escape' || !this.card?.classList.contains('x-posed-hovercard-visible')) return;
+        if (this.card.querySelector('.x-posed-warning-why[aria-expanded="true"]')) {
+            setLocationWarningHelp(this.card, false);
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
         // A pointer-opened card must not consume Escape intended for an X
         // input or another dialog. Keyboard interaction inside our own card or
         // badge still closes it and restores focus without dismissing X too.
@@ -662,7 +802,10 @@ class HovercardController {
     _handleOutsideTap(e) {
         if (!this.card) return;
         const t = e.target;
-        if (this.card.contains(t)) return;
+        if (this.card.contains(t)) {
+            if (!t.closest('.x-posed-warning-why, .x-posed-warning-help')) setLocationWarningHelp(this.card, false);
+            return;
+        }
         if (this.currentAnchor && this.currentAnchor.contains(t)) return;
         this.hide();
     }
@@ -783,17 +926,20 @@ class HovercardController {
         }
     }
 
-    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}, viewId = this.viewId, displayName = '') {
+    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}, viewId = this.viewId, displayName = '', displayNamePresentation = null) {
         const generation = this.generation;
         const key = String(screenName || '').toLowerCase();
         if (!key) return;
-        const fallbackName = safeText(initialInfo?.meta?.name, 60);
+        const fallbackName = initialInfo?.meta?.name || '';
 
         const cached = this.hoverCache.get(key);
         if (cached && Date.now() - cached.fetchedAt < this.cacheTtlMs) {
+            const info = resolveHovercardInfo(cached.data, initialInfo);
+            if (info !== cached.data) this.hoverCache.set(key, { ...cached, data: info });
+            syncBadgeInfo(screenName, info, initialInfo);
             if (this._isCurrentView(anchorEl, screenName, viewId)) {
                 this.card = buildCardContent({
-                    screenName, displayName, fallbackName, info: cached.data, loading: false,
+                    screenName, displayName, displayNamePresentation, fallbackName, info, loading: false,
                     allowlistControl: this.allowlistState?.element,
                     onClose: this._handleClose
                 });
@@ -825,7 +971,7 @@ class HovercardController {
             const msg = describeHovercardError(response);
             if (this._isCurrentView(anchorEl, screenName, viewId)) {
                 this.card = buildCardContent({
-                    screenName, displayName, info: initialInfo, loading: false, errorText: msg,
+                    screenName, displayName, displayNamePresentation, info: initialInfo, loading: false, errorText: msg,
                     allowlistControl: this.allowlistState?.element,
                     onClose: this._handleClose
                 });
@@ -835,25 +981,19 @@ class HovercardController {
             return;
         }
 
-        this.hoverCache.set(key, { data: response.data, fetchedAt: Date.now() });
+        const fresh = resolveHovercardInfo(response.data, initialInfo);
+        this.hoverCache.set(key, { data: fresh, fetchedAt: Date.now() });
 
         // Issue #23: the badge may have rendered from a stale cloud-cache snapshot (cloud
         // entries carry no `meta`, so this hover forced a live, authoritative fetch). If the
-        // live location/device disagree with what the badge was given, tell the content
+        // live location/device or accuracy disagree with what the badge was given, tell the content
         // layer to refresh the cached entry and re-render the badge, so the flag next to the
         // name matches this card. Gated on an actual difference to avoid needless churn.
-        const fresh = response.data;
-        if (fresh && (fresh.location !== initialInfo?.location || fresh.device !== initialInfo?.device)) {
-            try {
-                document.dispatchEvent(new CustomEvent('xposed:authoritative-info', {
-                    detail: { screenName, info: fresh }
-                }));
-            } catch { /* CustomEvent unsupported — non-fatal */ }
-        }
+        syncBadgeInfo(screenName, fresh, initialInfo);
 
         if (this._isCurrentView(anchorEl, screenName, viewId)) {
             this.card = buildCardContent({
-                screenName, displayName, fallbackName, info: response.data, loading: false,
+                screenName, displayName, displayNamePresentation, fallbackName, info: fresh, loading: false,
                 allowlistControl: this.allowlistState?.element,
                 onClose: this._handleClose
             });
@@ -862,7 +1002,9 @@ class HovercardController {
         }
     }
 
-    _handleScroll() {
+    _handleScroll(event) {
+        if (event?.target?.closest?.('.x-posed-warning-help')) return;
+        setLocationWarningHelp(this.card, false);
         // Coalesce bursts of capture-phase scroll/resize events into one rAF so
         // we don't call getBoundingClientRect()/reposition on every tick.
         if (this._repositionRafId !== null) return;

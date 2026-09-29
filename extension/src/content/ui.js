@@ -16,6 +16,7 @@ import { createSnapshotTracker } from '../shared/state-sync.js';
 import { showToast, cleanupNotifications } from './notifications.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
 import { createLifecycle } from '../shared/lifecycle.js';
+import { applyBadgeAppearance } from '../shared/badge-appearance.js';
 
 export { showToast, dismissToast } from './notifications.js';
 
@@ -223,14 +224,16 @@ function makeSep() {
  * @param {string|null} [effectiveCountry] - Flag/blocking country already computed
  *   by the observer (effectiveCountry()). Avoids recomputing getDeviceCountry here.
  * @param {string} [displayName] - This author's visible name, extracted before badge insertion.
+ * @param {Object|null} [displayNamePresentation] - Local, validated name artwork and font source.
  */
-export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null, effectiveCountry = null, displayName = '') {
+export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null, effectiveCountry = null, displayName = '', displayNamePresentation = null) {
     if (element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`)) {
         return;
     }
 
     const badge = document.createElement('span');
     badge.className = CSS_CLASSES.INFO_BADGE;
+    applyBadgeAppearance(badge, settings);
     const detailsButton = document.createElement('button');
     detailsButton.type = 'button';
     detailsButton.className = 'x-badge-details';
@@ -367,6 +370,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
     hovercard.attach(badge, {
         screenName,
         displayName,
+        displayNamePresentation,
         info,
         csrfToken,
         clickToOpen: settings.hovercardTrigger === 'click'

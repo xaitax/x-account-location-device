@@ -5,7 +5,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, CSS_CLASSES, VERSION, affiliationWasChecked } from '../shared/constants.js';
+import { MESSAGE_TYPES, CSS_CLASSES, SELECTORS, VERSION, affiliationWasChecked } from '../shared/constants.js';
 
 // Import modules
 import {
@@ -33,16 +33,19 @@ import {
     userInfoCache
 } from './observer.js';
 
-import { hovercard } from './hovercard.js';
+import { hovercard, hasNewerObservation } from './hovercard.js';
 import { glyph } from './icons.js';
-import { setProfile, clearProfiles, profileCount } from './profile-cache.js';
+import { setProfile, getProfile, clearProfiles, profileCount } from './profile-cache.js';
 import { PROFILE_LIMITS, profilePatchFromWire } from '../shared/profile-data.js';
+import { FOLLOWING_LIMITS, readFollowingViewer } from '../shared/following-data.js';
+import { configureFollowing, getFollowingContext, mergeFollowingBatch, clearFollowing } from './following-cache.js';
 import { syncModalState, syncModalSettings, closeModal } from './modal.js';
 import { cleanupEvidenceCapture } from './evidence-capture.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
 import { createLifecycle } from '../shared/lifecycle.js';
 import { createSnapshotTracker } from '../shared/state-sync.js';
 import { createFilterStatisticsReporter } from './filter-statistics.js';
+import { ACCOUNT_COUNT_FILTERS, isAccountCountThreshold, matchesAccountCount } from '../shared/account-counts.js';
 
 // ============================================
 // STATE
@@ -66,6 +69,7 @@ let debugMode = false;
 let session = null;
 let isCleanedUp = false;
 let filterStatisticsReporter = null;
+let syncFollowingMonitor = () => {};
 const cancelledResponse = () => ({ success: false, code: 'CANCELLED', error: 'Page session ended' });
 
 // Memoized functions (created once, reused)
@@ -257,6 +261,75 @@ function syncEnrichmentSetting() {
     }));
 }
 
+/** Follow relationships are a separate opt-in, never public profile enrichment. */
+function syncFollowingSetting(force = false) {
+    const enabled = settingsLoaded && isEnabled && !isCleanedUp && settings.alwaysShowFollowing === true;
+    const previous = getFollowingContext();
+    const context = configureFollowing(enabled, enabled ? readFollowingViewer() : null);
+    const changed = previous.generation !== context.generation;
+    syncFollowingMonitor(enabled);
+    if (changed || force) {
+        window.dispatchEvent(new CustomEvent('x-posed-set-following', { detail: JSON.stringify(context) }));
+        // Clearing the old viewer must also remove any already-rendered exemptions.
+        if (changed && isEnabled && !isCleanedUp) updateBlockedTweets(currentFilters());
+    }
+}
+
+function setupFollowingListener(current) {
+    current.listen(window, 'x-posed-page-ready', () => syncFollowingSetting(true));
+    current.listen(window, 'x-posed-following-reset', () => {
+        if (current.disposed || !settingsLoaded || !isEnabled || settings.alwaysShowFollowing !== true) return;
+        clearFollowing();
+        syncFollowingSetting(true);
+        // Identity may now be unknown, leaving configureFollowing disabled. Even
+        // then, clear exemptions already painted for the former viewer.
+        updateBlockedTweets(currentFilters());
+    });
+    current.listen(window, 'x-posed-following', event => {
+        if (current.disposed || !settingsLoaded || !isEnabled || settings.alwaysShowFollowing !== true) return;
+        syncFollowingSetting();
+        if (typeof event.detail !== 'string' || event.detail.length > FOLLOWING_LIMITS.MAX_RELAY_LENGTH) return;
+        let batch;
+        try { batch = JSON.parse(event.detail); } catch { return; }
+        const changed = mergeFollowingBatch(batch);
+        if (changed.size) updateBlockedTweets(currentFilters(), changed);
+    });
+
+    // Sidebar changes cover the DOM identity fallback. Cookie/account changes can
+    // also happen in another tab, without changing this tab's sidebar at all.
+    const checkViewer = () => {
+        if (!current.disposed && settings.alwaysShowFollowing === true) syncFollowingSetting();
+    };
+    const watchSidebar = new MutationObserver(checkViewer);
+    current.listen(window, 'focus', checkViewer);
+    current.listen(document, 'visibilitychange', checkViewer);
+    let monitoring = false;
+    let cancelPoll = () => {};
+    const pollViewer = () => {
+        if (!monitoring || current.disposed) return;
+        checkViewer();
+        if (monitoring) cancelPoll = current.delay(pollViewer, 1000);
+    };
+    syncFollowingMonitor = enabled => {
+        if (monitoring === enabled) return;
+        monitoring = enabled;
+        if (enabled) {
+            watchSidebar.observe(document.documentElement || document, {
+                subtree: true, childList: true, attributes: true, attributeFilter: ['href']
+            });
+            cancelPoll = current.delay(pollViewer, 1000);
+        } else {
+            watchSidebar.disconnect();
+            cancelPoll();
+        }
+    };
+    current.add(() => {
+        syncFollowingMonitor(false);
+        syncFollowingMonitor = () => {};
+    });
+    current.add(clearFollowing);
+}
+
 /** A fresh snapshot for UI consumers; never capture a Set at sidebar creation. */
 function getBlockingState() {
     return {
@@ -291,16 +364,32 @@ function setupProfileListener(current) {
         if (!Array.isArray(users) || users.length === 0) return;
 
         const changedUsers = new Set();
+        const hasProfileTextFilters = filterSets.blockedBioTags.size > 0 ||
+            filterSets.blockedPcf.size > 0 || filterSets.blockedLinks.size > 0;
+        const activeCounts = ACCOUNT_COUNT_FILTERS.filter(rule =>
+            rule.requiresProfile && isAccountCountThreshold(settings[rule.key], rule.max) && settings[rule.key] > 0);
         for (const entry of users.slice(0, PROFILE_LIMITS.MAX_BATCH_ENTRIES)) {
             const profile = profilePatchFromWire(entry);
             if (!profile) continue;
-            if (setProfile(entry.u, profile)) changedUsers.add(entry.u.toLowerCase());
+            const previous = activeCounts.length ? getProfile(entry.u) : null;
+            const textChanged = setProfile(entry.u, profile);
+            const next = activeCounts.length ? getProfile(entry.u) : null;
+            const countChanged = activeCounts.some(rule => {
+                const previousCount = previous?.[rule.profileField];
+                const nextCount = next?.[rule.profileField];
+                // A newly known value also clears stale verdicts after LRU eviction.
+                return (!isAccountCountThreshold(previousCount) && isAccountCountThreshold(nextCount)) ||
+                    matchesAccountCount(previousCount, settings[rule.key]) !==
+                    matchesAccountCount(nextCount, settings[rule.key]);
+            });
+            if ((hasProfileTextFilters && textChanged) || countChanged) changedUsers.add(entry.u.toLowerCase());
         }
         debug(`Harvested ${users.length} profile(s) from X's own response`);
 
-        // Newly known bios/labels can change a row's verdict, so re-derive what's on screen.
+        // Re-derive only affected authors. Count-only updates need a pass when an
+        // active count becomes known or changes its verdict, not for every increment.
         // Coalesced by updateBlockedTweets, so a burst of scroll responses costs one pass.
-        if (changedUsers.size > 0 && (filterSets.blockedBioTags.size > 0 || filterSets.blockedPcf.size > 0 || filterSets.blockedLinks.size > 0)) {
+        if (changedUsers.size > 0) {
             updateBlockedTweets(currentFilters(), changedUsers);
         }
     };
@@ -337,7 +426,7 @@ function setupBackgroundListener(current) {
 
 /**
  * Issue #23: a badge can render from a stale cloud-cache snapshot while the hovercard's
- * (authoritative) live fetch returns fresher location/device — so the flag by the name
+ * (authoritative) live fetch returns fresher location/device or accuracy, so the badge
  * disagrees with the popup until the row happens to re-process. The hovercard dispatches
  * this event when it sees a difference; we refresh the warm local cache and re-render the
  * affected badges so the two stay in sync.
@@ -346,6 +435,7 @@ function setupAuthoritativeInfoListener(current) {
     const onAuthoritativeInfo = event => {
         const { screenName, info } = event.detail || {};
         if (!screenName || !info) return;
+        if (hasNewerObservation(userInfoCache.get(screenName), info)) return;
 
         // Adopt the authoritative data so future (re)processing uses it, then rebuild the
         // badges that are showing this user. Clearing the processed markers + re-running
@@ -359,13 +449,26 @@ function setupAuthoritativeInfoListener(current) {
         queueMicrotask(() => {
             if (current.disposed) return;
             const key = screenName.toLowerCase();
-            document.querySelectorAll('[data-x-screen-name]').forEach(el => {
+            // The hovercard also carries this account marker. Only X's observed
+            // author roots may be reprocessed, never our own account-details UI.
+            document.querySelectorAll(`${SELECTORS.USERNAME}[data-x-screen-name], ${SELECTORS.USER_CELL}[data-x-screen-name]`).forEach(el => {
                 if ((el.dataset.xScreenName || '').toLowerCase() !== key) return;
                 const badge = el.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+                const focusedControl = badge?.contains(document.activeElement)
+                    ? document.activeElement.closest('.x-capture-btn') ? '.x-capture-btn' : '.x-badge-details'
+                    : null;
                 if (badge) badge.remove();
                 delete el.dataset.xProcessed;
                 delete el.dataset.xScreenName;
                 if (memoizedProcessElementSafe) memoizedProcessElementSafe(el);
+                // Warm-cache processing rebuilds synchronously. Retarget the same
+                // open view, or close it if filtering deliberately removed the row.
+                const replacement = el.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+                hovercard.replaceAnchor(badge, replacement, focusedControl);
+                if (focusedControl && replacement?.isConnected && hovercard.currentAnchor !== replacement &&
+                    (el.dataset.xScreenName || '').toLowerCase() === key) {
+                    replacement.querySelector(focusedControl)?.focus({ preventScroll: true });
+                }
             });
         });
     };
@@ -417,6 +520,7 @@ async function handleBackgroundMessage(type, payload, revision) {
             debug('Settings updated:', settings);
             syncSidebarSettings(settings, revision);
             syncModalSettings(settings, revision);
+            syncFollowingSetting();
             
             if (!isEnabled) {
                 resetProcessedElements(currentFilters());
@@ -433,7 +537,7 @@ async function handleBackgroundMessage(type, payload, revision) {
                 // badge is rebuilt.
                 const reapplyKeys = ['showFlags', 'flagFromDevice', 'showDevices', 'showVpnIndicator',
                     'showCaptureButton', 'showVpnUsers', 'highlightBlockedTweets',
-                    'showInfoIcon', 'hovercardTrigger'];
+                    'showInfoIcon', 'hovercardTrigger', 'badgeSize', 'showBadgeBackground'];
                 if (prevSettings.enabled !== settings.enabled || reapplyKeys.some(k => prevSettings[k] !== settings[k])) {
                     // Includes quote markers: their hidden username children cannot
                     // reach the lazy rescan until the old collapse is released.
@@ -446,7 +550,8 @@ async function handleBackgroundMessage(type, payload, revision) {
                 syncEnrichmentSetting();
                 if (!isEnabled || settings.profileEnrichment === false) clearProfiles();
             }
-            if (isEnabled && ['profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation']
+            if (isEnabled && ['profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation',
+                ...ACCOUNT_COUNT_FILTERS.map(rule => rule.key)]
                 .some(key => prevSettings[key] !== settings[key])) {
                 updateBlockedTweets(currentFilters());
             }
@@ -519,6 +624,7 @@ async function initialize() {
         // Set up listeners BEFORE injecting page script
         setupPageScriptListener(current);
         setupProfileListener(current);
+        setupFollowingListener(current);
         setupBackgroundListener(current);
         setupAuthoritativeInfoListener(current);
         // "Click to show" on a collapsed quote card (issue #32). Must be bound in the
@@ -555,6 +661,7 @@ async function initialize() {
         // Ready can precede storage loading or follow it. Sending on both events
         // makes the persisted preference authoritative in either ordering.
         syncEnrichmentSetting();
+        syncFollowingSetting(true);
 
         createMemoizedFunctions(current);
         // The manifest is the sole production owner of content stylesheets.
@@ -644,6 +751,7 @@ function cleanup() {
     isEnabled = false;
     settingsLoaded = false;
     syncEnrichmentSetting();
+    syncFollowingSetting(true);
     session?.dispose();
 
     cleanupEvidenceCapture();

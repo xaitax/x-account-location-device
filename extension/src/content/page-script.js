@@ -10,6 +10,7 @@
 import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.js';
 import { PROFILE_LIMITS, isProfileUsername, projectProfileUser, mergeProjectedProfile, profileSignature } from '../shared/profile-data.js';
 import { parseAccountResponse } from '../shared/account-response.js';
+import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowingViewer } from '../shared/following-data.js';
 
 (function() {
     'use strict';
@@ -34,6 +35,8 @@ import { parseAccountResponse } from '../shared/account-response.js';
     const EVENT_FETCH_USER_INFO_RESULT = 'x-posed-fetch-user-info-result';
     const EVENT_PROFILES_HARVESTED = 'x-posed-profiles';
     const EVENT_SET_ENRICHMENT = 'x-posed-set-enrichment';
+    const EVENT_SET_FOLLOWING = 'x-posed-set-following';
+    const EVENT_FOLLOWING_HARVESTED = 'x-posed-following';
     const API_PATTERN = /x\.com\/i\/api\/graphql/;
     const ABOUT_QUERY_ID = 'XRqGa7EeokUU5kppkh13EA';
     const lookupQueue = new PacedLookupQueue();
@@ -45,6 +48,111 @@ import { parseAccountResponse } from '../shared/account-response.js';
     // Bounded, primitive-only snapshots. A short dedup window permits recipient-cache
     // recovery; changed or newly available fields are always relayed immediately.
     const recentlyEmitted = new Map();
+    // Viewer relationships are private session state, separate from public profile
+    // enrichment. Capture identity and generation at REQUEST time, never at receipt.
+    let followingContext = null;
+    let followingSequence = 0;
+    const followingMutations = new Map();
+
+    window.addEventListener(EVENT_SET_FOLLOWING, event => {
+        const previousContext = followingContext;
+        followingContext = null;
+        try {
+            const setting = JSON.parse(event.detail || '{}');
+            if (setting.enabled === true && typeof setting.viewer === 'string' &&
+                Number.isSafeInteger(setting.generation) && setting.generation >= 0 &&
+                setting.viewer === readFollowingViewer()) {
+                followingContext = { viewer: setting.viewer, generation: setting.generation };
+            }
+        } catch { /* An invalid preference always disables relationship harvesting. */ }
+        if (!followingContext || previousContext?.viewer !== followingContext.viewer ||
+            previousContext?.generation !== followingContext.generation) followingMutations.clear();
+    });
+
+    function hasCurrentFollowingContext() {
+        if (!followingContext) return false;
+        if (followingContext.viewer === readFollowingViewer()) return true;
+        // Remember that a switch was observed, even if the user switches back
+        // before the content controller's next check. Its reply uses a new generation.
+        followingContext = null;
+        followingMutations.clear();
+        window.dispatchEvent(new CustomEvent('x-posed-following-reset'));
+        return false;
+    }
+
+    function followingRequestKind(url, method = 'GET') {
+        try {
+            const parsed = new URL(url, location.href);
+            if (parsed.origin !== location.origin) return null;
+            if (/^\/i\/api\/graphql\/[^/]+\/[^/]+$/.test(parsed.pathname)) {
+                return { kind: 'graphql', path: parsed.pathname };
+            }
+            const mutation = /^\/i\/api\/1\.1\/friendships\/(create|destroy)\.json$/.exec(parsed.pathname);
+            if (method.toUpperCase() === 'POST' && mutation) {
+                return { kind: 'mutation', path: parsed.pathname, following: mutation[1] === 'create' };
+            }
+        } catch { /* Ignore non-X and malformed URLs. */ }
+        return null;
+    }
+
+    function snapshotFollowingRequest(url, method) {
+        if (!hasCurrentFollowingContext()) return null;
+        const request = followingRequestKind(url, method);
+        return request ? { ...followingContext, ...request, sequence: ++followingSequence } : null;
+    }
+
+    function isCurrentFollowingRequest(snapshot) {
+        return Boolean(hasCurrentFollowingContext() && snapshot &&
+            snapshot.viewer === followingContext.viewer && snapshot.generation === followingContext.generation);
+    }
+
+    function followingResponseMatches(snapshot, url, status) {
+        if (!isCurrentFollowingRequest(snapshot) || status < 200 || status >= 300) return false;
+        const response = followingRequestKind(url, snapshot.kind === 'mutation' ? 'POST' : 'GET');
+        return response?.path === snapshot.path;
+    }
+
+    function relayFollowing(users, snapshot, authoritative = false) {
+        if (!users.length || !isCurrentFollowingRequest(snapshot)) return;
+        // Successful native mutations fence off every still-outstanding timeline
+        // response, including requests started while the mutation was in flight.
+        const sequence = authoritative ? ++followingSequence : snapshot.sequence;
+        for (let index = 0; index < users.length; index += FOLLOWING_LIMITS.MAX_BATCH_ENTRIES) {
+            const detail = JSON.stringify({
+                viewer: snapshot.viewer, generation: snapshot.generation, sequence,
+                users: users.slice(index, index + FOLLOWING_LIMITS.MAX_BATCH_ENTRIES),
+                ...(authoritative ? { authoritative: true } : {})
+            });
+            if (detail.length <= FOLLOWING_LIMITS.MAX_RELAY_LENGTH && isCurrentFollowingRequest(snapshot)) {
+                window.dispatchEvent(new CustomEvent(EVENT_FOLLOWING_HARVESTED, { detail }));
+            }
+        }
+    }
+
+    function harvestFollowingMutation(data, snapshot) {
+        if (!isCurrentFollowingRequest(snapshot) || !data || typeof data !== 'object' ||
+            Array.isArray(data) || data.errors || data.error || !isFollowingHandle(data.screen_name)) return;
+        // A 2xx error envelope is not success. Native friendship responses return a
+        // user object with its public account ID; do not infer from request bodies.
+        if (!/^\d+$/.test(String(data.id_str ?? data.id ?? ''))) return;
+        const flags = [data.relationship_perspectives?.following, data.following].filter(value => value !== undefined);
+        if (flags.some(value => typeof value !== 'boolean')) return;
+        const observed = flags.includes(false) ? false : flags.includes(true) ? true : undefined;
+        // A successful create may only submit a request to a protected account.
+        // Grant an exemption only with explicit confirmed-following evidence.
+        const pending = data.follow_request_sent === true || data.relationship_perspectives?.follow_request_sent === true;
+        if (snapshot.following && observed === undefined && !pending) return;
+        if (!snapshot.following && observed === true) return;
+        const following = snapshot.following && observed === true && !pending;
+        const name = data.screen_name.toLowerCase();
+        // An older native action completing late must not undo a newer confirmed
+        // action. The completion fence separately handles outstanding read requests.
+        if ((followingMutations.get(name) || 0) > snapshot.sequence) return;
+        followingMutations.delete(name);
+        followingMutations.set(name, snapshot.sequence);
+        if (followingMutations.size > FOLLOWING_LIMITS.MAX_ENTRIES) followingMutations.delete(followingMutations.keys().next().value);
+        relayFollowing([{ u: name, following }], snapshot, true);
+    }
 
     // Counters for window.XPosed.enrichmentStatus(), so a "nothing shows up" report can be
     // diagnosed without guessing which link in the chain broke.
@@ -199,16 +307,19 @@ import { parseAccountResponse } from '../shared/account-response.js';
      * per response — and the node cap is a backstop so a pathological payload can't pin the
      * main thread.
      */
-    function harvestProfiles(data) {
-        if (!enrichmentEnabled || !data || typeof data !== 'object') return;
+    function harvestProfiles(data, followingSnapshot = null) {
+        const collectFollowing = isCurrentFollowingRequest(followingSnapshot);
+        if ((!enrichmentEnabled && !collectFollowing) || !data || typeof data !== 'object') return;
 
         const found = new Map();
+        const relationships = new Map();
         const visited = new Set();
         const stack = [data];
         let nodes = 0;
+        const maxNodes = enrichmentEnabled ? PROFILE_LIMITS.MAX_WALK_NODES : FOLLOWING_LIMITS.MAX_WALK_NODES;
 
         while (stack.length > 0) {
-            if (++nodes > PROFILE_LIMITS.MAX_WALK_NODES) break;
+            if (++nodes > maxNodes) break;
 
             const node = stack.pop();
             if (!node || typeof node !== 'object') continue;
@@ -217,7 +328,7 @@ import { parseAccountResponse } from '../shared/account-response.js';
 
             if (node.__typename === 'User') {
                 const name = node.core?.screen_name;
-                if (isProfileUsername(name) &&
+                if (enrichmentEnabled && isProfileUsername(name) &&
                     (found.size < PROFILE_LIMITS.MAX_USERS_PER_RESPONSE || found.has(name.toLowerCase()))) {
                     const projected = projectProfileUser(node);
                     if (projected) {
@@ -226,20 +337,28 @@ import { parseAccountResponse } from '../shared/account-response.js';
                         found.set(projected.u, mergeProjectedProfile(found.get(projected.u), projected));
                     }
                 }
+                if (collectFollowing) {
+                    const relationship = projectFollowingUser(node);
+                    if (relationship && (relationships.size < FOLLOWING_LIMITS.MAX_USERS_PER_RESPONSE || relationships.has(relationship.u))) {
+                        if (relationships.get(relationship.u)?.following !== false) relationships.set(relationship.u, relationship);
+                    }
+                }
                 // Deliberately no `continue`: a User can contain further nested results.
             }
 
             if (Array.isArray(node)) {
-                const limit = Math.min(node.length, PROFILE_LIMITS.MAX_WALK_NODES - nodes - stack.length);
+                const limit = Math.min(node.length, maxNodes - nodes - stack.length);
                 for (let i = 0; i < limit; i++) stack.push(node[i]);
             } else {
                 for (const key in node) {
-                    if (nodes + stack.length >= PROFILE_LIMITS.MAX_WALK_NODES) break;
+                    if (nodes + stack.length >= maxNodes) break;
                     if (Object.hasOwn(node, key)) stack.push(node[key]);
                 }
             }
         }
 
+        if (collectFollowing) relayFollowing([...relationships.values()], followingSnapshot);
+        if (!enrichmentEnabled) return;
         harvestStats.responses++;
         const now = Date.now();
         const pending = [];
@@ -287,32 +406,38 @@ import { parseAccountResponse } from '../shared/account-response.js';
      * is megabytes of JSON, and parsing it a second time on every scroll is exactly how you
      * get jank. This taps the object X has already built, so the extra cost is the walk only.
      */
-    // Responses whose body we already read via the .json() tap, so the fetch fallback below
-    // doesn't parse the same payload twice. Bounded — it only needs to bridge one tick.
-    const tappedUrls = new Set();
+    // Request context follows the response object, not its URL: concurrent requests
+    // to the same timeline can belong to different viewers or preference generations.
+    const responseContexts = new WeakMap();
 
     // via is one of 'json' | 'fetch' | 'xhr' — in practice always 'xhr', see the fetch wrapper.
-    function tapPayload(url, data, via) {
+    function tapPayload(url, data, via, followingSnapshot = null) {
         if (via === 'xhr') {
             harvestStats.xhrTaps++;
         } else if (via === 'json') {
             harvestStats.jsonTaps++;
-            tappedUrls.add(url);
-            if (tappedUrls.size > 50) {
-                // Cheap reset; the set only guards against an immediate double-parse.
-                const keep = [...tappedUrls].slice(-10);
-                tappedUrls.clear();
-                for (const u of keep) tappedUrls.add(u);
-            }
         } else {
             harvestStats.fetchTaps++;
         }
         harvestStats.lastUrl = url;
         try {
-            harvestProfiles(data);
+            if (followingSnapshot?.kind === 'mutation') {
+                harvestFollowingMutation(data, followingSnapshot);
+            } else {
+                harvestProfiles(data, followingSnapshot);
+            }
         } catch (e) {
             logError('profile harvest', e);
         }
+    }
+
+    function tapResponsePayload(response, data, via, context) {
+        if (context?.tapped) return;
+        if (context) context.tapped = true;
+        const url = response.url || '';
+        const snapshot = followingResponseMatches(context?.following, url, response.status) ? context.following : null;
+        // Never route a rejected friendship response through the profile walker.
+        if (snapshot || (enrichmentEnabled && API_PATTERN.test(url))) tapPayload(url, data, via, snapshot);
     }
 
     const originalResponseJson = Response.prototype.json;
@@ -320,9 +445,11 @@ import { parseAccountResponse } from '../shared/account-response.js';
         const promise = originalResponseJson.apply(this, arguments);
         try {
             const url = this.url || '';
-            if (enrichmentEnabled && API_PATTERN.test(url)) {
+            const context = responseContexts.get(this);
+            if ((enrichmentEnabled && API_PATTERN.test(url)) ||
+                followingResponseMatches(context?.following, url, this.status)) {
                 promise
-                    .then(data => tapPayload(url, data, 'json'))
+                    .then(data => tapResponsePayload(this, data, 'json', context))
                     // X owns the real error handling for this response; we must not turn our
                     // tap into an unhandled rejection.
                     .catch(() => {});
@@ -339,9 +466,11 @@ import { parseAccountResponse } from '../shared/account-response.js';
     const originalFetch = window.fetch;
     window.fetch = function(input, init) {
         let isGraphql = false;
+        let followingSnapshot = null;
         try {
-            const url = typeof input === 'string' ? input : input?.url;
+            const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url;
             isGraphql = Boolean(url) && API_PATTERN.test(url);
+            followingSnapshot = snapshotFollowingRequest(url, init?.method || input?.method || 'GET');
 
             if (isGraphql) {
                 harvestStats.graphqlFetches++;
@@ -362,19 +491,22 @@ import { parseAccountResponse } from '../shared/account-response.js';
         // Gated on the REQUEST url so the common case (every non-GraphQL fetch X makes, of
         // which there are many) doesn't pay for an extra promise link it can never use.
         try {
-            if (!enrichmentEnabled || !isGraphql) return result;
+            if ((!enrichmentEnabled || !isGraphql) && !followingSnapshot) return result;
 
             return result.then(response => {
                 try {
-                    const url = response.url || '';
-
+                    const context = { following: followingSnapshot, tapped: false };
+                    responseContexts.set(response, context);
+                    if ((!enrichmentEnabled || !isGraphql) &&
+                        !followingResponseMatches(followingSnapshot, response.url, response.status)) return response;
                     const clone = response.clone();
                     // One tick, so the .json() tap gets first refusal on this response.
                     Promise.resolve().then(() => {
-                        if (!enrichmentEnabled || tappedUrls.has(url)) return;
-                        clone.json().then(data => {
-                            if (tappedUrls.has(url)) return;
-                            tapPayload(url, data, 'fetch');
+                        if (context.tapped || ((!enrichmentEnabled || !isGraphql) &&
+                            !followingResponseMatches(followingSnapshot, response.url, response.status))) return;
+                        // Use the original reader so the fallback cannot tap itself.
+                        originalResponseJson.call(clone).then(data => {
+                            tapResponsePayload(response, data, 'fetch', context);
                         }).catch(() => {});
                     });
                 } catch (e) {
@@ -394,11 +526,14 @@ import { parseAccountResponse } from '../shared/account-response.js';
     const originalXHROpen = XMLHttpRequest.prototype.open;
     const originalXHRSetHeader = XMLHttpRequest.prototype.setRequestHeader;
     const originalXHRSend = XMLHttpRequest.prototype.send;
+    const xhrRequests = new WeakMap();
 
     XMLHttpRequest.prototype.open = function(method, url) {
         try {
             this._xPosedUrl = url;
+            this._xPosedMethod = method;
             this._xPosedHeaders = {};
+            xhrRequests.delete(this);
         } catch (e) {
             logError('XHR open', e);
         }
@@ -418,42 +553,44 @@ import { parseAccountResponse } from '../shared/account-response.js';
 
     XMLHttpRequest.prototype.send = function() {
         try {
-            if (this._xPosedUrl && API_PATTERN.test(this._xPosedUrl)) {
+            const requestUrl = this._xPosedUrl;
+            const isGraphql = requestUrl && API_PATTERN.test(requestUrl);
+            const followingSnapshot = snapshotFollowingRequest(requestUrl, this._xPosedMethod);
+            if (isGraphql) {
                 harvestStats.graphqlXhrs++;
                 if (this._xPosedHeaders) sendHeaders(this._xPosedHeaders);
+            }
 
-                // Harvest profiles from XHR too. Response.prototype.json and the fetch
-                // wrapper both only see fetch — an XHR-delivered timeline is invisible to
-                // them, which is exactly how every counter can read zero while the page
-                // loads normally.
-                if (enrichmentEnabled) {
-                    const requestUrl = this._xPosedUrl;
-                    this.addEventListener('load', function () {
-                        try {
-                            if (!enrichmentEnabled) return;
-                            const type = this.responseType;
-                            // responseType 'json' hands back an already-parsed object (free);
-                            // '' / 'text' needs one parse. Anything else (blob, arraybuffer)
-                            // is not ours to touch.
-                            const started = performance.now();
-                            let data = null;
-                            if (type === 'json') data = this.response;
-                            else if (!type || type === 'text') data = JSON.parse(this.responseText);
-                            else return;
-                            if (!data) return;
+            // One listener per request, also removed on errors/aborts. Reused XHRs
+            // cannot inherit an old viewer context or replay a previous response.
+            if ((enrichmentEnabled && isGraphql) || followingSnapshot) {
+                const request = { following: followingSnapshot };
+                xhrRequests.set(this, request);
+                this.addEventListener('loadend', function () {
+                    try {
+                        if (xhrRequests.get(this) !== request) return;
+                        const snapshot = followingResponseMatches(followingSnapshot, this.responseURL, this.status) ? followingSnapshot : null;
+                        if ((!enrichmentEnabled || !isGraphql) && !snapshot) return;
+                        const type = this.responseType;
+                        // JSON is already parsed; ignore blobs and cap relationship-only
+                        // text parsing so a large response cannot pin the main thread.
+                        const started = performance.now();
+                        let data = null;
+                        if (type === 'json') data = this.response;
+                        else if (!type || type === 'text') {
+                            if (!enrichmentEnabled && this.responseText.length > 8 * 1024 * 1024) return;
+                            data = JSON.parse(this.responseText);
+                        } else return;
+                        if (!data) return;
 
-                            tapPayload(requestUrl, data, 'xhr');
+                        tapPayload(requestUrl, data, 'xhr', snapshot);
 
-                            // Surfaced so the cost of this work is measurable rather than
-                            // assumed: responseType 'json' is free, 'text' means we parse a
-                            // multi-megabyte payload on the main thread during scroll.
-                            harvestStats.xhrResponseType = type || '(default)';
-                            harvestStats.lastHarvestMs = Math.round(performance.now() - started);
-                        } catch (e) {
-                            logError('xhr harvest', e);
-                        }
-                    });
-                }
+                        harvestStats.xhrResponseType = type || '(default)';
+                        harvestStats.lastHarvestMs = Math.round(performance.now() - started);
+                    } catch (e) {
+                        logError('xhr harvest', e);
+                    }
+                }, { once: true });
             }
         } catch (e) {
             logError('XHR send', e);

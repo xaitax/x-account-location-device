@@ -8,6 +8,8 @@ import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS, canonicalCountry, affilia
 import { LRUCache } from './lru-cache.js';
 import { normalizeLinkRule } from './domain-utils.js';
 import { FILTER_SOURCES } from './filter-registry.js';
+import { ACCOUNT_COUNT_FILTERS, isAccountCountThreshold } from './account-counts.js';
+import { BADGE_SIZES, normalizeBadgeSize } from './badge-appearance.js';
 
 // One ordering counter per configuration store. Persisted alongside its state in
 // the same local-storage write, so delayed replies remain orderable after a
@@ -150,10 +152,11 @@ class UserCacheStorage {
         return evicted;
     }
 
+    /** Resolve whether this snapshot was persisted; background retries remain automatic. */
     async save(force = false) {
         this.pruneExpired();
         // Dirty-gated: skip the whole rebuild+write when nothing changed.
-        if (!this.dirty && !force) return;
+        if (!this.dirty && !force) return true;
 
         // Clear any pending save
         if (this.saveTimeoutId) {
@@ -183,6 +186,7 @@ class UserCacheStorage {
             await browserAPI.storage.local.set({
                 [STORAGE_KEYS.CACHE]: exportData
             });
+            return true;
         } catch (error) {
             this.dirty = true;
 
@@ -202,6 +206,7 @@ class UserCacheStorage {
             // next cache mutation.
             this.scheduleSave();
             console.error('Failed to save user cache:', error);
+            return false;
         }
     }
 
@@ -572,6 +577,13 @@ class SettingsStorage {
             if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
                 this.settings = { ...DEFAULT_SETTINGS, ...stored };
             }
+            this.settings.badgeSize = normalizeBadgeSize(this.settings.badgeSize);
+            if (typeof this.settings.showBadgeBackground !== 'boolean') {
+                this.settings.showBadgeBackground = DEFAULT_SETTINGS.showBadgeBackground;
+            }
+            for (const { key, max } of ACCOUNT_COUNT_FILTERS) {
+                if (!isAccountCountThreshold(this.settings[key], max)) this.settings[key] = DEFAULT_SETTINGS[key];
+            }
             
             this.loaded = true;
             console.log('⚙️ Settings loaded:', this.settings);
@@ -584,6 +596,11 @@ class SettingsStorage {
 
     async save(values = this.settings, revision = this.revision) {
         try {
+            if (!BADGE_SIZES.includes(values.badgeSize)) throw new TypeError('Invalid badge size.');
+            if (typeof values.showBadgeBackground !== 'boolean') throw new TypeError('Invalid badge background preference.');
+            for (const { key, max } of ACCOUNT_COUNT_FILTERS) {
+                if (!isAccountCountThreshold(values[key], max)) throw new TypeError(`Invalid account-count threshold: ${key}.`);
+            }
             await browserAPI.storage.local.set({
                 [STORAGE_KEYS.SETTINGS]: values,
                 [this.revisionKey]: revision

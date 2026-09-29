@@ -8,12 +8,18 @@ import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFr
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
 import { getProfile } from './profile-cache.js';
+import { isFollowing } from './following-cache.js';
 import { isFocalTweet, ownPostId } from './post-identity.js';
 import { hasGovernmentBadge, VERIFIED_BADGE_SELECTOR } from './government-badge.js';
 import { findBlockedDomain, findBlockedExactUrl } from '../shared/domain-utils.js';
 import { dialogIcon } from './dialog-icons.js';
+import { captureDisplayName, emojiImageText } from './display-name.js';
+import {
+    ACCOUNT_COUNT_FILTERS, countDisplayNameDigits, countHandleDigits, isAccountCountThreshold, matchesAccountCount
+} from '../shared/account-counts.js';
 
 let filterStatisticsReporter = null;
+let displayNameCounts = new WeakMap();
 
 /** The content session owns reporting. Standalone observers perform no messaging. */
 export function setFilterStatisticsReporter(reporter) {
@@ -39,9 +45,10 @@ export function effectiveCountry(info, flagFromDevice) {
 }
 
 /** The reader and Always Show accounts are exempt from every filter. */
-function isAuthorExempt(screenName, allowedUsers, loggedInUser = getLoggedInUsername()) {
+function isAuthorExempt(screenName, allowedUsers, settings, loggedInUser = getLoggedInUsername()) {
     const author = screenName?.toLowerCase();
-    return !!author && (author === loggedInUser?.toLowerCase() || allowedUsers?.has(author) === true);
+    return !!author && (author === loggedInUser?.toLowerCase() || allowedUsers?.has(author) === true ||
+        (settings?.alwaysShowFollowing === true && isFollowing(author)));
 }
 
 /** Assemble the same author verdict for first resolution and live filter updates. */
@@ -49,10 +56,23 @@ function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUs
     loggedInUser = getLoggedInUsername()) {
     const { blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedLinks,
         blockedPcf, blockedAffiliations, allowedUsers, settings } = filters;
-    const isExempt = isAuthorExempt(screenName, allowedUsers, loggedInUser);
+    const isExempt = isAuthorExempt(screenName, allowedUsers, settings, loggedInUser);
     const isQuote = isInsideQuoteTweet(element, tweet);
     const location = canonicalCountry(element.dataset.xCountry);
     const profile = settings.profileEnrichment === false ? null : getProfile(screenName);
+    const accountCountReasons = [];
+    for (const rule of ACCOUNT_COUNT_FILTERS) {
+        const threshold = settings[rule.key];
+        if (!isAccountCountThreshold(threshold, rule.max) || threshold === 0) continue;
+        let count;
+        if (rule.requiresProfile) count = profile?.[rule.profileField];
+        else if (rule.key === 'minHandleDigits') count = countHandleDigits(screenName);
+        else if (rule.key === 'minDisplayNameDigits') {
+            count = countDisplayNameDigits(extractDisplayName(element, false, screenName));
+            displayNameCounts.set(element, count);
+        }
+        if (matchesAccountCount(count, threshold)) accountCountReasons.push(rule.reason);
+    }
     const reasons = resolveBlockReasons({
         isExempt,
         isBlockedCountry: location !== '' && blockedCountries.has(location),
@@ -61,7 +81,8 @@ function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUs
         isBioBlocked: hasBlockedBio(profile, blockedBioTags, settings),
         isLinkBlocked: hasBlockedLink(profile, blockedLinks, settings),
         isLabelBlocked: hasBlockedAccountLabel(element, tweet, blockedPcf, profile),
-        isAffiliationBlocked: hasBlockedAffiliation(info?.meta, blockedAffiliations)
+        isAffiliationBlocked: hasBlockedAffiliation(info?.meta, blockedAffiliations),
+        accountCountReasons
     });
     return {
         isListBlocked: reasons.length > 0,
@@ -79,7 +100,7 @@ function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUs
  * Presentation never needs to parse a comma-separated verdict or profile text.
  */
 function resolveBlockReasons({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
-    isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked }) {
+    isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked, accountCountReasons = [] }) {
     if (isExempt) return [];
     const reasons = [];
     if (isBlockedCountry) reasons.push('country');
@@ -89,12 +110,14 @@ function resolveBlockReasons({ isExempt, isBlockedCountry, isBlockedRegion, isTa
     if (isLinkBlocked) reasons.push('link');
     if (isLabelBlocked) reasons.push('label');
     if (isAffiliationBlocked) reasons.push('affiliation');
+    reasons.push(...accountCountReasons);
     return reasons;
 }
 
 const BLOCK_REASON_LABELS = {
     country: 'Country', region: 'Region', tag: 'Display name', bio: 'Bio or profile location',
-    link: 'Linked domain / URL', label: 'Account label', affiliation: 'Affiliation'
+    link: 'Linked domain / URL', label: 'Account label', affiliation: 'Affiliation',
+    ...Object.fromEntries(ACCOUNT_COUNT_FILTERS.map(({ reason, label }) => [reason, label]))
 };
 const QUOTE_PLACEHOLDER_CLASS = 'x-quote-placeholder';
 let quotePlaceholders = new WeakMap();
@@ -256,8 +279,9 @@ function applyInfoToElement(element, screenName, info, opts) {
 
     if (info?.location || info?.device) {
         try {
+            const presentation = extractDisplayName(element, true);
             createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken, effCountry,
-                extractDisplayName(element));
+                presentation?.text || '', presentation);
         } catch (badgeError) {
             if (debug) debug(`Badge creation error for @${screenName}: ${badgeError.message}`);
         }
@@ -354,8 +378,8 @@ function getMainAuthorScreenName(tweet) {
  * @param {Set<string>} allowedUsers - lowercase allowlisted handles
  * @returns {boolean}
  */
-function isMainAuthorExempt(tweet, allowedUsers) {
-    return isAuthorExempt(getMainAuthorScreenName(tweet), allowedUsers);
+function isMainAuthorExempt(tweet, allowedUsers, settings) {
+    return isAuthorExempt(getMainAuthorScreenName(tweet), allowedUsers, settings);
 }
 
 /**
@@ -373,7 +397,7 @@ function applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers) {
     if (!tweet) return;
 
     let blocked = false;
-    if (blockedLanguages && blockedLanguages.size > 0 && !isMainAuthorExempt(tweet, allowedUsers)) {
+    if (blockedLanguages && blockedLanguages.size > 0 && !isMainAuthorExempt(tweet, allowedUsers, settings)) {
         const lang = getMainTweetLanguage(tweet);
         if (lang && lang !== 'und' && blockedLanguages.has(lang)) {
             blocked = true;
@@ -492,9 +516,12 @@ export const observerCleanupFunctions = [];
  * Extract display name including emojis from an element
  * X renders emojis as images (sometimes with an empty alt), so reconstruct the text.
  * @param {HTMLElement} element - The username element
- * @returns {string} - Display name with emojis
+ * @param {boolean} [includePresentation] - Retain safe artwork for the hovercard.
+ * @param {string|null} [screenName] - Restrict fallback links to this author.
+ * @returns {string|Object} - Plain name for filters, or local presentation data.
  */
-function extractDisplayName(element) {
+function extractDisplayName(element, includePresentation = false, screenName = null) {
+    const result = (node, text) => includePresentation ? captureDisplayName(node, text) || { text } : text;
     // Prefer this author's own username container. Searching the whole article
     // reads the main author's name again when processing a quoted author (#57).
     const tweet = element.closest(SELECTORS.TWEET);
@@ -507,7 +534,10 @@ function extractDisplayName(element) {
     if (!container) return '';
 
     const belongsToAuthor = node => !tweet || !!quoteCard || !isInsideQuoteTweet(node, tweet);
-    const isProfileLink = node => /^\/[a-zA-Z0-9_]{1,15}\/?$/.test(node.getAttribute('href') || '');
+    const isProfileLink = node => {
+        const match = /^\/([a-zA-Z0-9_]{1,15})\/?$/.exec(node.getAttribute('href') || '');
+        return !!match && (!screenName || match[1].toLowerCase() === screenName.toLowerCase());
+    };
     
     // Method 1: Look for User-Name testid which contains display name and @handle
     const userNameContainer = ownName || Array.from(container.querySelectorAll(SELECTORS.USERNAME))
@@ -529,7 +559,7 @@ function extractDisplayName(element) {
         if (hasSeparateHandle && nameField && !nameField.querySelector('time') &&
             nameField.closest(SELECTORS.USERNAME) === userNameContainer) {
             const displayName = extractTextWithEmojis(nameField);
-            if (displayName) return displayName;
+            if (displayName) return result(nameField, displayName);
         }
 
         // The first link usually contains the display name
@@ -538,7 +568,7 @@ function extractDisplayName(element) {
         if (displayNameLink) {
             const displayName = extractTextWithEmojis(displayNameLink);
             if (displayName && !displayName.startsWith('@')) {
-                return displayName;
+                return result(displayNameLink, displayName);
             }
         }
     }
@@ -550,7 +580,7 @@ function extractDisplayName(element) {
         const displayName = extractTextWithEmojis(link);
         // Skip if it looks like a @username or if it's empty
         if (displayName && !displayName.startsWith('@') && displayName.length > 0) {
-            return displayName;
+            return result(link, displayName);
         }
     }
     
@@ -559,28 +589,11 @@ function extractDisplayName(element) {
     if (parentSpan) {
         const displayName = extractTextWithEmojis(parentSpan);
         if (displayName && !displayName.startsWith('@')) {
-            return displayName;
+            return result(parentSpan, displayName);
         }
     }
     
     return '';
-}
-
-/**
- * Read an emoji image without guessing from its title or arbitrary asset URLs.
- * Some current X emoji images have alt="" but retain the Unicode SVG filename.
- * @param {HTMLImageElement} image
- * @returns {string}
- */
-function emojiImageText(image) {
-    if (image.alt) return image.alt;
-    const match = /^https:\/\/abs(?:-\d+)?\.twimg\.com\/emoji\/v\d+\/svg\/([a-f0-9]+(?:-[a-f0-9]+)*)\.svg(?:[?#].*)?$/i
-        .exec(image.getAttribute('src') || '');
-    if (!match) return '';
-    const points = match[1].split('-').map(point => parseInt(point, 16));
-    if (points.length > 32 || points.some(point => point < 0x20 || point > 0x10ffff ||
-        (point >= 0xd800 && point <= 0xdfff))) return '';
-    return String.fromCodePoint(...points);
 }
 
 /**
@@ -974,6 +987,49 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug, ge
     let pendingElements = new Set();
     let processTimeout = null;
     let contextFrame = null;
+    let nameFrame = null;
+    const pendingNameElements = new Set();
+    const nameOwnerSelector = `${SELECTORS.USERNAME}[data-x-screen-name], ${SELECTORS.USER_CELL}[data-x-screen-name]`;
+    const ownedNameUI = `.${CSS_CLASSES.INFO_BADGE}, .${QUOTE_PLACEHOLDER_CLASS}`;
+    const nameRuleActive = filters => isAccountCountThreshold(filters?.settings?.minDisplayNameDigits, 50) &&
+        filters.settings.minDisplayNameDigits > 0;
+    const isOwnedNameUI = node => {
+        const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+        return !!element?.closest(ownedNameUI);
+    };
+
+    const scheduleNameRefresh = target => {
+        const element = target.nodeType === Node.ELEMENT_NODE ? target : target.parentElement;
+        if (!element || isOwnedNameUI(element)) return;
+        // A people-list name can sit inside an unprocessed User-Name. Its processed
+        // UserCell is the owner; quoted names retain their own nearest author root.
+        const owner = element.closest(nameOwnerSelector);
+        if (!owner) return;
+        pendingNameElements.add(owner);
+        if (nameFrame !== null) return;
+        nameFrame = requestAnimationFrame(() => {
+            nameFrame = null;
+            const elements = Array.from(pendingNameElements);
+            pendingNameElements.clear();
+            const filters = getFilters?.() || latestFilterSnapshot;
+            if (!isEnabled() || !nameRuleActive(filters)) return;
+            const loggedInUser = getLoggedInUsername();
+            for (const author of elements) {
+                if (!author.isConnected) continue;
+                const screenName = author.dataset.xScreenName;
+                const currentName = author.matches(SELECTORS.USER_CELL)
+                    ? extractUsernameFromUserCell(author) : extractUsername(author);
+                if (!screenName || currentName?.toLowerCase() !== screenName.toLowerCase()) continue;
+                const count = countDisplayNameDigits(extractDisplayName(author, false, screenName));
+                if (displayNameCounts.has(author) && displayNameCounts.get(author) === count) continue;
+                // This is a local verdict update, not a new lookup. A cached badge
+                // can be restored, but a newly readable name never triggers traffic.
+                if (updateAuthorBlockState(author, filters, loggedInUser) && userInfoCache.has(screenName)) {
+                    applyAvailableFilters(author, screenName, filters);
+                }
+            }
+        });
+    };
 
     const scheduleContextRefresh = () => {
         if (contextFrame !== null) return;
@@ -1017,8 +1073,17 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug, ge
 
         // One string compare per batch; only does real work when the path changed.
         checkForNavigation(onNavigate);
+        const watchNames = nameRuleActive(getFilters?.() || latestFilterSnapshot);
 
         for (const mutation of mutations) {
+            if (watchNames && (mutation.type === 'characterData' ||
+                (mutation.type === 'attributes' && mutation.target.tagName === 'IMG' &&
+                    ['alt', 'src'].includes(mutation.attributeName)) ||
+                (mutation.type === 'childList' && [...mutation.addedNodes, ...mutation.removedNodes]
+                    .some(node => !isOwnedNameUI(node))))) {
+                scheduleNameRefresh(mutation.target);
+            }
+            if (mutation.type === 'characterData') continue;
             if (mutation.type === 'attributes') {
                 // Only timestamp anchor hrefs can change an existing post's ID.
                 if (mutation.target.tagName === 'A' && mutation.target.querySelector('time') &&
@@ -1083,9 +1148,10 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug, ge
 
     observer.observe(document.body, {
         childList: true,
+        characterData: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['href', 'fill']
+        attributeFilter: ['href', 'fill', 'alt', 'src']
     });
 
     // Initial scan
@@ -1099,7 +1165,9 @@ export function startObserver(isEnabled, processElementSafe, scanPage, debug, ge
         clearTimeout(initialScanTimeout);
         if (processTimeout !== null) clearTimeout(processTimeout);
         if (contextFrame !== null) cancelAnimationFrame(contextFrame);
+        if (nameFrame !== null) cancelAnimationFrame(nameFrame);
         pendingElements.clear();
+        pendingNameElements.clear();
         if (observer) {
             observer.disconnect();
             observer = null;
@@ -1563,6 +1631,24 @@ export function updateBlockedTweets(filters, changedUsers = null) {
 }
 
 /**
+ * Re-derive one author from current local evidence. Return whether a hidden row
+ * became readable without a badge; the caller decides how to recover that badge.
+ */
+function updateAuthorBlockState(element, filters, loggedInUser) {
+    const screenName = element.dataset.xScreenName;
+    const tweet = element.closest(SELECTORS.TWEET);
+    const isUserCell = !tweet && element.matches(SELECTORS.USER_CELL);
+    if (!tweet && !isUserCell) return false;
+    const cachedInfo = screenName ? userInfoCache.get(screenName) : null;
+    const wasHidden = element.dataset.xBlock === 'hide';
+    const { hide } = applyBlockState(element, tweet,
+        resolveAuthorBlockState(element, screenName, cachedInfo, filters, tweet, isUserCell, loggedInUser));
+    const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+    if (badge) badge.style.display = hide ? 'none' : '';
+    return !badge && wasHidden && !hide;
+}
+
+/**
  * Perform the actual single-pass tweet visibility update. See updateBlockedTweets.
  */
 function runUpdateBlockedTweets({
@@ -1588,39 +1674,27 @@ function runUpdateBlockedTweets({
     document.querySelectorAll('[data-x-screen-name]').forEach(element => {
         const screenName = element.dataset.xScreenName;
         if (changedUsers && !changedUsers.has(screenName?.toLowerCase())) return;
-        const tweet = element.closest(SELECTORS.TWEET);
         // People-list rows have no enclosing tweet, but they still need re-deriving when a
         // filter changes — otherwise adding a country would flag nothing on Followers /
         // Following until a reload.
-        const isUserCell = !tweet && !!element.matches && element.matches(SELECTORS.USER_CELL);
-        if (!tweet && !isUserCell) return;
-
-        const cachedInfo = screenName ? userInfoCache.get(screenName) : null;
-        const wasHidden = element.dataset.xBlock === 'hide';
-        const { hide } = applyBlockState(element, tweet,
-            resolveAuthorBlockState(element, screenName, cachedInfo, filters, tweet, isUserCell, loggedInUser));
-
-        const badge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
-        if (badge) badge.style.display = hide ? 'none' : '';
-        else if (wasHidden && !hide) newlyVisible.add(element);
+        if (updateAuthorBlockState(element, filters, loggedInUser)) newlyVisible.add(element);
     });
 
     // Language blocking is per-tweet (not per-author), so re-derive it across ALL
     // articles — this is what makes adding OR removing a language re-apply to
     // already-rendered tweets. applyLanguageBlock authoritatively sets or clears the
-    // marker, so a removed language un-hides its tweets. Runs only on config/setting
-    // changes (this pass is rAF-coalesced), not per scroll.
-    if (!changedUsers) {
-        document.querySelectorAll(SELECTORS.TWEET).forEach(tweet => {
-            const wasHidden = tweet.dataset.xLangBlock === 'hide';
-            applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
-            if (wasHidden && tweet.dataset.xLangBlock !== 'hide') {
-                tweet.querySelectorAll('[data-x-screen-name]').forEach(element => {
-                    if (element.closest(SELECTORS.TWEET) === tweet) newlyVisible.add(element);
-                });
-            }
-        });
-    }
+    // marker, so a removed language un-hides its tweets. Scoped relationship changes
+    // must also revisit language verdicts for the affected main authors.
+    document.querySelectorAll(SELECTORS.TWEET).forEach(tweet => {
+        if (changedUsers && !changedUsers.has(getMainAuthorScreenName(tweet)?.toLowerCase())) return;
+        const wasHidden = tweet.dataset.xLangBlock === 'hide';
+        applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers);
+        if (wasHidden && tweet.dataset.xLangBlock !== 'hide') {
+            tweet.querySelectorAll('[data-x-screen-name]').forEach(element => {
+                if (element.closest(SELECTORS.TWEET) === tweet) newlyVisible.add(element);
+            });
+        }
+    });
     // Recover only after both author and language verdicts have settled.
     for (const element of newlyVisible) recoverVisibleElement(element, filters);
 }
@@ -1896,6 +1970,7 @@ export function cleanupObservers() {
     elementProcessingTokens = new WeakMap();
     elementTweetContexts = new WeakMap();
     elementQuoteContexts = new WeakMap();
+    displayNameCounts = new WeakMap();
     postContexts = new WeakMap();
     document.querySelectorAll(`.${QUOTE_PLACEHOLDER_CLASS}`).forEach(el => el.remove());
     quotePlaceholders = new WeakMap();

@@ -206,6 +206,8 @@ export const DEFAULT_SETTINGS = {
     showFlags: true,
     flagFromDevice: false,  // Use the device's country for the flag instead of the account location (issue #17); falls back to location for web/unknown
     showDevices: true,
+    badgeSize: 'medium',  // 'small' | 'medium' | 'large'; icons, spacing and controls scale together.
+    showBadgeBackground: true,
     showVpnIndicator: true,
     showVpnUsers: true,  // Show tweets from users with VPN/proxy detected
     showInfoIcon: true,  // The circled-i at the end of the badge (issue #38). Hiding it frees
@@ -215,6 +217,7 @@ export const DEFAULT_SETTINGS = {
     // pointer devices. Touch devices are always click-to-toggle (they have no hover).
     showCaptureButton: true,  // The badge "Share" button (capture + quote/reply/post to X)
     showSidebarBlockerLink: true,
+    alwaysShowFollowing: false,  // Exempt accounts X confirms this viewer follows; relationship data stays in page-session memory.
     openChangelogOnUpdate: true,  // Open the "What's New"/changelog tab after a major/minor update (issue #24)
     debugMode: false,
     // Read the profile data X already sends with the timeline (bio, account label, follower
@@ -225,6 +228,11 @@ export const DEFAULT_SETTINGS = {
     // Keep existing bio rules unchanged until the user opts into this extra scope.
     bioTagsMatchLocation: false,
     linksMatchLocation: false,
+    // Inclusive account-count thresholds. Zero keeps each rule off.
+    minFollowing: 0,
+    minPosts: 0,
+    minHandleDigits: 0,
+    minDisplayNameDigits: 0,
     // NOTE: the community cache is NOT a setting here. It lives in its own storage key
     // (STORAGE_KEYS.CLOUD_CACHE_ENABLED) because the background reads it before settings
     // load. A `cloudCacheEnabled: false` used to sit here, read by nothing, riding along
