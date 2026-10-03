@@ -1,8 +1,8 @@
 # Privacy policy
 
-Last updated: 2026-09-29
+Last updated: 2026-10-03
 
-This policy describes X-Posed: Account Location & Device Info, browser extension version 4.1.0. Earlier versions available in browser stores may not include every feature described below. The separate iPhone and iPad app has its own [privacy policy](PRIVACY_iOS.md).
+This policy describes the current browser-extension source of X-Posed: Account Location & Device Info. Versions available in browser stores may not include every feature described below. The separate iPhone and iPad app has its own [privacy policy](PRIVACY_iOS.md).
 
 ## In brief
 
@@ -29,6 +29,8 @@ The account cache is keyed by handle. New cache writes retain a compact record o
 **Use profile details**, in **Blocking → Behavior**, is enabled by default. It reads a bounded subset of profile data already delivered in X's own responses: bios, self-written profile locations, website and bio links, account labels, and follower, following, post and media counts. This passive feature makes no additional requests to X. It holds up to 500 profiles in page-session memory, with limits on text and link sizes. This profile cache is not written to disk, exported or contributed to Community Cache. Turning the feature off clears it; it also clears when the page session ends. Your saved matching rules remain until you change or remove them.
 
 **Always show accounts I follow**, in **Blocking → Always Show**, is off by default and works independently of **Use profile details**. When enabled, it reads follow status already supplied by X to exempt confirmed followed accounts from your filters, without extra requests. A numeric signed-in account ID, or the visible handle when unavailable, is used only in memory to keep signed-in accounts separate. These viewer-specific relationships stay in page-session memory, are cleared when the signed-in account changes or the option is disabled, and are never written to disk, exported or shared with Community Cache. Only the on/off preference is saved and included in backups.
+
+**Hide replies and quotes of filtered posts**, in **Blocking → Behavior**, is off by default. When enabled, it reads post IDs, author handles, languages and exact reply/quote relationships already delivered by X, plus bounded display names and account labels from visible headers. Up to 5,000 public post observations stay in page-session memory, with no post text retained and no extra requests. They are not written to disk or shared with Community Cache, and are cleared when the option is disabled, the signed-in account changes or the page session ends. This hides related posts locally; it does not add their authors to your filters or block them on X.
 
 ## Community Cache
 
@@ -66,7 +68,7 @@ These records are not uploaded or included in configuration exports. They remain
 
 The Share feature creates an image locally from the selected post and its displayed account information. Rendering can load the account's profile image and post media from their existing image URLs. You choose whether to copy the result to your clipboard, download a PNG, open an X draft, or send it through your device's share menu. Opening an X draft sends the selected draft text and post link to X. Native sharing passes the selected content to the service you choose. X-Posed does not publish posts automatically or upload these images to Community Cache.
 
-**Export Data** creates a local file containing settings, filter rules, saved Always Show accounts and cached account information. It excludes saved authentication headers, observed follow relationships, the passive profile cache and filtering statistics. Backups and saved images can contain account information and personal filtering preferences; review them before sharing. Removing extension data does not remove files you already downloaded.
+**Export Data** creates a local file containing settings, filter rules, saved Always Show accounts and cached account information. It excludes saved authentication headers, observed follow and post relationships, the passive profile cache and filtering statistics. Backups and saved images can contain account information and personal filtering preferences; review them before sharing. Removing extension data does not remove files you already downloaded.
 
 Country flags can load from X's Twemoji CDN at `abs-0.twimg.com`; profile and media images can load from X's image hosts. Those providers receive the associated network requests even when Community Cache is off. Interface icons and world maps are bundled with the extension. The extension does not execute downloaded code.
 

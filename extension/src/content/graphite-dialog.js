@@ -476,7 +476,7 @@ function createBlockingSurface(config, container = null) {
     }
 
     function settingSwitch(key, titleText, helpText, {
-        id = `x-g-setting-${key}`, helpId = `${id}-help`, defaultValue = false
+        id = `x-g-setting-${key}`, helpId = `${id}-help`, defaultValue = false, inverted = false
     } = {}) {
         const row = el('div', 'xp-g-setting');
         const text = el('div');
@@ -486,9 +486,10 @@ function createBlockingSurface(config, container = null) {
         const input = createElement('input', {
             id, type: 'checkbox', className: 'xp-g-switch', role: 'switch', 'aria-describedby': helpId
         });
-        input.checked = defaultValue ? settings[key] !== false : settings[key] === true;
+        const value = defaultValue ? settings[key] !== false : settings[key] === true;
+        input.checked = inverted ? !value : value;
         input.disabled = pending.has('settings');
-        input.addEventListener('change', () => changeSettings({ [key]: input.checked }));
+        input.addEventListener('change', () => changeSettings({ [key]: inverted ? !input.checked : input.checked }));
         row.append(text, input);
         return row;
     }
@@ -740,56 +741,45 @@ function createBlockingSurface(config, container = null) {
 
     function renderBehavior() {
         const container = el('div', 'xp-g-behavior');
-        const heading = el('div', 'xp-g-section-heading');
-        heading.append(el('h3', '', 'Filtering preferences'), el('p', '', settings.highlightBlockedTweets === true
-            ? 'Highlight is active. Matching posts stay visible and are highlighted.'
-            : 'Hide is active. Matching posts are hidden from your feed.'));
-        container.append(heading);
 
-        function choiceSection(key, titleText, labelText, options, description, defaultValue) {
+        function group(titleText, id) {
             const section = el('section', 'xp-g-behavior-section');
-            section.append(el('h4', '', titleText));
-            const field = el('div', 'xp-g-setting-choice');
-            const id = `x-g-behavior-${key}`;
-            const label = el('label', '', labelText); label.htmlFor = id;
-            const select = createElement('select', { id, className: 'xp-g-select', 'aria-describedby': `${id}-help` });
-            for (const [value, text] of options) {
-                const option = el('option', '', text); option.value = String(value); select.append(option);
-            }
-            select.value = String(settings[key] === undefined ? defaultValue : settings[key] === true);
-            select.disabled = pending.has('settings');
-            select.addEventListener('change', () => changeSettings({ [key]: select.value === 'true' }));
-            const help = el('p', '', description); help.id = `${id}-help`;
-            field.append(label, select, help); section.append(field);
-            return section;
+            const heading = el('h3', '', titleText); heading.id = id;
+            section.setAttribute('aria-labelledby', id);
+            const rows = el('div', 'xp-g-behavior-rows');
+            section.append(heading, rows);
+            container.append(section);
+            return { section, rows };
         }
 
-        container.append(choiceSection('showVpnUsers', 'Location warnings', 'When X marks an account’s location as uncertain', [
-            [true, 'Use saved filters only'], [false, 'Also filter accounts with location warnings']
-        ], 'A warning indicates location uncertainty, not confirmed VPN use. Saved filters still apply. Warning matches follow Hide or Highlight.', true));
-        container.append(choiceSection('flagFromDevice', 'Country source', 'Preferred location source', [
-            [false, 'Account location'], [true, 'Device country, when available']
-        ], 'Used for flags and country/region filters. Device country comes from the connected app; account location is used when it is unavailable.', false));
+        const filtering = group('Post filtering', 'x-g-behavior-filtering');
+        filtering.rows.append(settingSwitch('hideRelatedPosts', 'Hide replies and quotes of filtered posts',
+            'Hide whole replies and quotes of known filter matches, even in Highlight. Use Show post to reveal them.',
+            { id: 'x-g-behavior-hideRelatedPosts' }));
+        filtering.rows.append(settingSwitch('showVpnUsers', 'Filter accounts with location warnings',
+            'Follow Hide or Highlight when X marks a location as uncertain. This is not proof of VPN use.',
+            { id: 'x-g-behavior-showVpnUsers', defaultValue: true, inverted: true }));
 
-        const profile = el('section', 'xp-g-behavior-section');
-        profile.append(settingSwitch('profileEnrichment', 'Use profile details',
-            'Read bios, links and account counts that X already loads. No extra requests are made; these details stay on this device. Following and Total posts filters are inactive when this is off. Digit rules for handles and display names do not need profile details.',
-            { id: 'x-g-behavior-profileEnrichment', helpId: 'x-g-profile-help', defaultValue: true }));
-        container.append(profile);
+        const data = group('Data sources', 'x-g-behavior-data');
+        data.rows.append(settingSwitch('flagFromDevice', 'Use device country when available',
+            'Use the connected app’s country for flags and location filters. Otherwise, use account location.',
+            { id: 'x-g-behavior-flagFromDevice' }));
+        const profile = settingSwitch('profileEnrichment', 'Use profile details',
+            'Use bios, links and activity counts X already loads. No extra requests.',
+            { id: 'x-g-behavior-profileEnrichment', helpId: 'x-g-profile-help', defaultValue: true });
+        data.rows.append(profile);
+        if (settings.profileEnrichment === false) {
+            const dependency = el('p', 'xp-g-behavior-dependency',
+                'Following and Total posts filters need profile details. Name-digit filters still work.');
+            dependency.id = 'x-g-profile-dependency';
+            profile.querySelector('input').setAttribute('aria-describedby', 'x-g-profile-help x-g-profile-dependency');
+            data.section.append(dependency);
+        }
 
-        const notes = el('section', 'xp-g-rule-notes');
-        const list = el('ul');
-        for (const note of [
-            'A post only needs to match one filter.',
-            'Always Show accounts are exempt from all filters.',
-            'Highlight keeps all matching posts visible, including location warnings.'
-        ]) list.append(el('li', '', note));
-        notes.append(el('h4', '', 'How your filters work together'), list);
-        const details = el('details', 'xp-g-details');
-        details.append(el('summary', '', 'Quotes, replies and opened posts'),
-            el('p', '', 'In Hide mode, a matching quoted author hides only the quote. You can reveal it without changing your filters.'),
-            el('p', '', 'When X-Posed can identify the main post you opened, it stays readable. Replies still follow your filters. Accounts in people lists remain visible.'));
-        container.append(notes, details);
+        const note = el('p', 'xp-g-behavior-note');
+        const icon = glyph('infoCircle', 16); icon.setAttribute('aria-hidden', 'true');
+        note.append(icon, el('span', '', 'Always Show takes priority. Posts you open directly stay readable; unknown relationships keep normal filtering.'));
+        container.append(note);
         return container;
     }
 

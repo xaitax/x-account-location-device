@@ -9,10 +9,12 @@ import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './u
 import { LRUCache } from '../shared/lru-cache.js';
 import { getProfile } from './profile-cache.js';
 import { isFollowing } from './following-cache.js';
-import { isFocalTweet, ownPostId } from './post-identity.js';
+import { isFocalTweet, ownPostId, quotedPostId, QUOTE_CARD_SELECTOR, quoteCardOf } from './post-identity.js';
 import { hasGovernmentBadge, VERIFIED_BADGE_SELECTOR } from './government-badge.js';
 import { findBlockedDomain, findBlockedExactUrl } from '../shared/domain-utils.js';
-import { dialogIcon } from './dialog-icons.js';
+import { createFilterPlaceholder, updateFilterPlaceholder } from './filter-placeholder.js';
+import { createRelatedPostController } from './related-posts.js';
+import { rememberPostRelation } from './post-relations-cache.js';
 import { captureDisplayName, emojiImageText } from './display-name.js';
 import {
     ACCOUNT_COUNT_FILTERS, countDisplayNameDigits, countHandleDigits, isAccountCountThreshold, matchesAccountCount
@@ -60,24 +62,15 @@ function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUs
     const isQuote = isInsideQuoteTweet(element, tweet);
     const location = canonicalCountry(element.dataset.xCountry);
     const profile = settings.profileEnrichment === false ? null : getProfile(screenName);
-    const accountCountReasons = [];
-    for (const rule of ACCOUNT_COUNT_FILTERS) {
-        const threshold = settings[rule.key];
-        if (!isAccountCountThreshold(threshold, rule.max) || threshold === 0) continue;
-        let count;
-        if (rule.requiresProfile) count = profile?.[rule.profileField];
-        else if (rule.key === 'minHandleDigits') count = countHandleDigits(screenName);
-        else if (rule.key === 'minDisplayNameDigits') {
-            count = countDisplayNameDigits(extractDisplayName(element, false, screenName));
-            displayNameCounts.set(element, count);
-        }
-        if (matchesAccountCount(count, threshold)) accountCountReasons.push(rule.reason);
-    }
+    const displayName = blockedTags?.size || settings.minDisplayNameDigits > 0
+        ? extractDisplayName(element, false, screenName) : undefined;
+    const accountCountReasons = resolveAccountCountReasons(screenName, profile, settings, displayName);
+    if (settings.minDisplayNameDigits > 0) displayNameCounts.set(element, countDisplayNameDigits(displayName));
     const reasons = resolveBlockReasons({
         isExempt,
         isBlockedCountry: location !== '' && blockedCountries.has(location),
         isBlockedRegion: location !== '' && !!blockedRegions?.has(location),
-        isTagBlocked: blockedTags?.size > 0 && hasBlockedTag(extractDisplayName(element), blockedTags),
+        isTagBlocked: blockedTags?.size > 0 && hasBlockedTag(displayName, blockedTags),
         isBioBlocked: hasBlockedBio(profile, blockedBioTags, settings),
         isLinkBlocked: hasBlockedLink(profile, blockedLinks, settings),
         isLabelBlocked: hasBlockedAccountLabel(element, tweet, blockedPcf, profile),
@@ -93,6 +86,21 @@ function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUs
         neverHide: isUserCell,
         reasons
     };
+}
+
+/** Unknown counts/names never stand in for an observed value. */
+function resolveAccountCountReasons(screenName, profile, settings, displayName) {
+    const reasons = [];
+    for (const rule of ACCOUNT_COUNT_FILTERS) {
+        const threshold = settings[rule.key];
+        if (!isAccountCountThreshold(threshold, rule.max) || threshold === 0) continue;
+        let count;
+        if (rule.requiresProfile) count = profile?.[rule.profileField];
+        else if (rule.key === 'minHandleDigits') count = countHandleDigits(screenName);
+        else if (rule.key === 'minDisplayNameDigits' && typeof displayName === 'string') count = countDisplayNameDigits(displayName);
+        if (matchesAccountCount(count, threshold)) reasons.push(rule.reason);
+    }
+    return reasons;
 }
 
 /**
@@ -117,10 +125,13 @@ function resolveBlockReasons({ isExempt, isBlockedCountry, isBlockedRegion, isTa
 const BLOCK_REASON_LABELS = {
     country: 'Country', region: 'Region', tag: 'Display name', bio: 'Bio or profile location',
     link: 'Linked domain / URL', label: 'Account label', affiliation: 'Affiliation',
+    vpn: 'Location warning', language: 'Post language',
     ...Object.fromEntries(ACCOUNT_COUNT_FILTERS.map(({ reason, label }) => [reason, label]))
 };
 const QUOTE_PLACEHOLDER_CLASS = 'x-quote-placeholder';
 let quotePlaceholders = new WeakMap();
+let quoteCards = new WeakMap();
+let quoteOwners = new WeakMap();
 
 function clearQuotePlaceholder(element) {
     const placeholder = quotePlaceholders.get(element);
@@ -129,9 +140,28 @@ function clearQuotePlaceholder(element) {
     quotePlaceholders.delete(element);
 }
 
+function releaseQuoteCard(element) {
+    const card = quoteCards.get(element);
+    if (card && quoteOwners.get(card) === element) {
+        delete card.dataset.xQuoteState;
+        quoteOwners.delete(card);
+    }
+    quoteCards.delete(element);
+    clearQuotePlaceholder(element);
+}
+
 /** Only our own button is managed; X retains ownership of the quoted content. */
 function syncQuotePlaceholder(element, reasons) {
-    const card = element.closest('div[role="link"][tabindex="0"]');
+    const card = quoteCardOf(element);
+    if (quoteCards.get(element) && quoteCards.get(element) !== card) releaseQuoteCard(element);
+    if (card) {
+        const oldOwner = quoteOwners.get(card);
+        if (oldOwner && oldOwner !== element) releaseQuoteCard(oldOwner);
+        quoteOwners.set(card, element);
+        quoteCards.set(element, card);
+        if (element.dataset.xQuoteBlock) card.dataset.xQuoteState = element.dataset.xQuoteBlock;
+        else delete card.dataset.xQuoteState;
+    }
     let placeholder = quotePlaceholders.get(element);
     if (placeholder && placeholder.parentElement !== card) {
         clearQuotePlaceholder(element);
@@ -149,35 +179,14 @@ function syncQuotePlaceholder(element, reasons) {
         return;
     }
     if (!placeholder || !placeholder.isConnected) {
-        placeholder = document.createElement('button');
-        placeholder.type = 'button';
-        placeholder.className = QUOTE_PLACEHOLDER_CLASS;
-        const icon = dialogIcon('shield', 18);
-        icon.classList.add(`${QUOTE_PLACEHOLDER_CLASS}-icon`);
-        const copy = document.createElement('span');
-        copy.className = `${QUOTE_PLACEHOLDER_CLASS}-copy`;
-        for (const [suffix, text] of [
-            ['title', 'Quoted post hidden'], ['reasons', '']
-        ]) {
-            const span = document.createElement('span');
-            span.className = `${QUOTE_PLACEHOLDER_CLASS}-${suffix}`;
-            span.textContent = text;
-            copy.appendChild(span);
-        }
-        const action = document.createElement('span');
-        action.className = `${QUOTE_PLACEHOLDER_CLASS}-action`;
-        action.append('Show quoted post', dialogIcon('chevronRight', 14));
-        placeholder.append(icon, copy, action);
+        placeholder = createFilterPlaceholder({ title: 'Quoted post hidden', action: 'Show quoted post' });
         card.prepend(placeholder);
         quotePlaceholders.set(element, placeholder);
     }
     const labels = reasons.map(reason => BLOCK_REASON_LABELS[reason]).filter(Boolean);
     const summary = labels.slice(0, 2).join(' · ') + (labels.length > 2 ? ` · +${labels.length - 2} more` : '');
-    const reasonText = placeholder.querySelector(`.${QUOTE_PLACEHOLDER_CLASS}-reasons`);
-    if (reasonText.textContent !== summary) reasonText.textContent = summary;
     const description = labels.length ? `Hidden because: ${labels.join(', ')}.` : 'Matches your filters.';
-    placeholder.setAttribute('aria-label', `Show quoted post. ${description}`);
-    placeholder.title = description;
+    updateFilterPlaceholder(placeholder, { reasonText: summary, description });
 }
 
 /**
@@ -226,7 +235,7 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
 
     delete element.dataset.xQuoteBlock;
     delete element.dataset.xQuoteReason;
-    clearQuotePlaceholder(element);
+    releaseQuoteCard(element);
 
     // People lists (Followers, Verified followers, Following) only ever FLAG a row.
     // Removing someone from your own follower list hides the information you opened
@@ -234,7 +243,7 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
     const matchesFilter = isListBlocked || isVpnHidden;
     // The post deliberately opened by its own timestamp remains readable. This
     // runs after the quote branch, so its quoted authors retain independent rules.
-    const keepVisible = neverHide || isFocalTweet(tweet);
+    const keepVisible = neverHide || isFocalTweet(tweet) || tweet?.dataset.xRelatedBlock === 'shown';
     const hide = !keepVisible && matchesFilter && !highlightMode;
     const highlight = !hide && matchesFilter;
 
@@ -275,6 +284,9 @@ function applyInfoToElement(element, screenName, info, opts) {
     const { hide } = applyBlockState(element, tweet,
         resolveAuthorBlockState(element, screenName, info, opts, tweet, isUserCell));
 
+    // New local facts can also change a reply/quote elsewhere in the timeline.
+    if (settings.hideRelatedPosts === true) updateBlockedTweets(opts);
+
     if (hide) return; // hidden row → don't build a badge
 
     if (info?.location || info?.device) {
@@ -312,23 +324,7 @@ function isValidScreenName(screenName) {
  * @returns {boolean} - True if inside a quote tweet
  */
 function isInsideQuoteTweet(element, tweet = element.closest(SELECTORS.TWEET)) {
-    // Get the tweet article
-    if (!tweet) return false;
-
-    // Walk up from the element to the tweet article
-    // If we encounter a quote card container, this is a quoted user
-    let current = element.parentElement;
-    while (current && current !== tweet) {
-        // Quote tweet cards are clickable containers with role="link" and tabindex="0"
-        // They contain the quoted tweet's content including the username
-        if (current.getAttribute('role') === 'link' &&
-            current.getAttribute('tabindex') === '0') {
-            return true;
-        }
-        current = current.parentElement;
-    }
-
-    return false;
+    return quoteCardOf(element, tweet) !== null;
 }
 
 /**
@@ -362,10 +358,11 @@ function getMainTweetLanguage(tweet) {
  * @returns {string}
  */
 function getMainAuthorScreenName(tweet) {
-    const els = tweet.querySelectorAll('[data-x-screen-name]');
+    const els = tweet.querySelectorAll(`${SELECTORS.USERNAME}, [data-x-screen-name]`);
     for (const el of els) {
-        if (!isInsideQuoteTweet(el, tweet)) {
-            return (el.dataset.xScreenName || '').toLowerCase();
+        if (el.closest(SELECTORS.TWEET) === tweet && !isInsideQuoteTweet(el, tweet)) {
+            const author = el.dataset.xScreenName || extractUsername(el);
+            if (isValidScreenName(author)) return author.toLowerCase();
         }
     }
     return '';
@@ -380,6 +377,151 @@ function getMainAuthorScreenName(tweet) {
  */
 function isMainAuthorExempt(tweet, allowedUsers, settings) {
     return isAuthorExempt(getMainAuthorScreenName(tweet), allowedUsers, settings);
+}
+
+let relatedInfoSnapshot = null;
+
+function knownAuthorInfo(screenName) {
+    if (!screenName) return null;
+    const key = screenName.toLowerCase();
+    if (relatedInfoSnapshot) return relatedInfoSnapshot.get(key) || null;
+    const direct = userInfoCache.get(screenName) || userInfoCache.get(key);
+    if (direct) return direct;
+    for (const [name, info] of userInfoCache.entries()) {
+        if (name.toLowerCase() === key) return info;
+    }
+    return null;
+}
+
+function relatedVerdict(reasons, location) {
+    return {
+        reasons, location,
+        labels: reasons.map(reason => {
+            const label = BLOCK_REASON_LABELS[reason] || reason;
+            return (reason === 'country' || reason === 'region') && location ? `${label}: ${location}` : label;
+        })
+    };
+}
+
+/** Re-evaluate observed parent facts against current rules, never historical statistics. */
+function knownPostVerdict(record, filters) {
+    const screenName = record.author;
+    const { settings, blockedCountries, blockedRegions, blockedTags, blockedBioTags,
+        blockedLinks, blockedPcf, blockedAffiliations, blockedLanguages, allowedUsers } = filters;
+    if (screenName && isAuthorExempt(screenName, allowedUsers, settings)) return relatedVerdict([]);
+    const info = knownAuthorInfo(screenName);
+    const location = effectiveCountry(info, settings.flagFromDevice);
+    const country = canonicalCountry(location);
+    const profile = settings.profileEnrichment === false ? null : getProfile(screenName);
+    const labels = record.accountLabels || [];
+    const isLabelBlocked = [...(blockedPcf || [])].some(value => value === GOVERNMENT_LABEL
+        ? labels.includes(GOVERNMENT_LABEL)
+        : profile?.pcf ? profile.pcf === value : labels.some(label => label.includes(value)));
+    const reasons = resolveBlockReasons({
+        isExempt: false,
+        isBlockedCountry: country !== '' && blockedCountries?.has(country),
+        isBlockedRegion: country !== '' && blockedRegions?.has(country),
+        isTagBlocked: hasBlockedTag(record.displayName, blockedTags),
+        isBioBlocked: hasBlockedBio(profile, blockedBioTags, settings),
+        isLinkBlocked: hasBlockedLink(profile, blockedLinks, settings),
+        isLabelBlocked,
+        isAffiliationBlocked: hasBlockedAffiliation(info?.meta, blockedAffiliations),
+        accountCountReasons: screenName ? resolveAccountCountReasons(screenName, profile, settings, record.displayName) : []
+    });
+    if (info?.locationAccurate === false && settings.showVpnUsers === false) reasons.push('vpn');
+    const language = record.language?.split('-')[0];
+    if (language && language !== 'und' && blockedLanguages?.has(language)) reasons.push('language');
+    return relatedVerdict(reasons, location);
+}
+
+function ownTextLanguage(scope, article, card = null) {
+    for (const text of scope.querySelectorAll('[data-testid="tweetText"]')) {
+        if (text.closest(SELECTORS.TWEET) !== article || quoteCardOf(text, article) !== card) continue;
+        return text.getAttribute('lang')?.toLowerCase();
+    }
+    return undefined;
+}
+
+function renderedPostRecord(element, article) {
+    const card = quoteCardOf(element, article);
+    const id = card ? quotedPostId(card) : ownPostId(article);
+    if (!id) return null;
+    const author = element.dataset.xScreenName || extractUsername(element);
+    if (!isValidScreenName(author)) return null;
+    const labels = [...(getAccountTypeTokens(element, article) || [])];
+    if (hasGovernmentBadge(element)) labels.push(GOVERNMENT_LABEL);
+    const record = {
+        id, author, displayName: extractDisplayName(element, false, author),
+        accountLabels: labels.slice(0, 8),
+        language: ownTextLanguage(card || article, article, card)
+    };
+    // Only a quote's own timestamp establishes this edge. Media/text links and
+    // descendant quotes must not stand in for the direct quoted post.
+    const directQuotes = Array.from((card || article).querySelectorAll(QUOTE_CARD_SELECTOR))
+        .filter(quote => quote.closest(SELECTORS.TWEET) === article && quoteCardOf(quote, article) === card);
+    if (directQuotes.length === 1) {
+        const quoteId = quotedPostId(directQuotes[0]);
+        if (quoteId) {
+            record.quoteId = quoteId;
+        }
+    }
+    return record;
+}
+
+/** DOM quotes can be evaluated even when X does not render a quote permalink. */
+function renderedQuoteVerdicts(article, filters) {
+    const verdicts = [];
+    for (const element of article.querySelectorAll(SELECTORS.USERNAME)) {
+        const card = quoteCardOf(element, article);
+        if (!card || element.closest(SELECTORS.TWEET) !== article) continue;
+        const author = element.dataset.xScreenName || extractUsername(element);
+        if (!isValidScreenName(author)) continue;
+        const info = knownAuthorInfo(author);
+        const state = resolveAuthorBlockState(element, author, info, filters, article, false);
+        const reasons = [...state.reasons];
+        if (!isAuthorExempt(author, filters.allowedUsers, filters.settings)) {
+            if (info?.locationAccurate === false && filters.settings.showVpnUsers === false) reasons.push('vpn');
+            const language = ownTextLanguage(card, article, card)?.split('-')[0];
+            if (language && language !== 'und' && filters.blockedLanguages?.has(language)) {
+                reasons.push('language');
+            }
+        }
+        if (reasons.length) {
+            verdicts.push(relatedVerdict(reasons,
+                effectiveCountry(info, filters.settings.flagFromDevice) || element.dataset.xCountry));
+        }
+    }
+    return verdicts;
+}
+
+const relatedPosts = createRelatedPostController({
+    getAuthorVerdict: knownPostVerdict,
+    getQuoteVerdicts: renderedQuoteVerdicts,
+    getMainAuthor: getMainAuthorScreenName,
+    isExempt: (article, filters) => isFocalTweet(article) ||
+        isMainAuthorExempt(article, filters.allowedUsers, filters.settings),
+    onChange: article => filterStatisticsReporter?.schedule(article)
+});
+
+function syncRelatedPosts(filters, articles = document.querySelectorAll(SELECTORS.TWEET)) {
+    if (filters.settings.hideRelatedPosts !== true) {
+        relatedPosts.reset();
+        return;
+    }
+    relatedInfoSnapshot = new Map([...userInfoCache.entries()].map(([name, info]) => [name.toLowerCase(), info]));
+    try {
+        // Observe all current rows before resolving children; parent DOM order must not matter.
+        for (const article of articles) {
+            for (const element of article.querySelectorAll(SELECTORS.USERNAME)) {
+                if (element.closest(SELECTORS.TWEET) !== article) continue;
+                const record = renderedPostRecord(element, article);
+                if (record) rememberPostRelation(record);
+            }
+        }
+        for (const article of articles) relatedPosts.sync(article, filters);
+    } finally {
+        relatedInfoSnapshot = null;
+    }
 }
 
 /**
@@ -405,7 +547,8 @@ function applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers) {
     }
 
     if (blocked) {
-        tweet.dataset.xLangBlock = settings.highlightBlockedTweets === true || isFocalTweet(tweet)
+        tweet.dataset.xLangBlock = settings.highlightBlockedTweets === true || isFocalTweet(tweet) ||
+            tweet.dataset.xRelatedBlock === 'shown'
             ? 'highlight' : 'hide';
     } else if (tweet.dataset.xLangBlock) {
         delete tweet.dataset.xLangBlock;
@@ -683,10 +826,11 @@ const ACCOUNT_TYPE_MAX_ANCESTORS = 5;
  * First account-type label node inside `scope`, skipping any that belongs to a quoted
  * account when `tweetForQuoteCheck` is supplied.
  */
-function firstAccountTypeNode(scope, tweetForQuoteCheck) {
+function firstAccountTypeNode(scope, tweetForQuoteCheck, card = null) {
     const nodes = scope.querySelectorAll(ACCOUNT_TYPE_SELECTOR);
     for (const node of nodes) {
-        if (tweetForQuoteCheck && isInsideQuoteTweet(node, tweetForQuoteCheck)) continue;
+        if (tweetForQuoteCheck && (node.closest(SELECTORS.TWEET) !== tweetForQuoteCheck ||
+            quoteCardOf(node, tweetForQuoteCheck) !== card)) continue;
         return node;
     }
     return null;
@@ -723,8 +867,8 @@ function findAccountTypeNode(element, tweet) {
     // A quoted account's label lives inside the quote card and must not be read as the
     // main author's (and vice versa) — same separation as the rest of the quote handling.
     if (isInsideQuoteTweet(element, tweet)) {
-        const card = element.closest(QUOTE_CARD_SELECTOR);
-        return card ? firstAccountTypeNode(card, null) : null;
+        const card = quoteCardOf(element, tweet);
+        return card ? firstAccountTypeNode(card, tweet, card) : null;
     }
 
     if (tweet) return firstAccountTypeNode(tweet, tweet);
@@ -1577,8 +1721,12 @@ export function resetProcessedElements(filters) {
         if (el.dataset.xQuoteBlock !== 'shown') delete el.dataset.xQuoteBlock;
         delete el.dataset.xQuoteReason;
     });
+    relatedPosts.reset({ preserveReveals: filters?.settings?.enabled !== false && filters?.settings?.hideRelatedPosts === true });
+    document.querySelectorAll('[data-x-quote-state]').forEach(el => { delete el.dataset.xQuoteState; });
     document.querySelectorAll(`.${QUOTE_PLACEHOLDER_CLASS}`).forEach(el => el.remove());
     quotePlaceholders = new WeakMap();
+    quoteCards = new WeakMap();
+    quoteOwners = new WeakMap();
 
     // Waiting rows skip the visibility queue, but their already-known filters
     // must still reflect settings changes. This pass performs no lookup.
@@ -1697,6 +1845,9 @@ function runUpdateBlockedTweets({
     });
     // Recover only after both author and language verdicts have settled.
     for (const element of newlyVisible) recoverVisibleElement(element, filters);
+    // A changed parent can affect a different author's reply/quote, so this
+    // pass cannot use the author-only scope of profile/follow-status updates.
+    syncRelatedPosts(filters);
 }
 
 /** Resume work that a previous hide verdict short-circuited before badge creation. */
@@ -1724,9 +1875,6 @@ function recoverVisibleElement(element, filters) {
 // QUOTE REVEAL (issue #32)
 // ============================================
 
-/** Quote cards are clickable containers — see isInsideQuoteTweet. */
-const QUOTE_CARD_SELECTOR = 'div[role="link"][tabindex="0"]';
-
 let quoteRevealBound = false;
 
 /**
@@ -1740,19 +1888,24 @@ export function setupQuoteReveal() {
     quoteRevealBound = true;
 
     const reveal = event => {
+        if (relatedPosts.reveal(event)) {
+            if (latestFilterSnapshot) updateBlockedTweets(latestFilterSnapshot);
+            return;
+        }
         const target = event.target;
         if (!target || typeof target.closest !== 'function') return;
 
         const card = target.closest(QUOTE_CARD_SELECTOR);
-        if (!card) return;
+        if (!card || card.dataset.xQuoteState !== 'hide') return;
 
-        const marker = card.querySelector('[data-x-quote-block="hide"]');
-        if (!marker) return;
+        const marker = quoteOwners.get(card);
+        if (!marker || marker.dataset.xQuoteBlock !== 'hide' || quoteCardOf(marker) !== card) return;
 
         // Swallow the interaction before X navigates to the quoted post.
         event.preventDefault();
         event.stopPropagation();
         marker.dataset.xQuoteBlock = 'shown';
+        card.dataset.xQuoteState = 'shown';
         const hadFocus = card.contains(document.activeElement);
         clearQuotePlaceholder(marker);
         if (hadFocus) card.focus({ preventScroll: true });
@@ -1785,7 +1938,7 @@ function releaseElementMarkers(element, currentScreenName) {
     delete element.dataset.xBlock;
     delete element.dataset.xQuoteBlock;
     delete element.dataset.xQuoteReason;
-    clearQuotePlaceholder(element);
+    releaseQuoteCard(element);
     if (isValidScreenName(currentScreenName)) element.dataset.xScreenName = currentScreenName;
 }
 
@@ -1814,7 +1967,7 @@ export function refreshPostContext(filters, processElementSafe) {
             for (const element of tweet.querySelectorAll('[data-x-quote-block]')) {
                 delete element.dataset.xQuoteBlock;
                 delete element.dataset.xQuoteReason;
-                clearQuotePlaceholder(element);
+                releaseQuoteCard(element);
             }
         }
 
@@ -1972,8 +2125,13 @@ export function cleanupObservers() {
     elementQuoteContexts = new WeakMap();
     displayNameCounts = new WeakMap();
     postContexts = new WeakMap();
+    relatedPosts.reset();
+    relatedInfoSnapshot = null;
+    document.querySelectorAll('[data-x-quote-state]').forEach(el => { delete el.dataset.xQuoteState; });
     document.querySelectorAll(`.${QUOTE_PLACEHOLDER_CLASS}`).forEach(el => el.remove());
     quotePlaceholders = new WeakMap();
+    quoteCards = new WeakMap();
+    quoteOwners = new WeakMap();
     latestFilterSnapshot = null;
     processingQueue.clear();
     userInfoCache.clear();

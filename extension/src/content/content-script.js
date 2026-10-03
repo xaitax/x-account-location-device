@@ -39,6 +39,10 @@ import { setProfile, getProfile, clearProfiles, profileCount } from './profile-c
 import { PROFILE_LIMITS, profilePatchFromWire } from '../shared/profile-data.js';
 import { FOLLOWING_LIMITS, readFollowingViewer } from '../shared/following-data.js';
 import { configureFollowing, getFollowingContext, mergeFollowingBatch, clearFollowing } from './following-cache.js';
+import { POST_RELATION_LIMITS } from '../shared/post-relations.js';
+import {
+    configurePostRelations, getPostRelationsContext, mergePostRelationsBatch, clearPostRelations
+} from './post-relations-cache.js';
 import { syncModalState, syncModalSettings, closeModal } from './modal.js';
 import { cleanupEvidenceCapture } from './evidence-capture.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
@@ -267,12 +271,51 @@ function syncFollowingSetting(force = false) {
     const previous = getFollowingContext();
     const context = configureFollowing(enabled, enabled ? readFollowingViewer() : null);
     const changed = previous.generation !== context.generation;
-    syncFollowingMonitor(enabled);
+    syncFollowingMonitor(shouldMonitorViewer());
     if (changed || force) {
         window.dispatchEvent(new CustomEvent('x-posed-set-following', { detail: JSON.stringify(context) }));
         // Clearing the old viewer must also remove any already-rendered exemptions.
         if (changed && isEnabled && !isCleanedUp) updateBlockedTweets(currentFilters());
     }
+}
+
+/** One existing identity monitor serves both independent passive-data preferences. */
+function shouldMonitorViewer() {
+    return settingsLoaded && isEnabled && !isCleanedUp &&
+        (settings.alwaysShowFollowing === true || settings.hideRelatedPosts === true);
+}
+
+/** Public post links stay session-only and cannot inherit a former viewer's context. */
+function syncPostRelationsSetting(force = false) {
+    const enabled = settingsLoaded && isEnabled && !isCleanedUp && settings.hideRelatedPosts === true;
+    const previous = getPostRelationsContext();
+    const context = configurePostRelations(enabled, enabled ? readFollowingViewer() : null);
+    const changed = previous.generation !== context.generation;
+    syncFollowingMonitor(shouldMonitorViewer());
+    if (changed || force) {
+        // The page transport needs only the preference and generation, not viewer identity.
+        window.dispatchEvent(new CustomEvent('x-posed-set-post-relations', {
+            detail: JSON.stringify({ enabled: context.enabled, generation: context.generation })
+        }));
+        if (changed && isEnabled && !isCleanedUp) updateBlockedTweets(currentFilters());
+    }
+}
+
+function setupPostRelationsListener(current) {
+    current.listen(window, 'x-posed-page-ready', () => syncPostRelationsSetting(true));
+    current.listen(window, 'x-posed-post-relations', event => {
+        if (current.disposed || !settingsLoaded || !isEnabled || isCleanedUp || settings.hideRelatedPosts !== true) return;
+        syncPostRelationsSetting();
+        // Decode only bounded primitive batches, then validate/cache by generation.
+        if (typeof event.detail !== 'string' || event.detail.length > POST_RELATION_LIMITS.MAX_RELAY_LENGTH) return;
+        let batch;
+        try { batch = JSON.parse(event.detail); } catch { return; }
+        const changed = mergePostRelationsBatch(batch);
+        // One parent can affect multiple authors and deeper dependants. The observer
+        // coalesces bursts, so this must be a full related-verdict pass, not an ID filter.
+        if (changed.size) updateBlockedTweets(currentFilters());
+    });
+    current.add(clearPostRelations);
 }
 
 function setupFollowingListener(current) {
@@ -281,6 +324,7 @@ function setupFollowingListener(current) {
         if (current.disposed || !settingsLoaded || !isEnabled || settings.alwaysShowFollowing !== true) return;
         clearFollowing();
         syncFollowingSetting(true);
+        syncPostRelationsSetting();
         // Identity may now be unknown, leaving configureFollowing disabled. Even
         // then, clear exemptions already painted for the former viewer.
         updateBlockedTweets(currentFilters());
@@ -298,7 +342,10 @@ function setupFollowingListener(current) {
     // Sidebar changes cover the DOM identity fallback. Cookie/account changes can
     // also happen in another tab, without changing this tab's sidebar at all.
     const checkViewer = () => {
-        if (!current.disposed && settings.alwaysShowFollowing === true) syncFollowingSetting();
+        if (!current.disposed && shouldMonitorViewer()) {
+            syncFollowingSetting();
+            syncPostRelationsSetting();
+        }
     };
     const watchSidebar = new MutationObserver(checkViewer);
     current.listen(window, 'focus', checkViewer);
@@ -521,6 +568,7 @@ async function handleBackgroundMessage(type, payload, revision) {
             syncSidebarSettings(settings, revision);
             syncModalSettings(settings, revision);
             syncFollowingSetting();
+            syncPostRelationsSetting();
             
             if (!isEnabled) {
                 resetProcessedElements(currentFilters());
@@ -625,6 +673,7 @@ async function initialize() {
         setupPageScriptListener(current);
         setupProfileListener(current);
         setupFollowingListener(current);
+        setupPostRelationsListener(current);
         setupBackgroundListener(current);
         setupAuthoritativeInfoListener(current);
         // "Click to show" on a collapsed quote card (issue #32). Must be bound in the
@@ -662,6 +711,7 @@ async function initialize() {
         // makes the persisted preference authoritative in either ordering.
         syncEnrichmentSetting();
         syncFollowingSetting(true);
+        syncPostRelationsSetting(true);
 
         createMemoizedFunctions(current);
         // The manifest is the sole production owner of content stylesheets.
@@ -752,6 +802,7 @@ function cleanup() {
     settingsLoaded = false;
     syncEnrichmentSetting();
     syncFollowingSetting(true);
+    syncPostRelationsSetting(true);
     session?.dispose();
 
     cleanupEvidenceCapture();

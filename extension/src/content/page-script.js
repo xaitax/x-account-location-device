@@ -11,6 +11,7 @@ import { PacedLookupQueue, readRateLimitReset } from '../shared/request-policy.j
 import { PROFILE_LIMITS, isProfileUsername, projectProfileUser, mergeProjectedProfile, profileSignature } from '../shared/profile-data.js';
 import { parseAccountResponse } from '../shared/account-response.js';
 import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowingViewer } from '../shared/following-data.js';
+import { POST_RELATION_LIMITS, collectPostRelations } from '../shared/post-relations.js';
 
 (function() {
     'use strict';
@@ -37,6 +38,8 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
     const EVENT_SET_ENRICHMENT = 'x-posed-set-enrichment';
     const EVENT_SET_FOLLOWING = 'x-posed-set-following';
     const EVENT_FOLLOWING_HARVESTED = 'x-posed-following';
+    const EVENT_SET_POST_RELATIONS = 'x-posed-set-post-relations';
+    const EVENT_POST_RELATIONS_HARVESTED = 'x-posed-post-relations';
     const API_PATTERN = /x\.com\/i\/api\/graphql/;
     const ABOUT_QUERY_ID = 'XRqGa7EeokUU5kppkh13EA';
     const lookupQueue = new PacedLookupQueue();
@@ -53,6 +56,24 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
     let followingContext = null;
     let followingSequence = 0;
     const followingMutations = new Map();
+    // Public post links are opt-in independently of profile text and viewer follows.
+    // The internal epoch also rejects traffic after a disable/re-enable that happens
+    // to reuse the same recipient generation.
+    let postRelationContext = null;
+    let postRelationEpoch = 0;
+
+    window.addEventListener(EVENT_SET_POST_RELATIONS, event => {
+        const previous = postRelationContext;
+        postRelationContext = null;
+        try {
+            const setting = JSON.parse(event.detail || '{}');
+            if (setting.enabled === true && Number.isSafeInteger(setting.generation) && setting.generation >= 0) {
+                if (!previous || previous.generation !== setting.generation) postRelationEpoch++;
+                postRelationContext = { generation: setting.generation, epoch: postRelationEpoch };
+            }
+        } catch { /* Invalid settings disable passive post harvesting. */ }
+        if (!postRelationContext) postRelationEpoch++;
+    });
 
     window.addEventListener(EVENT_SET_FOLLOWING, event => {
         const previousContext = followingContext;
@@ -99,6 +120,36 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
         if (!hasCurrentFollowingContext()) return null;
         const request = followingRequestKind(url, method);
         return request ? { ...followingContext, ...request, sequence: ++followingSequence } : null;
+    }
+
+    function snapshotPostRelationsRequest(url, method) {
+        if (!postRelationContext) return null;
+        const request = followingRequestKind(url, method);
+        return request?.kind === 'graphql' ? { ...postRelationContext, path: request.path } : null;
+    }
+
+    function postRelationsResponseMatches(snapshot, url, status) {
+        if (!snapshot || !postRelationContext || status < 200 || status >= 300 ||
+            snapshot.generation !== postRelationContext.generation || snapshot.epoch !== postRelationContext.epoch) return false;
+        const response = followingRequestKind(url);
+        return response?.kind === 'graphql' && response.path === snapshot.path;
+    }
+
+    function relayPostRelations(data, snapshot) {
+        if (!snapshot || !postRelationContext || snapshot.generation !== postRelationContext.generation ||
+            snapshot.epoch !== postRelationContext.epoch) return;
+        const posts = collectPostRelations(data);
+        for (let index = 0; index < posts.length; index += POST_RELATION_LIMITS.MAX_BATCH_ENTRIES) {
+            const detail = JSON.stringify({
+                generation: snapshot.generation,
+                posts: posts.slice(index, index + POST_RELATION_LIMITS.MAX_BATCH_ENTRIES)
+            });
+            if (!postRelationContext || snapshot.generation !== postRelationContext.generation ||
+                snapshot.epoch !== postRelationContext.epoch) return;
+            if (detail.length <= POST_RELATION_LIMITS.MAX_RELAY_LENGTH) {
+                window.dispatchEvent(new CustomEvent(EVENT_POST_RELATIONS_HARVESTED, { detail }));
+            }
+        }
     }
 
     function isCurrentFollowingRequest(snapshot) {
@@ -411,7 +462,7 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
     const responseContexts = new WeakMap();
 
     // via is one of 'json' | 'fetch' | 'xhr' — in practice always 'xhr', see the fetch wrapper.
-    function tapPayload(url, data, via, followingSnapshot = null) {
+    function tapPayload(url, data, via, followingSnapshot = null, postRelationsSnapshot = null) {
         if (via === 'xhr') {
             harvestStats.xhrTaps++;
         } else if (via === 'json') {
@@ -420,6 +471,11 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
             harvestStats.fetchTaps++;
         }
         harvestStats.lastUrl = url;
+        try {
+            if (postRelationsSnapshot) relayPostRelations(data, postRelationsSnapshot);
+        } catch (e) {
+            logError('post relationship harvest', e);
+        }
         try {
             if (followingSnapshot?.kind === 'mutation') {
                 harvestFollowingMutation(data, followingSnapshot);
@@ -436,8 +492,9 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
         if (context) context.tapped = true;
         const url = response.url || '';
         const snapshot = followingResponseMatches(context?.following, url, response.status) ? context.following : null;
+        const postSnapshot = postRelationsResponseMatches(context?.postRelations, url, response.status) ? context.postRelations : null;
         // Never route a rejected friendship response through the profile walker.
-        if (snapshot || (enrichmentEnabled && API_PATTERN.test(url))) tapPayload(url, data, via, snapshot);
+        if (snapshot || postSnapshot || (enrichmentEnabled && API_PATTERN.test(url))) tapPayload(url, data, via, snapshot, postSnapshot);
     }
 
     const originalResponseJson = Response.prototype.json;
@@ -447,7 +504,8 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
             const url = this.url || '';
             const context = responseContexts.get(this);
             if ((enrichmentEnabled && API_PATTERN.test(url)) ||
-                followingResponseMatches(context?.following, url, this.status)) {
+                followingResponseMatches(context?.following, url, this.status) ||
+                postRelationsResponseMatches(context?.postRelations, url, this.status)) {
                 promise
                     .then(data => tapResponsePayload(this, data, 'json', context))
                     // X owns the real error handling for this response; we must not turn our
@@ -467,10 +525,12 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
     window.fetch = function(input, init) {
         let isGraphql = false;
         let followingSnapshot = null;
+        let postRelationsSnapshot = null;
         try {
             const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url;
             isGraphql = Boolean(url) && API_PATTERN.test(url);
             followingSnapshot = snapshotFollowingRequest(url, init?.method || input?.method || 'GET');
+            postRelationsSnapshot = snapshotPostRelationsRequest(url, init?.method || input?.method || 'GET');
 
             if (isGraphql) {
                 harvestStats.graphqlFetches++;
@@ -491,19 +551,21 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
         // Gated on the REQUEST url so the common case (every non-GraphQL fetch X makes, of
         // which there are many) doesn't pay for an extra promise link it can never use.
         try {
-            if ((!enrichmentEnabled || !isGraphql) && !followingSnapshot) return result;
+            if ((!enrichmentEnabled || !isGraphql) && !followingSnapshot && !postRelationsSnapshot) return result;
 
             return result.then(response => {
                 try {
-                    const context = { following: followingSnapshot, tapped: false };
+                    const context = { following: followingSnapshot, postRelations: postRelationsSnapshot, tapped: false };
                     responseContexts.set(response, context);
                     if ((!enrichmentEnabled || !isGraphql) &&
-                        !followingResponseMatches(followingSnapshot, response.url, response.status)) return response;
+                        !followingResponseMatches(followingSnapshot, response.url, response.status) &&
+                        !postRelationsResponseMatches(postRelationsSnapshot, response.url, response.status)) return response;
                     const clone = response.clone();
                     // One tick, so the .json() tap gets first refusal on this response.
                     Promise.resolve().then(() => {
                         if (context.tapped || ((!enrichmentEnabled || !isGraphql) &&
-                            !followingResponseMatches(followingSnapshot, response.url, response.status))) return;
+                            !followingResponseMatches(followingSnapshot, response.url, response.status) &&
+                            !postRelationsResponseMatches(postRelationsSnapshot, response.url, response.status))) return;
                         // Use the original reader so the fallback cannot tap itself.
                         originalResponseJson.call(clone).then(data => {
                             tapResponsePayload(response, data, 'fetch', context);
@@ -556,6 +618,7 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
             const requestUrl = this._xPosedUrl;
             const isGraphql = requestUrl && API_PATTERN.test(requestUrl);
             const followingSnapshot = snapshotFollowingRequest(requestUrl, this._xPosedMethod);
+            const postRelationsSnapshot = snapshotPostRelationsRequest(requestUrl, this._xPosedMethod);
             if (isGraphql) {
                 harvestStats.graphqlXhrs++;
                 if (this._xPosedHeaders) sendHeaders(this._xPosedHeaders);
@@ -563,14 +626,15 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
 
             // One listener per request, also removed on errors/aborts. Reused XHRs
             // cannot inherit an old viewer context or replay a previous response.
-            if ((enrichmentEnabled && isGraphql) || followingSnapshot) {
-                const request = { following: followingSnapshot };
+            if ((enrichmentEnabled && isGraphql) || followingSnapshot || postRelationsSnapshot) {
+                const request = { following: followingSnapshot, postRelations: postRelationsSnapshot };
                 xhrRequests.set(this, request);
                 this.addEventListener('loadend', function () {
                     try {
                         if (xhrRequests.get(this) !== request) return;
                         const snapshot = followingResponseMatches(followingSnapshot, this.responseURL, this.status) ? followingSnapshot : null;
-                        if ((!enrichmentEnabled || !isGraphql) && !snapshot) return;
+                        const postSnapshot = postRelationsResponseMatches(postRelationsSnapshot, this.responseURL, this.status) ? postRelationsSnapshot : null;
+                        if ((!enrichmentEnabled || !isGraphql) && !snapshot && !postSnapshot) return;
                         const type = this.responseType;
                         // JSON is already parsed; ignore blobs and cap relationship-only
                         // text parsing so a large response cannot pin the main thread.
@@ -583,7 +647,7 @@ import { FOLLOWING_LIMITS, isFollowingHandle, projectFollowingUser, readFollowin
                         } else return;
                         if (!data) return;
 
-                        tapPayload(requestUrl, data, 'xhr', snapshot);
+                        tapPayload(requestUrl, data, 'xhr', snapshot, postSnapshot);
 
                         harvestStats.xhrResponseType = type || '(default)';
                         harvestStats.lastHarvestMs = Math.round(performance.now() - started);

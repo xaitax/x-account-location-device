@@ -8,6 +8,16 @@ const X_HOSTS = new Set([
     'twitter.com', 'www.twitter.com', 'mobile.twitter.com'
 ]);
 const STATUS_PATH = /^\/(?:[a-zA-Z0-9_]{1,15}\/status|i\/web\/status)\/([1-9]\d*)(?:\/(?:photo|video)\/[1-9]\d*)?\/?$/;
+export const QUOTE_CARD_SELECTOR = '[data-testid="quoteTweet"], [role="link"][tabindex="0"]';
+
+/** The nearest quote owns its verdict; containing quotes must not inherit it. */
+export function quoteCardOf(element, article = element?.closest('article[data-testid="tweet"]')) {
+    if (!article) return null;
+    for (let node = element?.parentElement; node && node !== article; node = node.parentElement) {
+        if (node.matches(QUOTE_CARD_SELECTOR)) return node;
+    }
+    return null;
+}
 
 /**
  * Read an exact post ID without losing precision. Only post and media routes

@@ -627,7 +627,7 @@
 article[data-testid="tweet"]:has([data-x-block="highlight"]),
 [data-testid="UserCell"][data-x-block="highlight"],
 article[data-testid="tweet"][data-x-lang-block="highlight"],
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="highlight"]) {
+article[data-testid="tweet"] [data-x-quote-state="highlight"] {
     background-color: var(--xp-filter-surface) !important;
 }
 .x-tweet-highlighted,
@@ -639,12 +639,12 @@ article[data-testid="tweet"][data-x-lang-block="highlight"] {
 /* Quote media reaches the frame edge and would cover an inset shadow on the card.
    Paint the rail above it instead, without intercepting clicks or resizing content.
    Isolation keeps the rail's stacking layer inside this quote. */
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="highlight"]) {
+article[data-testid="tweet"] [data-x-quote-state="highlight"] {
     position: relative;
     isolation: isolate;
     border-radius: 0 !important;
 }
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="highlight"])::after {
+article[data-testid="tweet"] [data-x-quote-state="highlight"]::after {
     content: '';
     position: absolute;
     top: 0;
@@ -662,7 +662,8 @@ article[data-testid="tweet"]:has([data-x-block="hide"]) {
 /* Blocked QUOTED posts (issue #32): a quote card sits inside someone else's tweet, so
    a blocked quoted author must never hide the row. The verdict lands on its own marker
    (data-x-quote-block). Only our reveal button stays visible; X retains its content. */
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"]) {
+article[data-testid="tweet"] [data-x-quote-state="hide"],
+article[data-testid="tweet"][data-x-related-block="hide"] {
     display: block !important;
     container: xp-hidden-quote / inline-size;
     min-height: 44px;
@@ -672,7 +673,8 @@ article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-bl
     background: transparent !important;
 }
 /* Collapse the card's real content (avatar, name, text, media) */
-article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-block="hide"]) > :not(.x-quote-placeholder) {
+article[data-testid="tweet"] [data-x-quote-state="hide"] > :not(.x-quote-placeholder),
+article[data-testid="tweet"][data-x-related-block="hide"] > :not(.x-related-placeholder) {
     display: none !important;
 }
 .x-quote-placeholder {
@@ -726,8 +728,12 @@ article[data-testid="tweet"] div[role="link"][tabindex="0"]:has([data-x-quote-bl
 }
 /* Language blocking (issue #25): a separate article-level marker so it composes with
    the per-author data-x-block above — if either says hide, the row is hidden. */
-article[data-testid="tweet"][data-x-lang-block="hide"] {
+article[data-testid="tweet"][data-x-lang-block="hide"]:not([data-x-related-block="hide"]) {
     display: none !important;
+}
+/* An explicit Show post action applies only to this confirmed rendered post. */
+article[data-testid="tweet"][data-x-related-block="shown"] {
+    display: block !important;
 }
 
 /* Shared base button classes are still used by the hovercard's Always Show action. */

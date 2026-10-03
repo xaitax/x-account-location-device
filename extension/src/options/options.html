@@ -15,32 +15,28 @@
         <div class="whats-new-banner" id="whats-new-banner" role="region" aria-labelledby="whats-new-title" style="display: none;">
             <button type="button" class="whats-new-close" id="whats-new-close" aria-label="Dismiss what's new" data-settings-icon="close"></button>
             <div class="whats-new-content">
-                <h2 id="whats-new-title">What's new in X-Posed <span data-release-version>4.1.0</span></h2>
+                <h2 id="whats-new-title">What's new in X-Posed <span data-release-version>4.1.1</span></h2>
                 <p class="whats-new-subtitle">More control. Less clutter.</p>
 
-                <div class="whats-new-features">
-                    <article class="whats-new-feature">
-                        <h3>Badges, your way</h3>
-                        <p>Three sizes, an icons-only look, and a live preview to find your fit.</p>
-                        <div class="whats-new-badge-samples" role="group" aria-label="Badge size examples">
-                            <div><span class="x-info-badge" data-release-badge-size="small"></span><span>Small</span></div>
-                            <div><span class="x-info-badge" data-release-badge-size="medium"></span><span>Medium</span></div>
-                            <div><span class="x-info-badge" data-release-badge-size="large"></span><span>Large</span></div>
+                <section class="whats-new-related" aria-labelledby="whats-new-related-title">
+                    <div class="whats-new-feature whats-new-related-copy">
+                        <span class="whats-new-requested">Highly requested</span>
+                        <h3 id="whats-new-related-title">Hide replies and quotes, too</h3>
+                        <p>Collapse replies and quotes of filtered posts, even when the original is only highlighted. Each hidden post shows why and can be revealed with a click.</p>
+                        <p class="whats-new-related-note">Off by default. Always Show still takes priority.</p>
+                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="behavior" data-focus-id="x-g-behavior-hideRelatedPosts">Try related-post filtering <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
+                    </div>
+                    <figure class="whats-new-related-preview" id="release-related-preview">
+                        <figcaption id="release-related-caption">Try the preview · example data</figcaption>
+                        <div id="release-related-placeholder"></div>
+                        <div class="whats-new-example" id="release-related-example" hidden>
+                            <div class="whats-new-example-author"><strong>Example account</strong> <span>@example</span></div>
+                            <p>Here’s a quote of a post that matches your filters.</p>
+                            <div class="whats-new-example-source"><span>Country: Netherlands</span><p>A filtered source post.</p></div>
+                            <button type="button" class="whats-new-preview-reset" id="release-related-reset">Reset preview</button>
                         </div>
-                        <a href="#panel-display" class="whats-new-feature-link whats-new-open" data-target="panel-display" data-focus-id="opt-badge-size">Customize badges <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
-                    </article>
-                    <article class="whats-new-feature">
-                        <h3>More ways to filter</h3>
-                        <p>Filter by accounts followed, total posts, or digits in handles and display names.</p>
-                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="add" data-blocking-editor="accountCounts">Explore filters <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
-                    </article>
-                    <article class="whats-new-feature">
-                        <h3>Keep the people you follow</h3>
-                        <p>Let followed accounts bypass your filters when X confirms their follow status. Just enable Always Show.</p>
-                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="allowed">Always Show <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
-                    </article>
-                </div>
-                <p class="whats-new-improvements"><strong>And plenty of bug fixes</strong> for a smoother everyday experience.</p>
+                    </figure>
+                </section>
                 <div class="whats-new-actions">
                     <a href="#panel-general" class="btn btn-primary whats-new-open" data-target="panel-general">Continue to settings</a>
                     <a href="https://github.com/xaitax/x-account-location-device/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer" class="whats-new-changelog">Full changelog &amp; credits</a>
@@ -451,7 +447,7 @@
                 </h2>
 
                 <div class="about-info">
-                    <p><strong>X-Posed</strong> v<span id="version">4.1.0</span></p>
+                    <p><strong>X-Posed</strong> v<span id="version">4.1.1</span></p>
                     <p class="text-muted">See where X users are located and what devices they use.</p>
                     
                     <div class="about-links">

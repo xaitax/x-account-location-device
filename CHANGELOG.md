@@ -2,6 +2,14 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [4.1.1] - 2026-10-03
+
+A highly requested option to hide replies and quotes of filtered posts, with clearer controls and more reliable quote filtering.
+
+- **Hide replies and quotes:** an optional, default-off switch in **Blocking → Behavior** collapses replies and quotes of known filter matches, even in Highlight mode. A reason and **Show post** button keep them easy to reveal. Always Show exemptions still apply; unknown sources keep normal filtering. No extra requests.
+- **Nested quote fix:** highlights and hidden-quote controls stay on the matching quote instead of affecting surrounding quote cards ([#73](https://github.com/xaitax/x-account-location-device/issues/73)).
+- **Simpler Behavior page:** familiar toggles grouped into **Post filtering** and **Data sources**, with shorter explanations and consistent styling.
+
 ## [4.1.0] - 2026-09-29
 
 More control over your feed, customizable badges, and plenty of bug fixes for a smoother everyday experience.

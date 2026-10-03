@@ -218,6 +218,7 @@ export const DEFAULT_SETTINGS = {
     showCaptureButton: true,  // The badge "Share" button (capture + quote/reply/post to X)
     showSidebarBlockerLink: true,
     alwaysShowFollowing: false,  // Exempt accounts X confirms this viewer follows; relationship data stays in page-session memory.
+    hideRelatedPosts: false,  // Collapse replies and quotes when their source is known to match a filter, including highlighted sources.
     openChangelogOnUpdate: true,  // Open the "What's New"/changelog tab after a major/minor update (issue #24)
     debugMode: false,
     // Read the profile data X already sends with the timeline (bio, account label, follower

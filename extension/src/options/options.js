@@ -6,6 +6,7 @@ import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, CACHE_CONFIG } from '../shared/constants.js';
 import { dialogIcon } from '../content/dialog-icons.js';
 import { deviceIcon, flagImage, glyph } from '../content/icons.js';
+import { createFilterPlaceholder, updateFilterPlaceholder } from '../content/filter-placeholder.js';
 import { BADGE_SIZES, normalizeBadgeSize, applyBadgeAppearance } from '../shared/badge-appearance.js';
 import { mountStatistics } from './statistics.js';
 import { mountBlockingSettings } from '../content/graphite-dialog.js';
@@ -80,7 +81,7 @@ async function initialize() {
     }
     elements.version.textContent = VERSION;
     for (const label of document.querySelectorAll('[data-release-version]')) label.textContent = VERSION;
-    renderReleaseBadgeSamples();
+    renderReleaseRelatedPreview();
     const cacheDays = Math.round(CACHE_CONFIG.EXPIRY_MS / (24 * 60 * 60 * 1000));
     document.getElementById('cache-expiry').textContent = `Up to ${cacheDays} days`;
     for (const [id] of TOGGLES) document.getElementById(id).disabled = true;
@@ -152,8 +153,9 @@ function setupNav() {
             if (item.classList.contains('whats-new-open')) {
                 const { target, blockingTab, blockingEditor: editor, focusId } = item.dataset;
                 if (target === 'panel-blocking' && (blockingTab === 'allowed' ||
+                    (blockingTab === 'behavior' && focusId === 'x-g-behavior-hideRelatedPosts') ||
                     (blockingTab === 'add' && editor === 'accountCounts'))) {
-                    pendingReleaseNavigation = { target, tab: blockingTab, editor: blockingTab === 'add' ? editor : null };
+                    pendingReleaseNavigation = { target, tab: blockingTab, editor: blockingTab === 'add' ? editor : null, focusId };
                 } else if (target === 'panel-display' && focusId === 'opt-badge-size') {
                     pendingReleaseNavigation = { target, focusId };
                 }
@@ -180,6 +182,7 @@ function applyPendingReleaseNavigation() {
         if (!blockingEditor) return false;
         pendingReleaseNavigation = null;
         blockingEditor.navigate(destination.tab, destination.editor);
+        if (destination.focusId) document.getElementById(destination.focusId)?.focus({ preventScroll: true });
         return true;
     }
     const control = document.getElementById(destination.focusId);
@@ -189,26 +192,33 @@ function applyPendingReleaseNavigation() {
     return true;
 }
 
-/** Fixed, decorative size examples. They do not depend on the user's preferences. */
-function renderReleaseBadgeSamples() {
-    for (const badge of document.querySelectorAll('[data-release-badge-size]')) {
-        const badgeSize = badge.dataset.releaseBadgeSize;
-        if (!BADGE_SIZES.includes(badgeSize)) continue;
-        const details = document.createElement('span');
-        details.className = 'x-badge-details';
-        for (const [className, artwork] of [
-            ['x-flag', flagImage('Switzerland')],
-            ['x-device', deviceIcon('Switzerland App Store')]
-        ]) {
-            const icon = document.createElement('span');
-            icon.className = className;
-            icon.append(artwork);
-            details.append(icon);
-        }
-        badge.replaceChildren(details);
-        badge.setAttribute('aria-hidden', 'true');
-        applyBadgeAppearance(badge, { badgeSize, showBadgeBackground: true });
-    }
+/** A local example using the real reveal-card markup, never the user's filters. */
+function renderReleaseRelatedPreview() {
+    const slot = document.getElementById('release-related-placeholder');
+    const example = document.getElementById('release-related-example');
+    const reset = document.getElementById('release-related-reset');
+    if (!slot || !example || !reset) return;
+    const reveal = createFilterPlaceholder({ title: 'Post hidden', action: 'Show post', related: true });
+    updateFilterPlaceholder(reveal, {
+        reasonText: 'Quotes a filtered post · Country: Netherlands',
+        description: 'Example quote hidden because its source matches a country filter.'
+    });
+    reveal.setAttribute('aria-controls', example.id);
+    reveal.setAttribute('aria-expanded', 'false');
+    reveal.setAttribute('aria-describedby', 'release-related-caption');
+    reveal.addEventListener('click', () => {
+        slot.hidden = true;
+        example.hidden = false;
+        reveal.setAttribute('aria-expanded', 'true');
+        reset.focus({ preventScroll: true });
+    });
+    reset.addEventListener('click', () => {
+        example.hidden = true;
+        slot.hidden = false;
+        reveal.setAttribute('aria-expanded', 'false');
+        reveal.focus({ preventScroll: true });
+    });
+    slot.replaceChildren(reveal);
 }
 
 function applySettingsToInputs() {

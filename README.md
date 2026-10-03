@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md">Version 4.1.0</a> ·
+  <a href="CHANGELOG.md">Version 4.1.1</a> ·
   <a href="#features">Features</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#filtering">Filtering</a> ·
@@ -41,7 +41,7 @@ X-Posed is a free, open-source browser extension for Chrome and Firefox. It brin
 
 Install the extension, reload X, and browse while signed in. Open an account badge for details, or choose **Manage filters** in the extension popup to configure your timeline.
 
-This README describes source version 4.1.0. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
+This README describes source version 4.1.1. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
 
 **iPhone and iPad:** a separate [X-Posed Location companion app](https://apps.apple.com/us/app/x-posed-location/id6755918713) offers username lookups. It is not the browser extension and does not provide the same timeline features.
 
@@ -55,11 +55,11 @@ This README describes source version 4.1.0. Browser-store updates roll out separ
 - **Consistent controls.** Light and dark themes, a compact popup, the optional Blocking link in X's sidebar, settings backups and a configurable Hide/Highlight keyboard shortcut.
 - **Community cache.** Reuse public account records shared by the community to reduce repeat X lookups. You can turn it off and continue using direct X lookups and your local cache.
 
-Version 4.1 adds activity and name-pattern filters, an option to always show accounts you follow, clearer account details and more reliable backups. Read the [changelog](CHANGELOG.md) for the release details.
+Version 4.1 adds activity and name-pattern filters, an option to always show accounts you follow, clearer account details and more reliable backups. Version 4.1.1 adds optional hiding of replies and quotes of filtered posts, plus nested-quote fixes and simpler Behavior controls. Read the [changelog](CHANGELOG.md) for the release details.
 
 ## Filtering
 
-Open **Manage filters** from the popup, **Settings → Blocking**, or the optional **Blocking** link in X's sidebar. Choose **Add filter**, select a type, and add your rules. Use **Saved filters** to search or remove them, **Always Show** for exceptions, and **Behavior** for data-source preferences.
+Open **Manage filters** from the popup, **Settings → Blocking**, or the optional **Blocking** link in X's sidebar. Choose **Add filter**, select a type, and add your rules. Use **Saved filters** to search or remove them, **Always Show** for exceptions, and **Behavior** for filtering preferences.
 
 Choose **Hide** to remove matching posts or **Highlight** to keep them readable. Saved changes recheck posts already on the page. A match on any applicable rule is enough.
 
@@ -78,10 +78,11 @@ Filters affect what you see locally. They do not block or mute accounts on X.
 
 ### Matching and exceptions
 
-- **Countries and regions are separate.** Selecting Europe does not select individual European countries. Under **Behavior → Country source**, **Device country, when available** uses a country from the connection-source label, falling back to the account location. This affects both flags and country/region filters.
+- **Countries and regions are separate.** Selecting Europe does not select individual European countries. Enable **Behavior → Use device country when available** to use a country from the connection-source label, falling back to the account location. This affects both flags and country/region filters.
 - **Always Show takes priority.** Exempt accounts from its tab or their account card. Your own recognized account is exempt too. New installs include `@xaitax` in Always Show; removing it is respected.
 - **Accounts you follow can be exempt too.** Enable **Always Show → Always show accounts I follow**, off by default. It applies as X loads follow status; already-loaded accounts may need a refresh or further browsing. Confirmed followed accounts bypass filters, while unknown status uses normal filtering. No extra requests are made, and **Use profile details** can remain off. Follow status stays in page-session memory, is cleared when the signed-in account changes, and is never uploaded or backed up. Only the preference is included in backups. Quoted authors are checked independently.
-- **Quotes keep their own rules.** A matching quoted account can collapse independently, with a **Show quoted post** control and the matching reasons. Language and location-warning filters apply to the enclosing post, not independently to its quoted author.
+- **Quotes keep their own rules by default.** A matching quoted account can collapse independently, with a **Show quoted post** control and the matching reasons. Language and location-warning filters apply to the enclosing post, not independently to its quoted author.
+- **Hide related posts, optionally.** Enable **Behavior → Hide replies and quotes of filtered posts** to collapse whole replies and quotes, even when their source is only highlighted. Each gets a reason and **Show post** control. This uses relationships X already loads, without extra requests. Unknown sources keep normal filtering, and existing exceptions still apply. Authors are not added to your filters.
 - **Opened posts stay readable.** A main post identified by its own permalink is highlighted rather than hidden when deliberately opened. Replies retain their normal rules. Matching accounts in people lists are highlighted, never removed.
 - **Missing information is not guessed.** Language filtering uses X's displayed-text language marker; auto-translation can make the original language unavailable. Unknown languages are not filtered, and government status requires the account's own grey checkmark.
 
@@ -112,7 +113,7 @@ Both digit rules work even with profile details disabled. All four rules need no
 
 ### Location warnings and keyboard shortcut
 
-Choose **Behavior → Location warnings → Also filter accounts with location warnings** to include them in Hide/Highlight. A warning indicates uncertainty, not confirmed VPN use.
+Enable **Behavior → Filter accounts with location warnings** to include them in Hide/Highlight. A warning indicates uncertainty, not confirmed VPN use.
 
 You can assign **Switch matching posts between Hide and Highlight** in your browser's extension-shortcut settings. No shortcut is assigned by default; the Blocking link in X's sidebar remains navigation only.
 

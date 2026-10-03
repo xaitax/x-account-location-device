@@ -978,13 +978,13 @@ async function handleInstalled(details) {
         const previousVersion = details.previousVersion || '1.0.0';
         console.log('Updated from version:', previousVersion);
         
-        // Check if this is a major/minor version update that should show "What's New"
+        // Major/minor updates show "What's New"; 4.1.1 is a feature-bearing patch.
         const prevMajorMinor = previousVersion.split('.').slice(0, 2).join('.');
         const currentMajorMinor = VERSION.split('.').slice(0, 2).join('.');
+        const featurePatch = VERSION === '4.1.1' && previousVersion !== VERSION;
         
-        // Show "What's New" if updating to a new major/minor version
-        if (prevMajorMinor !== currentMajorMinor) {
-            console.log(`🆕 Major update: ${prevMajorMinor} → ${currentMajorMinor}`);
+        if (prevMajorMinor !== currentMajorMinor || featurePatch) {
+            console.log(`🆕 Feature update: ${previousVersion} → ${VERSION}`);
             
             // Mark that we should show the "What's New" banner
             await browserAPI.storage.local.set({
@@ -1006,7 +1006,7 @@ async function handleInstalled(details) {
                 browserAPI.tabs.create({ url: optionsUrl });
             }
         } else {
-            // Minor patch update, just save version
+            // Other patches and same-version reinstalls remain quiet.
             await browserAPI.storage.local.set({
                 [STORAGE_KEYS.LAST_VERSION]: VERSION
             });
