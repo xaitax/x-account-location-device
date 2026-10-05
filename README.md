@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="extension/icons/icon128.png" width="64" height="64" alt="X-Posed logo">
+  <img src="extension/icons/logo.svg" width="64" height="64" alt="X-Posed logo">
 </p>
 
 <h1 align="center">X-Posed</h1>
@@ -10,12 +10,15 @@
 </p>
 
 <p align="center">
-  <a href="https://chromewebstore.google.com/detail/x-posed-account-location/oodhljjldjdhcdopjpmfgbaoibpancfk"><img src="https://img.shields.io/badge/Chrome-Install-236c5c?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Install from the Chrome Web Store"></a>
-  <a href="https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/"><img src="https://img.shields.io/badge/Firefox-Install-236c5c?style=for-the-badge&logo=firefoxbrowser&logoColor=white" alt="Install from Firefox Add-ons"></a>
+  <a href="https://chromewebstore.google.com/detail/x-posed-account-location/oodhljjldjdhcdopjpmfgbaoibpancfk"><img src="https://img.shields.io/badge/Chrome-Install-1a73e8?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Install for Chrome from the Chrome Web Store"></a>
+  <a href="https://chromewebstore.google.com/detail/x-posed-account-location/oodhljjldjdhcdopjpmfgbaoibpancfk"><img src="https://img.shields.io/badge/Brave-Install-c84418?style=for-the-badge&logo=brave&logoColor=white" alt="Install for Brave from the Chrome Web Store"></a>
+  <a href="https://chromewebstore.google.com/detail/x-posed-account-location/oodhljjldjdhcdopjpmfgbaoibpancfk"><img src="assets/browser-badges/edge.svg" alt="Install for Edge from the Chrome Web Store"></a>
+  <a href="https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/"><img src="https://img.shields.io/badge/Firefox-Install-6033b1?style=for-the-badge&logo=firefoxbrowser&logoColor=white" alt="Install for Firefox from Firefox Add-ons"></a>
+  <a href="https://addons.mozilla.org/en-GB/firefox/addon/x-posed-account-location-devic/"><img src="https://img.shields.io/badge/Firefox_for_Android-Install-6033b1?style=for-the-badge&logo=firefoxbrowser&logoColor=white" alt="Install for Firefox for Android from Firefox Add-ons"></a>
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md">Version 4.1.1</a> ·
+  <a href="CHANGELOG.md">Version 4.2</a> ·
   <a href="#features">Features</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#filtering">Filtering</a> ·
@@ -41,21 +44,21 @@ X-Posed is a free, open-source browser extension for Chrome and Firefox. It brin
 
 Install the extension, reload X, and browse while signed in. Open an account badge for details, or choose **Manage filters** in the extension popup to configure your timeline.
 
-This README describes source version 4.1.1. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
+This README describes source version 4.2.0. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
 
 **iPhone and iPad:** a separate [X-Posed Location companion app](https://apps.apple.com/us/app/x-posed-location/id6755918713) offers username lookups. It is not the browser extension and does not provide the same timeline features.
 
 ## Features
 
 - **Account context, inline.** Country flags, Apple/Android/Web source icons and location warnings beside usernames. Choose which indicators you see, select Small/Medium/Large badges, or turn off the background for icons only. Preview changes in **Settings → Display**.
-- **Compact account details.** Open a badge for country, connection source, account age, verification, handle changes, affiliation and follower, following, post and media counts, where available. Hover, click and touch controls are supported.
+- **Compact account details.** Open a badge for country, connection source, account age, blue/gold/grey verification, handle changes, affiliation and follower, following, post and media counts, where available. Hover, click and touch controls are supported. Icon-only Copy PNG and Save PNG controls export the card's current design locally, without buttons or surrounding posts; use Save PNG when image copying is unavailable.
 - **Your timeline, your filters.** Hide matching posts or keep them visible with a subtle highlight. Search saved rules and exempt accounts with **Always Show**.
 - **Local statistics.** See how many identifiable posts your filters catch, with country, region and device breakdowns. Explore world maps for filtering activity and locally cached accounts.
 - **Share evidence.** Preview an image, edit its caption, then choose Quote, Reply or New post, or save the image. You review and submit the post yourself.
 - **Consistent controls.** Light and dark themes, a compact popup, the optional Blocking link in X's sidebar, settings backups and a configurable Hide/Highlight keyboard shortcut.
 - **Community cache.** Reuse public account records shared by the community to reduce repeat X lookups. You can turn it off and continue using direct X lookups and your local cache.
 
-Version 4.1 adds activity and name-pattern filters, an option to always show accounts you follow, clearer account details and more reliable backups. Version 4.1.1 adds optional hiding of replies and quotes of filtered posts, plus nested-quote fixes and simpler Behavior controls. Read the [changelog](CHANGELOG.md) for the release details.
+Version 4.2 brings a heavily requested addition: region filters can match X's region label **and the countries you choose inside it**. Browse each region's flags, pick a few countries or include them all; existing region filters stay label-only until you opt in. Refined account cards also gain icon-only **Copy PNG** and **Save PNG** actions. Read the [changelog](CHANGELOG.md) for the release details.
 
 ## Filtering
 
@@ -78,7 +81,8 @@ Filters affect what you see locally. They do not block or mute accounts on X.
 
 ### Matching and exceptions
 
-- **Countries and regions are separate.** Selecting Europe does not select individual European countries. Enable **Behavior → Use device country when available** to use a country from the connection-source label, falling back to the account location. This affects both flags and country/region filters.
+- **Regions can include countries.** Expand a region under **Add filter → Regions** to browse its flags. Choose individual countries, or enable **Include countries** to select them all; either action automatically enables the region. Customize the list with individual checkboxes or **All / None**. Existing filters stay label-only until you opt in. Regions can overlap, so excluding a country in one does not override another matching filter. Membership follows [UN M49 geography](https://unstats.un.org/unsd/methodology/m49/) with documented composite groups, not a claim about X's boundaries. Antarctica remains country-only.
+- **Choose the location source.** Enable **Behavior → Use device country when available** to use a country from the connection-source label, falling back to the account location. This affects both flags and country/region filters.
 - **Always Show takes priority.** Exempt accounts from its tab or their account card. Your own recognized account is exempt too. New installs include `@xaitax` in Always Show; removing it is respected.
 - **Accounts you follow can be exempt too.** Enable **Always Show → Always show accounts I follow**, off by default. It applies as X loads follow status; already-loaded accounts may need a refresh or further browsing. Confirmed followed accounts bypass filters, while unknown status uses normal filtering. No extra requests are made, and **Use profile details** can remain off. Follow status stays in page-session memory, is cleared when the signed-in account changes, and is never uploaded or backed up. Only the preference is included in backups. Quoted authors are checked independently.
 - **Quotes keep their own rules by default.** A matching quoted account can collapse independently, with a **Show quoted post** control and the matching reasons. Language and location-warning filters apply to the enclosing post, not independently to its quoted author.

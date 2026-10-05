@@ -10,6 +10,7 @@ import { normalizeLinkRule } from './domain-utils.js';
 import { FILTER_SOURCES } from './filter-registry.js';
 import { ACCOUNT_COUNT_FILTERS, isAccountCountThreshold } from './account-counts.js';
 import { BADGE_SIZES, normalizeBadgeSize } from './badge-appearance.js';
+import { normalizeRegionCountrySelections, areRegionCountrySelectionsEqual } from './region-membership.js';
 
 // One ordering counter per configuration store. Persisted alongside its state in
 // the same local-storage write, so delayed replies remain orderable after a
@@ -578,6 +579,7 @@ class SettingsStorage {
                 this.settings = { ...DEFAULT_SETTINGS, ...stored };
             }
             this.settings.badgeSize = normalizeBadgeSize(this.settings.badgeSize);
+            this.settings.regionCountrySelections = normalizeRegionCountrySelections(this.settings.regionCountrySelections);
             if (typeof this.settings.showBadgeBackground !== 'boolean') {
                 this.settings.showBadgeBackground = DEFAULT_SETTINGS.showBadgeBackground;
             }
@@ -594,14 +596,16 @@ class SettingsStorage {
         }
     }
 
-    async save(values = this.settings, revision = this.revision) {
+    async save(values = this.settings, revision = this.revision, additionalEntries = {}) {
         try {
             if (!BADGE_SIZES.includes(values.badgeSize)) throw new TypeError('Invalid badge size.');
             if (typeof values.showBadgeBackground !== 'boolean') throw new TypeError('Invalid badge background preference.');
+            normalizeRegionCountrySelections(values.regionCountrySelections, { strict: true });
             for (const { key, max } of ACCOUNT_COUNT_FILTERS) {
                 if (!isAccountCountThreshold(values[key], max)) throw new TypeError(`Invalid account-count threshold: ${key}.`);
             }
             await browserAPI.storage.local.set({
+                ...additionalEntries,
                 [STORAGE_KEYS.SETTINGS]: values,
                 [this.revisionKey]: revision
             });
@@ -646,8 +650,16 @@ class SettingsStorage {
             return Promise.reject(new TypeError('Settings must be a partial settings object or a setting name'));
         }
         const patch = typeof key === 'string' ? { [key]: value } : { ...key };
+        if (Object.hasOwn(patch, 'regionCountrySelections')) {
+            try {
+                patch.regionCountrySelections = normalizeRegionCountrySelections(patch.regionCountrySelections, { strict: true });
+            } catch (error) {
+                return Promise.reject(error);
+            }
+        }
         return this.commitMutation(next => {
-            const changed = Object.keys(patch).some(name => !Object.is(next[name], patch[name]));
+            const changed = Object.keys(patch).some(name => name === 'regionCountrySelections'
+                ? !areRegionCountrySelectionsEqual(next[name], patch[name]) : !Object.is(next[name], patch[name]));
             if (!changed) return false;
             return { ...next, ...patch };
         });
@@ -659,6 +671,62 @@ class SettingsStorage {
             next[key] = !next[key];
             return next;
         });
+    }
+
+    /** Merge one region inside the queue so edits in different tabs cannot erase each other. */
+    setRegionCountries(regionKey, countries, { activate = false, regionStore } = {}) {
+        let region;
+        let selection;
+        try {
+            if (typeof activate !== 'boolean') throw new TypeError('Invalid region activation preference.');
+            if (activate && (!(regionStore instanceof BlockedSetStorage) ||
+                regionStore.storageKey !== STORAGE_KEYS.BLOCKED_REGIONS)) {
+                throw new TypeError('Region activation requires the region filter store.');
+            }
+            if (typeof regionKey !== 'string') throw new TypeError('A region name is required.');
+            region = canonicalCountry(regionKey);
+            selection = normalizeRegionCountrySelections({ [region]: countries === null ? [] : countries }, { strict: true });
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        const change = next => {
+            const coverage = { ...next.regionCountrySelections };
+            if (countries === null) delete coverage[region];
+            else coverage[region] = selection[region];
+            if (areRegionCountrySelectionsEqual(next.regionCountrySelections, coverage)) return false;
+            next.regionCountrySelections = normalizeRegionCountrySelections(coverage, { strict: true });
+            return next;
+        };
+        if (!activate) return this.commitMutation(change);
+
+        // Reserve both queues before awaiting either. Other settings/list edits
+        // must follow this operation, so activation and precise country coverage
+        // are persisted together without a half-enabled region on write failure.
+        const operation = Promise.all([this.mutationQueue, regionStore.mutationQueue]).then(async () => {
+            if (!this.loaded || !regionStore.loaded) throw new Error('Settings and regions must be loaded before editing');
+            const changedSettings = change({ ...this.settings });
+            const changedRegion = !regionStore.values.has(region);
+            if (!changedSettings && !changedRegion) return this.get();
+            const next = changedSettings || this.settings;
+            const regions = new Set(regionStore.values);
+            regions.add(region);
+            const revision = changedSettings ? nextStateRevision(this.revision) : this.revision;
+            const regionsRevision = changedRegion ? nextStateRevision(regionStore.revision) : regionStore.revision;
+            await this.save(next, revision, {
+                [regionStore.storageKey]: [...regions],
+                [regionStore.revisionKey]: regionsRevision
+            });
+            this.settings = next;
+            this.revision = revision;
+            regionStore.values = regions;
+            regionStore.revision = regionsRevision;
+            if (changedSettings) this.notifyListeners();
+            return this.get();
+        });
+        const settled = operation.catch(() => {});
+        this.mutationQueue = settled;
+        regionStore.mutationQueue = settled;
+        return operation;
     }
 
     addListener(callback) {

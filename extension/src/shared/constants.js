@@ -219,6 +219,8 @@ export const DEFAULT_SETTINGS = {
     showSidebarBlockerLink: true,
     alwaysShowFollowing: false,  // Exempt accounts X confirms this viewer follows; relationship data stays in page-session memory.
     hideRelatedPosts: false,  // Collapse replies and quotes when their source is known to match a filter, including highlighted sources.
+    // Region keys are opt-in country lists. Absent = X label only; [] = no countries selected.
+    regionCountrySelections: Object.freeze({}),
     openChangelogOnUpdate: true,  // Open the "What's New"/changelog tab after a major/minor update (issue #24)
     debugMode: false,
     // Read the profile data X already sends with the timeline (bio, account label, follower
@@ -303,7 +305,12 @@ export const COUNTRY_FLAGS = {
     'new caledonia': '🇳🇨', 'norfolk island': '🇳🇫', 'northern mariana islands': '🇲🇵', 'niue': '🇳🇺', 'réunion': '🇷🇪',
     'reunion': '🇷🇪', 'saint barthelemy': '🇧🇱', 'saint helena': '🇸🇭', 'saint martin': '🇲🇫', 'saint pierre and miquelon': '🇵🇲',
     'sint maarten': '🇸🇽', 'svalbard': '🇸🇯', 'tokelau': '🇹🇰', 'turks and caicos islands': '🇹🇨', 'us virgin islands': '🇻🇮',
-    'wallis and futuna': '🇼🇫', 'western sahara': '🇪🇭'
+    'wallis and futuna': '🇼🇫', 'western sahara': '🇪🇭',
+    // Remaining UN M49 areas, using the same Twemoji flag artwork as every badge.
+    'antarctica': '🇦🇶', 'bouvet island': '🇧🇻', 'british indian ocean territory': '🇮🇴',
+    'cocos (keeling) islands': '🇨🇨', 'french southern territories': '🇹🇫',
+    'heard island and mcdonald islands': '🇭🇲', 'pitcairn': '🇵🇳',
+    'south georgia and the south sandwich islands': '🇬🇸', 'united states minor outlying islands': '🇺🇲'
 };
 
 /**
@@ -313,6 +320,38 @@ export const COUNTRY_FLAGS = {
  * (and the same for the UK/US/UAE aliases). Keys and values are lowercase.
  */
 export const COUNTRY_ALIASES = {
+    'cabo verde': 'cape verde',
+    'u.s. virgin islands': 'us virgin islands',
+    'united states virgin islands': 'us virgin islands',
+    'swaziland': 'eswatini',
+    'republic of the congo': 'congo',
+    'congo-brazzaville': 'congo',
+    'dr congo': 'democratic republic of the congo',
+    'congo-kinshasa': 'democratic republic of the congo',
+    'republic of korea': 'south korea',
+    "democratic people's republic of korea": 'north korea',
+    'republic of moldova': 'moldova',
+    'holy see': 'vatican city',
+    'brunei darussalam': 'brunei',
+    'federated states of micronesia': 'micronesia',
+    'micronesia (federated states of)': 'micronesia',
+    'united republic of tanzania': 'tanzania',
+    'state of palestine': 'palestine',
+    'united states of america': 'united states',
+    'svalbard and jan mayen': 'svalbard',
+    'svalbard and jan mayen islands': 'svalbard',
+    'saint martin (french part)': 'saint martin',
+    'sint maarten (dutch part)': 'sint maarten',
+    'wallis and futuna islands': 'wallis and futuna',
+    'naoero': 'nauru',
+    'bolivia (plurinational state of)': 'bolivia',
+    'iran (islamic republic of)': 'iran',
+    'netherlands (kingdom of the)': 'netherlands',
+    'venezuela (bolivarian republic of)': 'venezuela',
+    'falkland islands (malvinas)': 'falkland islands',
+    'china, hong kong special administrative region': 'hong kong',
+    'china, macao special administrative region': 'macao',
+    'united kingdom of great britain and northern ireland': 'united kingdom',
     'bonaire, sint eustatius and saba': 'bonaire',
     'bosnia': 'bosnia and herzegovina',
     'britain': 'united kingdom',

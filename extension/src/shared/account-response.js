@@ -50,6 +50,13 @@ export function parseAccountResponse(data, requestedScreenName = null, { fullMet
     };
 
     if (fullMetadata) {
+        const rawVerifiedType = user?.verification?.verified_type;
+        const normalizedVerifiedType = typeof rawVerifiedType === 'string'
+            ? rawVerifiedType.trim().toLowerCase() : null;
+        // Business/Government describe the checkmark, independently of X's
+        // is_blue_verified boolean. Unknown values must not guess a badge color.
+        const verifiedType = ['business', 'government', 'blue'].includes(normalizedVerifiedType)
+            ? normalizedVerifiedType : null;
         let verifiedSinceMsec = null;
         const rawVerifiedSince = user?.verification_info?.reason?.verified_since_msec;
         if (rawVerifiedSince !== null && rawVerifiedSince !== undefined) {
@@ -61,6 +68,7 @@ export function parseAccountResponse(data, requestedScreenName = null, { fullMet
             profileImageShape: user?.profile_image_shape || null,
             blueVerified: user?.is_blue_verified === true,
             verified: user?.verification?.verified === true,
+            verifiedType,
             identityVerified: user?.verification_info?.is_identity_verified === true,
             verifiedSinceMsec,
             protected: user?.privacy?.protected === true,

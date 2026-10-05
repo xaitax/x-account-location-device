@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "X-Posed: Account Location & Device Info",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "description": "See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.",
   
   "icons": {
     "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
     "48": "icons/icon48.png",
+    "64": "icons/icon64.png",
     "128": "icons/icon128.png"
   },
 
@@ -80,7 +82,9 @@
     "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
       "48": "icons/icon48.png",
+      "64": "icons/icon64.png",
       "128": "icons/icon128.png"
     },
     "default_title": "X-Posed"

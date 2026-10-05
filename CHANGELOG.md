@@ -2,6 +2,32 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [4.2.0] - 2026-10-05
+
+A heavily requested community feature—regions with selectable countries—plus cleaner account cards and easy PNG exports.
+
+### New features
+
+- **Regions and their countries:** X sometimes reports a region, such as Europe, instead of a country. Region filters can now match both that X label and the individual countries you choose within it ([#51](https://github.com/xaitax/x-account-location-device/issues/51)).
+- **Copy or save account cards:** Two discreet, icon-only controls export the current card as a sharp PNG. Its light/dark design and full details are preserved, without buttons or surrounding posts. Images are generated locally; if image copying is blocked, use **Save PNG**.
+
+### Improvements
+
+- **Easier region editing:** Expand a region to browse its countries and flags. Choose a subset, or enable **Include countries** to select all; choosing a country automatically enables its region. Search and **All / None** controls work in Settings and the on-X dialog.
+- **Refined account cards:** Verification now sits beside the name. Location and connection details share a compact panel with aligned right-hand icons. Media joins the activity counts, with clearer dates, inline account age and a consistently sized User ID—all in the existing Graphite style.
+- **Consistent filter icons:** Saved filters show the matching category icon for every filter type, alongside country flags and the region map icon.
+- **Refreshed logo:** A mint X with a globe backdrop brings the extension's icon in line with the Graphite-and-mint interface.
+- **A friendlier welcome:** A compact welcome and update page puts region filters first and PNG account cards next, with clearer next steps and a big thank-you to supporters. The popup's Support button now shares Settings' muted rose accent.
+- **Fewer accidental popups:** Account details wait for a short 300 ms hover before opening. Moving away cancels the opening; clicks, taps and keyboard activation stay immediate ([#72](https://github.com/xaitax/x-account-location-device/issues/72)).
+- **Country and territory coverage:** Added nine missing flags from the existing artwork set and aliases including Cabo Verde and U.S. Virgin Islands. Geographic groupings are documented; Antarctica remains a country-only filter.
+
+### Fixes
+
+- **Inline people-list badges:** Flags and account details sit beside handles in Following, Followers, Verified followers and account suggestions. Narrow rows wrap without covering native Follow controls ([#71](https://github.com/xaitax/x-account-location-device/issues/71)).
+- **Correct verification colors:** Gold business and grey government checkmarks take precedence over X's blue-verification boolean. Business accounts are no longer shown as blue simply because X also sets `is_blue_verified: true`; unverified accounts remain unverified.
+
+Existing region filters stay label-only until you opt into country coverage. Overlapping filters and Always Show exemptions continue to work as before.
+
 ## [4.1.1] - 2026-10-03
 
 A highly requested option to hide replies and quotes of filtered posts, with clearer controls and more reliable quote filtering.

@@ -15,6 +15,7 @@ import { findBlockedDomain, findBlockedExactUrl } from '../shared/domain-utils.j
 import { createFilterPlaceholder, updateFilterPlaceholder } from './filter-placeholder.js';
 import { createRelatedPostController } from './related-posts.js';
 import { rememberPostRelation } from './post-relations-cache.js';
+import { matchingBlockedRegions } from '../shared/region-membership.js';
 import { captureDisplayName, emojiImageText } from './display-name.js';
 import {
     ACCOUNT_COUNT_FILTERS, countDisplayNameDigits, countHandleDigits, isAccountCountThreshold, matchesAccountCount
@@ -69,7 +70,7 @@ function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUs
     const reasons = resolveBlockReasons({
         isExempt,
         isBlockedCountry: location !== '' && blockedCountries.has(location),
-        isBlockedRegion: location !== '' && !!blockedRegions?.has(location),
+        isBlockedRegion: matchingBlockedRegions(location, blockedRegions, settings.regionCountrySelections).length > 0,
         isTagBlocked: blockedTags?.size > 0 && hasBlockedTag(displayName, blockedTags),
         isBioBlocked: hasBlockedBio(profile, blockedBioTags, settings),
         isLinkBlocked: hasBlockedLink(profile, blockedLinks, settings),
@@ -420,7 +421,7 @@ function knownPostVerdict(record, filters) {
     const reasons = resolveBlockReasons({
         isExempt: false,
         isBlockedCountry: country !== '' && blockedCountries?.has(country),
-        isBlockedRegion: country !== '' && blockedRegions?.has(country),
+        isBlockedRegion: matchingBlockedRegions(country, blockedRegions, settings.regionCountrySelections).length > 0,
         isTagBlocked: hasBlockedTag(record.displayName, blockedTags),
         isBioBlocked: hasBlockedBio(profile, blockedBioTags, settings),
         isLinkBlocked: hasBlockedLink(profile, blockedLinks, settings),

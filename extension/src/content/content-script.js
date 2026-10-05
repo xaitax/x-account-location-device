@@ -50,6 +50,7 @@ import { createLifecycle } from '../shared/lifecycle.js';
 import { createSnapshotTracker } from '../shared/state-sync.js';
 import { createFilterStatisticsReporter } from './filter-statistics.js';
 import { ACCOUNT_COUNT_FILTERS, isAccountCountThreshold, matchesAccountCount } from '../shared/account-counts.js';
+import { areRegionCountrySelectionsEqual } from '../shared/region-membership.js';
 
 // ============================================
 // STATE
@@ -143,6 +144,9 @@ async function sendMessage(message) {
         const updateType = STATE_MUTATION_UPDATES[message.type];
         if (response?.success && updateType) {
             await handleBackgroundMessage(updateType, response.data, response.revision);
+            if (message.type === MESSAGE_TYPES.SET_SETTINGS && Array.isArray(response.blockedRegions)) {
+                await handleBackgroundMessage(MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, response.blockedRegions, response.regionsRevision);
+            }
         }
         return response;
     } catch (error) {
@@ -598,9 +602,10 @@ async function handleBackgroundMessage(type, payload, revision) {
                 syncEnrichmentSetting();
                 if (!isEnabled || settings.profileEnrichment === false) clearProfiles();
             }
-            if (isEnabled && ['profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation',
-                ...ACCOUNT_COUNT_FILTERS.map(rule => rule.key)]
-                .some(key => prevSettings[key] !== settings[key])) {
+            if (isEnabled && (!areRegionCountrySelectionsEqual(prevSettings.regionCountrySelections, settings.regionCountrySelections) ||
+                ['profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation',
+                    ...ACCOUNT_COUNT_FILTERS.map(rule => rule.key)]
+                    .some(key => prevSettings[key] !== settings[key]))) {
                 updateBlockedTweets(currentFilters());
             }
 

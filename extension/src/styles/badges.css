@@ -1,4 +1,4 @@
-/* Shared by on-X badges and the settings preview. Never restyles X's own elements. */
+/* Shared badge appearance; UserCell placement only affects explicitly marked handle rows. */
 .x-info-badge, .x-info-badge * { box-sizing: border-box; }
 .x-info-badge {
     --xp-badge-icon: 15px;
@@ -42,6 +42,48 @@
     --xp-badge-gap: 8px;
     --xp-badge-padding: 3px;
     --xp-badge-details-padding: 5px;
+}
+
+/* Keep native profile links and follow controls intact. These layout rules disappear
+   when our direct-child badge/loading marker is removed from a validated handle row. */
+[data-testid="UserCell"] .x-user-cell-handle-row:has(> .x-info-badge, > .x-flag-shimmer) {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    flex: 0 1 auto;
+    row-gap: 4px;
+}
+[data-testid="UserCell"] .x-user-cell-handle-row:has(> .x-info-badge, > .x-flag-shimmer) > .x-user-cell-handle-link {
+    flex: 1 1 0;
+    min-inline-size: min(100%, 4ch);
+    max-inline-size: max-content;
+}
+[data-testid="UserCell"] .x-user-cell-handle-row > :is(.x-info-badge, .x-flag-shimmer) {
+    flex: 0 0 auto;
+    margin: 0;
+    margin-inline-start: 6px;
+    margin-inline-end: 4px;
+}
+/* Extremely narrow identity columns keep every configured icon visible at its
+   chosen size, wrapping badge groups rather than clipping icons or crowding controls. */
+[data-testid="UserCell"] .x-user-cell-handle-row > .x-info-badge {
+    max-inline-size: calc(100% - 10px);
+    flex-wrap: wrap;
+    justify-content: center;
+}
+[data-testid="UserCell"] .x-user-cell-handle-row > .x-info-badge > .x-badge-details {
+    max-inline-size: 100%;
+    flex-wrap: wrap;
+}
+[data-testid="UserCell"] .x-user-cell-handle-meta:has(> .x-user-cell-handle-row > .x-info-badge, > .x-user-cell-handle-row > .x-flag-shimmer) {
+    flex-wrap: wrap;
+    align-items: center;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    row-gap: 4px;
 }
 .x-info-badge:hover, .x-info-badge:focus-within {
     background: var(--xp-badge-hover-fill);

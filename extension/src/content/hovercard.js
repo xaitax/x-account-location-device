@@ -9,12 +9,14 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, Z_INDEX } from '../shared/constants.js';
+import { MESSAGE_TYPES, Z_INDEX, isRegion } from '../shared/constants.js';
 import { LRUCache } from '../shared/lru-cache.js';
+import { getAccountVerification } from '../shared/account-verification.js';
 import { deviceIcon, flagImage } from './icons.js';
 import { dialogIcon } from './dialog-icons.js';
 import { getProfile } from './profile-cache.js';
 import { renderDisplayName, resolveDisplayNamePresentation } from './display-name.js';
+import { createHovercardPng } from './hovercard-image.js';
 
 /**
  * Thousands-separated count, or null when we have no number.
@@ -147,8 +149,27 @@ function createTag({ label, tone = 'neutral', title = '' }) {
 
 function createSignalValue(icon, text) {
     const value = createEl('span', 'x-posed-signal-value');
-    if (icon) value.appendChild(icon);
-    value.appendChild(createEl('span', '', safeText(text, 80)));
+    value.appendChild(createEl('span', 'x-posed-signal-text', safeText(text, 80)));
+    // A trailing, fixed-width rail keeps the flag and device aligned even when
+    // their labels wrap to different lengths.
+    const iconWrap = createEl('span', 'x-posed-signal-icon');
+    iconWrap.setAttribute('aria-hidden', 'true');
+    if (icon) iconWrap.appendChild(icon);
+    value.appendChild(iconWrap);
+    return value;
+}
+
+function createDateValue(date, ageYears = null) {
+    const value = createEl('span', 'x-posed-date-value');
+    const time = createEl('time', '', formatShortDate(date));
+    time.dateTime = date.toISOString();
+    value.appendChild(time);
+    if (typeof ageYears === 'number') {
+        const age = createEl('span', 'x-posed-account-age', `· ${ageYears}y`);
+        age.setAttribute('aria-label', `${ageYears} ${ageYears === 1 ? 'year' : 'years'} old`);
+        age.title = age.getAttribute('aria-label');
+        value.appendChild(age);
+    }
     return value;
 }
 
@@ -346,7 +367,7 @@ function describeHovercardError(response) {
     }
 }
 
-function buildCardContent({ screenName, displayName = '', displayNamePresentation = null, fallbackName = '', info, loading = false, errorText = '', allowlistControl = null, onClose }) {
+function buildCardContent({ screenName, displayName = '', displayNamePresentation = null, fallbackName = '', info, loading = false, errorText = '', allowlistControl = null, imageControl = null, onClose }) {
     const card = ensureCard();
     const focusedElement = card.contains(document.activeElement) ? document.activeElement : null;
     const focusedClose = focusedElement?.classList.contains('x-posed-card-close');
@@ -374,15 +395,21 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
     const handleEl = createEl('span', 'x-posed-handle', `@${safeText(screenName, 20)}`);
     nameLine.appendChild(nameEl);
 
-    // Tags
-    const tags = createEl('div', 'x-posed-tags');
+    // Business/Government take precedence: X also marks some gold accounts
+    // is_blue_verified, so that flag alone does not identify the checkmark color.
+    const verificationInfo = getAccountVerification(meta);
+    if (verificationInfo) {
+        const verification = createEl('span', 'x-posed-inline-verification');
+        verification.dataset.verification = verificationInfo.type;
+        verification.setAttribute('role', 'img');
+        verification.setAttribute('aria-label', verificationInfo.label);
+        verification.title = verificationInfo.title;
+        verification.appendChild(dialogIcon('verified', 18));
+        nameLine.appendChild(verification);
+    }
 
-    if (meta.blueVerified) {
-        tags.appendChild(createTag({ label: 'Blue verification', tone: 'blue', title: 'X Premium / Blue verified' }));
-    }
-    if (meta.verified) {
-        tags.appendChild(createTag({ label: 'Legacy verified', tone: 'gold', title: 'Legacy verified' }));
-    }
+    // Less common account statuses still keep their explicit labels.
+    const tags = createEl('div', 'x-posed-tags');
     if (meta.identityVerified) {
         tags.appendChild(createTag({ label: 'Identity verified', tone: 'green', title: 'Identity verified' }));
     }
@@ -417,7 +444,7 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
     if (info?.location) {
         signals.appendChild(createRow({
             label: 'Location',
-            value: createSignalValue(flagImage(info.location), info.location),
+            value: createSignalValue(flagImage(info.location) || dialogIcon(isRegion(info.location) ? 'map' : 'globe', 18), info.location),
             primary: true
         }));
     }
@@ -425,7 +452,7 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
     if (info?.device) {
         signals.appendChild(createRow({
             label: 'Connected via',
-            value: createSignalValue(deviceIcon(info.device, 20), info.device),
+            value: createSignalValue(deviceIcon(info.device, 18), info.device),
             primary: true
         }));
     }
@@ -435,16 +462,19 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
         body.appendChild(createLocationWarning(card));
     }
 
-    // Follower / following / post counts, harvested from the profile data X already ships
+    // Activity counts, harvested from the profile data X already ships
     // with its own timeline responses. No lookup was spent to show these, and they are
     // simply absent for an account we have not seen in a response yet.
     const profile = getProfile(screenName);
     if (profile) {
         const stats = createEl('div', 'x-posed-card-stats');
+        stats.setAttribute('role', 'group');
+        stats.setAttribute('aria-label', 'Account activity');
         const values = [
             { label: 'Followers', value: profile.followers },
             { label: 'Following', value: profile.following },
-            { label: 'Posts', value: profile.tweets }
+            { label: 'Posts', value: profile.tweets },
+            { label: 'Media', value: profile.media }
         ];
         for (const { label, value } of values) {
             const exactCount = formatCount(value);
@@ -459,36 +489,29 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
             stat.append(number, createEl('span', 'x-posed-stat-label', label));
             stats.appendChild(stat);
         }
-        if (stats.childNodes.length) body.appendChild(stats);
+        if (stats.childNodes.length) {
+            stats.dataset.count = String(stats.childNodes.length);
+            body.appendChild(stats);
+        }
     }
 
     const metadata = createEl('div', 'x-posed-card-metadata');
-    const media = formatCount(profile?.media);
-    if (media !== null) {
-        metadata.appendChild(createRow({ label: 'Media', value: media }));
-    }
     const createdAt = parseCreatedAt(meta.createdAt);
     const ageYears = yearsSince(createdAt);
     if (createdAt) {
-        const ageSuffix = typeof ageYears === 'number' ? ` (${ageYears}y)` : '';
-        metadata.appendChild(createRow({ label: 'Created', value: `${formatShortDate(createdAt)}${ageSuffix}` }));
+        metadata.appendChild(createRow({ label: 'Created', value: createDateValue(createdAt, ageYears) }));
     }
 
     // Verified since
     if (typeof meta.verifiedSinceMsec === 'number' && meta.verifiedSinceMsec > 0) {
         const d = new Date(meta.verifiedSinceMsec);
         if (!Number.isNaN(d.getTime())) {
-            metadata.appendChild(createRow({ label: 'Verified since', value: formatShortDate(d) }));
+            metadata.appendChild(createRow({ label: 'Verified since', value: createDateValue(d) }));
         }
     }
 
     if (typeof meta.usernameChanges === 'number') {
         metadata.appendChild(createRow({ label: 'Handle changes', value: String(meta.usernameChanges) }));
-    }
-
-    // X internal stable user identifier (useful for tracking across handle changes)
-    if (meta.restId) {
-        metadata.appendChild(createRow({ label: 'User ID', value: safeText(meta.restId, 40) }));
     }
 
     if (aff?.name || meta.affiliateUsername) {
@@ -521,7 +544,19 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
 
         metadata.appendChild(createRow({ label: 'Affiliation', value: content }));
     }
-    if (metadata.childNodes.length) body.appendChild(metadata);
+
+    // Keep this technical, stable identifier last, apart from account history.
+    if (meta.restId) {
+        const identifier = createRow({ label: 'User ID', value: safeText(meta.restId, 40) });
+        identifier.classList.add('x-posed-row--identifier');
+        metadata.appendChild(identifier);
+    }
+    if (metadata.childNodes.length) {
+        metadata.setAttribute('role', 'group');
+        metadata.setAttribute('aria-label', 'Account details');
+        metadata.prepend(createEl('div', 'x-posed-metadata-heading', 'Account details'));
+        body.appendChild(metadata);
+    }
 
     // Intentionally omit `profileImageShape` ("Avatar") and `learnMoreUrl` rows:
     // they add noise without providing actionable signal.
@@ -543,7 +578,16 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
 
     card.appendChild(header);
     card.appendChild(body);
-    if (allowlistControl) card.appendChild(allowlistControl);
+    if (allowlistControl || imageControl) {
+        const footer = allowlistControl || createEl('div', 'x-posed-card-actions');
+        const actionRow = footer.querySelector('.x-posed-card-action-row') || createEl('div', 'x-posed-card-action-row');
+        if (!actionRow.parentElement) footer.prepend(actionRow);
+        if (imageControl) {
+            actionRow.appendChild(imageControl.element);
+            footer.appendChild(imageControl.status);
+        }
+        card.appendChild(footer);
+    }
     body.scrollTop = scrollTop;
     // Refreshing metadata must not drop keyboard focus while someone is reading
     // the card or using its account exception control.
@@ -559,16 +603,19 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
 // so the dossier opens on tap instead of hover (see attach()).
 const TOUCH = !(typeof window !== 'undefined' && window.matchMedia &&
     window.matchMedia('(hover: hover)').matches);
+const HOVER_INTENT_MS = 300;
 
 class HovercardController {
     constructor() {
         this.card = null;
         this.hideTimeout = null;
+        this.hoverIntent = null;
         this.currentAnchor = null;
         this.currentScreenName = '';
         this.viewId = 0;
         this.generation = 0;
         this.allowlistState = null;
+        this.imageState = null;
         this.allowlistWrites = new Map();
         this._clickMode = false;
 
@@ -589,6 +636,7 @@ class HovercardController {
         this._handleKeyDown = this._handleKeyDown.bind(this);
         this._handleClose = this._handleClose.bind(this);
         this._handleFocusOut = this._handleFocusOut.bind(this);
+        this._handleHoverIntentCancel = this._handleHoverIntentCancel.bind(this);
     }
 
     /**
@@ -610,6 +658,7 @@ class HovercardController {
         // The details control, optional info hint and pill gaps all open the
         // card. Share has its own action and must never toggle account details.
         badgeEl.addEventListener('click', e => {
+            this._cancelHoverIntent();
             if (e.target.closest('.x-capture-btn')) return;
             e.preventDefault();
             e.stopPropagation();
@@ -623,10 +672,12 @@ class HovercardController {
         });
         if (!useClick) {
             const onEnter = () => {
-                if (this._clickMode && this.card?.classList.contains('x-posed-hovercard-visible')) return;
-                this.show(badgeEl, { screenName, displayName, displayNamePresentation, info, csrfToken });
+                this._scheduleHoverIntent(badgeEl, { screenName, displayName, displayNamePresentation, info, csrfToken });
             };
-            const onLeave = () => this.hideSoon();
+            const onLeave = () => {
+                this._cancelHoverIntent(badgeEl);
+                this.hideSoon();
+            };
             badgeEl.addEventListener('mouseenter', onEnter);
             badgeEl.addEventListener('mouseleave', onLeave);
         }
@@ -637,20 +688,85 @@ class HovercardController {
         badgeEl.classList.add('x-posed-has-hovercard');
     }
 
+    _scheduleHoverIntent(anchorEl, options) {
+        this._cancelHoverIntent();
+        const visible = this.card?.classList.contains('x-posed-hovercard-visible');
+        if (visible && this.currentAnchor === anchorEl) {
+            this._handleCardEnter();
+            return;
+        }
+        // Passing another badge must not interrupt a pinned card, a keyboard
+        // reader or an explicit Copy/Save operation. Clicking can still switch.
+        if (!anchorEl?.isConnected || document.hidden || this._clickMode || this.imageState?.pending ||
+            (visible && (this.card.contains(document.activeElement) ||
+                this.currentAnchor?.contains(document.activeElement)))) return;
+
+        this._clearHideTimeout();
+        const intent = { anchor: anchorEl, options, generation: this.generation, timer: null };
+        this.hoverIntent = intent;
+        intent.timer = setTimeout(() => {
+            if (this.hoverIntent !== intent) return;
+            this._cancelHoverIntent();
+            if (intent.generation !== this.generation || !anchorEl.isConnected || document.hidden ||
+                !anchorEl.matches(':hover') || this._clickMode || this.imageState?.pending ||
+                this.card?.contains(document.activeElement) || this.currentAnchor?.contains(document.activeElement)) {
+                this.hideSoon();
+                return;
+            }
+            // show() is the only place that requests rich account metadata, so
+            // a brief pass over a badge does not trigger another account lookup.
+            this.show(anchorEl, intent.options);
+        }, HOVER_INTENT_MS);
+        // These listeners exist only while opening is pending, including when
+        // there is no visible card yet. Escape never consumes X's own key event.
+        document.addEventListener('keydown', this._handleHoverIntentCancel, true);
+        document.addEventListener('pointerdown', this._handleHoverIntentCancel, true);
+        document.addEventListener('visibilitychange', this._handleHoverIntentCancel);
+        window.addEventListener('scroll', this._handleHoverIntentCancel, true);
+        window.addEventListener('resize', this._handleHoverIntentCancel, true);
+        window.addEventListener('blur', this._handleHoverIntentCancel);
+    }
+
+    _cancelHoverIntent(anchorEl = null) {
+        const intent = this.hoverIntent;
+        if (!intent || (anchorEl && intent.anchor !== anchorEl)) return;
+        clearTimeout(intent.timer);
+        this.hoverIntent = null;
+        document.removeEventListener('keydown', this._handleHoverIntentCancel, true);
+        document.removeEventListener('pointerdown', this._handleHoverIntentCancel, true);
+        document.removeEventListener('visibilitychange', this._handleHoverIntentCancel);
+        window.removeEventListener('scroll', this._handleHoverIntentCancel, true);
+        window.removeEventListener('resize', this._handleHoverIntentCancel, true);
+        window.removeEventListener('blur', this._handleHoverIntentCancel);
+    }
+
+    _handleHoverIntentCancel(event) {
+        if (!this.hoverIntent) return;
+        if (event?.type === 'keydown' && event.key !== 'Escape') return;
+        if (event?.type === 'visibilitychange' && !document.hidden) return;
+        this._cancelHoverIntent();
+        if (this.card?.classList.contains('x-posed-hovercard-visible')) this.hideSoon();
+    }
+
+    _clearHideTimeout() {
+        if (!this.hideTimeout) return;
+        clearTimeout(this.hideTimeout);
+        this.hideTimeout = null;
+    }
+
     show(anchorEl, { screenName, displayName = '', displayNamePresentation = null, info, csrfToken = null, clickToOpen = false }) {
+        this._cancelHoverIntent();
         if (!anchorEl || !anchorEl.isConnected) return;
 
         // Click-opened cards must not close on mouseleave. The reader deliberately
         // opened this one and expects it to stay until they dismiss it.
         const useClick = TOUCH || clickToOpen;
 
-        if (this.hideTimeout) {
-            clearTimeout(this.hideTimeout);
-            this.hideTimeout = null;
-        }
+        this._clearHideTimeout();
 
         if (this.currentAnchor === anchorEl && this.card?.classList.contains('x-posed-hovercard-visible') &&
             !useClick) return;
+        this._disposeImageState();
         this.currentAnchor?.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'false');
         this.currentAnchor = anchorEl;
         this._clickMode = useClick;
@@ -658,6 +774,7 @@ class HovercardController {
         this.currentScreenName = String(screenName || '').toLowerCase();
         const viewId = ++this.viewId;
         this.allowlistState = this._createAllowlistState(this.currentScreenName, viewId);
+        this.imageState = this._createImageState(this.currentScreenName, viewId);
         // Seed the header from the name already visible on X. Keep this local to
         // the card view so enrichment cannot replace it with a handle or a stale
         // cached name, and never write observed DOM text into the account cache.
@@ -667,7 +784,7 @@ class HovercardController {
         // Show immediate card (using whatever we currently know)
         this.card = buildCardContent({
             screenName, displayName: headerName, displayNamePresentation: presentation, info, loading: true,
-            allowlistControl: this.allowlistState?.element, onClose: this._handleClose
+            allowlistControl: this.allowlistState?.element, imageControl: this.imageState, onClose: this._handleClose
         });
         this.card.classList.add('x-posed-hovercard-visible');
         positionCard(this.card, anchorEl);
@@ -700,17 +817,16 @@ class HovercardController {
     }
 
     hideSoon(delayMs = 120) {
-        if (this._clickMode || this.card?.contains(document.activeElement) ||
+        if (this.hoverIntent || this._clickMode || this.imageState?.pending || this.card?.contains(document.activeElement) ||
             this.currentAnchor?.contains(document.activeElement)) return;
         if (this.hideTimeout) clearTimeout(this.hideTimeout);
         this.hideTimeout = setTimeout(() => this.hide(), delayMs);
     }
 
     hide() {
-        if (this.hideTimeout) {
-            clearTimeout(this.hideTimeout);
-            this.hideTimeout = null;
-        }
+        this._cancelHoverIntent();
+        this._disposeImageState();
+        this._clearHideTimeout();
 
         if (this._repositionRafId !== null) {
             cancelAnimationFrame(this._repositionRafId);
@@ -743,6 +859,7 @@ class HovercardController {
 
     /** Retain an open view when authoritative information rebuilds its badge. */
     replaceAnchor(previous, replacement, focusSelector = null) {
+        this._cancelHoverIntent(previous);
         if (!previous || this.currentAnchor !== previous) return;
         const author = replacement?.closest('[data-x-screen-name]')?.dataset.xScreenName?.toLowerCase();
         if (!replacement?.isConnected || author !== this.currentScreenName) {
@@ -752,7 +869,7 @@ class HovercardController {
         previous.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'false');
         this.currentAnchor = replacement;
         replacement.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'true');
-        this._handleCardEnter();
+        this._clearHideTimeout();
         if (focusSelector) replacement.querySelector(focusSelector)?.focus({ preventScroll: true });
         positionCard(this.card, replacement);
     }
@@ -776,10 +893,8 @@ class HovercardController {
     }
 
     _handleCardEnter() {
-        if (this.hideTimeout) {
-            clearTimeout(this.hideTimeout);
-            this.hideTimeout = null;
-        }
+        this._cancelHoverIntent();
+        this._clearHideTimeout();
     }
 
     _handleCardLeave() {
@@ -822,6 +937,141 @@ class HovercardController {
             this.card.contains(state.element);
     }
 
+    _isCurrentImageState(state) {
+        return this.imageState === state && state.generation === this.generation &&
+            this._isCurrentView(this.currentAnchor, state.handle, state.viewId) &&
+            this.card.contains(state.element);
+    }
+
+    _createImageState(handle, viewId) {
+        const element = createEl('div', 'x-posed-export-actions');
+        element.setAttribute('role', 'group');
+        element.setAttribute('aria-label', 'Account card image');
+        const status = createEl('div', 'x-posed-export-status');
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        status.hidden = true;
+        const state = { handle, viewId, generation: this.generation, element, status,
+            buttons: [], pending: false, controller: null, resetTimer: null, success: '', message: '', error: false };
+        for (const action of ['copy', 'save']) {
+            const button = createEl('button', 'x-posed-export-button');
+            button.type = 'button';
+            button.dataset.action = action;
+            button.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                this._exportImage(state, action);
+            });
+            state.buttons.push(button);
+            element.appendChild(button);
+        }
+        this._renderImageState(state);
+        return state;
+    }
+
+    _renderImageState(state) {
+        for (const button of state.buttons) {
+            const action = button.dataset.action;
+            const success = state.success === action;
+            const label = action === 'copy' ? 'Copy account card as PNG' : 'Save account card as PNG';
+            button.setAttribute('aria-label', label);
+            button.title = success ? (action === 'copy' ? 'PNG copied' : 'PNG download started') : label;
+            // Keep keyboard focus while busy. The handler guards repeat activation.
+            button.setAttribute('aria-disabled', String(state.pending));
+            button.setAttribute('aria-busy', String(state.pending));
+            button.classList.toggle('x-posed-export-button--success', success);
+            button.replaceChildren(dialogIcon(success ? 'check' : action === 'copy' ? 'copy' : 'download', 16));
+        }
+        state.status.textContent = state.message;
+        state.status.hidden = !state.message;
+        state.status.classList.toggle('x-posed-export-status--error', state.error);
+        if (this._isCurrentImageState(state)) positionCard(this.card, this.currentAnchor);
+    }
+
+    _exportImage(state, action) {
+        if (!this._isCurrentImageState(state) || state.pending) return;
+        if (state.resetTimer) clearTimeout(state.resetTimer);
+        state.resetTimer = null;
+        state.success = '';
+        state.error = false;
+        if (action === 'copy' && (!navigator.clipboard?.write || !window.ClipboardItem)) {
+            state.error = true;
+            state.message = 'Image copying is unavailable here. Use Save PNG.';
+            this._renderImageState(state);
+            return;
+        }
+        const controller = new AbortController();
+        state.controller = controller;
+        state.pending = true;
+        state.message = 'Creating PNG…';
+        let png;
+        let transfer;
+        try {
+            // Snapshot immediately and initiate write in this click handler. Passing
+            // the PNG promise preserves activation while artwork is rasterized.
+            png = createHovercardPng(this.card, { signal: controller.signal }).then(blob => {
+                // Check again at Blob delivery, not just at snapshot time. A
+                // closed/replaced card must not finish a pending clipboard job.
+                if (!this._isCurrentImageState(state) || controller.signal.aborted) {
+                    throw new DOMException('Account card image was cancelled.', 'AbortError');
+                }
+                return blob;
+            });
+            transfer = action === 'copy'
+                ? navigator.clipboard.write([new window.ClipboardItem({ 'image/png': png })])
+                : png.then(blob => {
+                    if (!this._isCurrentImageState(state) || controller.signal.aborted) return;
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `x-posed-${state.handle.replace(/[^a-z0-9_]/g, '') || 'account'}-card.png`;
+                    document.body.appendChild(link);
+                    try { link.click(); }
+                    finally {
+                        link.remove();
+                        // Give the browser time to start its download before revoking.
+                        setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    }
+                });
+        } catch (error) {
+            transfer = Promise.reject(error);
+            png ||= Promise.resolve();
+        }
+        this._renderImageState(state);
+        Promise.all([png, transfer]).then(() => {
+            if (!this._isCurrentImageState(state) || controller.signal.aborted) return;
+            state.success = action;
+            state.message = action === 'copy' ? 'PNG copied. Paste it wherever images are supported.' : 'PNG download started.';
+            state.resetTimer = setTimeout(() => {
+                if (!this._isCurrentImageState(state)) return;
+                state.resetTimer = null;
+                state.success = '';
+                state.message = '';
+                this._renderImageState(state);
+            }, 3500);
+        }).catch(error => {
+            controller.abort();
+            if (!this._isCurrentImageState(state) || error?.name === 'AbortError') return;
+            state.error = true;
+            state.message = action === 'copy'
+                ? 'Couldn’t copy the image. Use Save PNG, or try copying again.'
+                : 'Couldn’t create the image. Please try again.';
+        }).finally(() => {
+            if (!this._isCurrentImageState(state)) return;
+            state.pending = false;
+            state.controller = null;
+            this._renderImageState(state);
+        });
+    }
+
+    _disposeImageState() {
+        const state = this.imageState;
+        this.imageState = null;
+        if (!state) return;
+        state.controller?.abort();
+        if (state.resetTimer) clearTimeout(state.resetTimer);
+    }
+
     _createAllowlistState(handle, viewId) {
         if (!/^[a-z0-9_]{1,15}$/.test(handle)) return null;
         const element = createEl('div', 'x-posed-card-actions');
@@ -829,7 +1079,9 @@ class HovercardController {
         button.type = 'button';
         const status = createEl('div', 'x-posed-allowlist-status');
         status.setAttribute('aria-live', 'polite');
-        element.append(button, status);
+        const actionRow = createEl('div', 'x-posed-card-action-row');
+        actionRow.appendChild(button);
+        element.append(actionRow, status);
         const state = { handle, viewId, generation: this.generation, element, button, status,
             allowed: null, pending: true, error: '', message: '' };
         this._renderAllowlist(state);
@@ -941,6 +1193,7 @@ class HovercardController {
                 this.card = buildCardContent({
                     screenName, displayName, displayNamePresentation, fallbackName, info, loading: false,
                     allowlistControl: this.allowlistState?.element,
+                    imageControl: this.imageState,
                     onClose: this._handleClose
                 });
                 this.card.classList.add('x-posed-hovercard-visible');
@@ -973,6 +1226,7 @@ class HovercardController {
                 this.card = buildCardContent({
                     screenName, displayName, displayNamePresentation, info: initialInfo, loading: false, errorText: msg,
                     allowlistControl: this.allowlistState?.element,
+                    imageControl: this.imageState,
                     onClose: this._handleClose
                 });
                 this.card.classList.add('x-posed-hovercard-visible');
@@ -995,6 +1249,7 @@ class HovercardController {
             this.card = buildCardContent({
                 screenName, displayName, displayNamePresentation, fallbackName, info: fresh, loading: false,
                 allowlistControl: this.allowlistState?.element,
+                imageControl: this.imageState,
                 onClose: this._handleClose
             });
             this.card.classList.add('x-posed-hovercard-visible');

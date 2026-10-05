@@ -6,7 +6,6 @@ import browserAPI from '../shared/browser-api.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, CACHE_CONFIG } from '../shared/constants.js';
 import { dialogIcon } from '../content/dialog-icons.js';
 import { deviceIcon, flagImage, glyph } from '../content/icons.js';
-import { createFilterPlaceholder, updateFilterPlaceholder } from '../content/filter-placeholder.js';
 import { BADGE_SIZES, normalizeBadgeSize, applyBadgeAppearance } from '../shared/badge-appearance.js';
 import { mountStatistics } from './statistics.js';
 import { mountBlockingSettings } from '../content/graphite-dialog.js';
@@ -81,7 +80,6 @@ async function initialize() {
     }
     elements.version.textContent = VERSION;
     for (const label of document.querySelectorAll('[data-release-version]')) label.textContent = VERSION;
-    renderReleaseRelatedPreview();
     const cacheDays = Math.round(CACHE_CONFIG.EXPIRY_MS / (24 * 60 * 60 * 1000));
     document.getElementById('cache-expiry').textContent = `Up to ${cacheDays} days`;
     for (const [id] of TOGGLES) document.getElementById(id).disabled = true;
@@ -154,7 +152,7 @@ function setupNav() {
                 const { target, blockingTab, blockingEditor: editor, focusId } = item.dataset;
                 if (target === 'panel-blocking' && (blockingTab === 'allowed' ||
                     (blockingTab === 'behavior' && focusId === 'x-g-behavior-hideRelatedPosts') ||
-                    (blockingTab === 'add' && editor === 'accountCounts'))) {
+                    (blockingTab === 'add' && ['accountCounts', 'regions'].includes(editor)))) {
                     pendingReleaseNavigation = { target, tab: blockingTab, editor: blockingTab === 'add' ? editor : null, focusId };
                 } else if (target === 'panel-display' && focusId === 'opt-badge-size') {
                     pendingReleaseNavigation = { target, focusId };
@@ -190,35 +188,6 @@ function applyPendingReleaseNavigation() {
     pendingReleaseNavigation = null;
     control.focus({ preventScroll: true });
     return true;
-}
-
-/** A local example using the real reveal-card markup, never the user's filters. */
-function renderReleaseRelatedPreview() {
-    const slot = document.getElementById('release-related-placeholder');
-    const example = document.getElementById('release-related-example');
-    const reset = document.getElementById('release-related-reset');
-    if (!slot || !example || !reset) return;
-    const reveal = createFilterPlaceholder({ title: 'Post hidden', action: 'Show post', related: true });
-    updateFilterPlaceholder(reveal, {
-        reasonText: 'Quotes a filtered post · Country: Netherlands',
-        description: 'Example quote hidden because its source matches a country filter.'
-    });
-    reveal.setAttribute('aria-controls', example.id);
-    reveal.setAttribute('aria-expanded', 'false');
-    reveal.setAttribute('aria-describedby', 'release-related-caption');
-    reveal.addEventListener('click', () => {
-        slot.hidden = true;
-        example.hidden = false;
-        reveal.setAttribute('aria-expanded', 'true');
-        reset.focus({ preventScroll: true });
-    });
-    reset.addEventListener('click', () => {
-        example.hidden = true;
-        slot.hidden = false;
-        reveal.setAttribute('aria-expanded', 'false');
-        reveal.focus({ preventScroll: true });
-    });
-    slot.replaceChildren(reveal);
 }
 
 function applySettingsToInputs() {
@@ -377,8 +346,17 @@ async function saveSettings(newSettings) {
             throw new Error('Save failed');
         }
         acceptSettings(response.data, response.revision);
+        const regions = FILTER_SOURCES.find(source => source.kind === 'regions');
+        if (Array.isArray(response.blockedRegions)) {
+            acceptList(regions, response.blockedRegions, response.regionsRevision);
+        }
         showSaveStatus();
-        return { success: true, data: currentSettings, revision: snapshots.snapshot()[MESSAGE_TYPES.SETTINGS_UPDATED] };
+        return {
+            success: true, data: currentSettings, revision: snapshots.snapshot()[MESSAGE_TYPES.SETTINGS_UPDATED],
+            ...(Array.isArray(response.blockedRegions) ? {
+                blockedRegions: listState[regions.field], regionsRevision: snapshots.snapshot()[regions.update]
+            } : {})
+        };
     } catch (error) {
         console.error('Failed to save settings:', error);
         applySettingsToInputs();
@@ -600,6 +578,8 @@ async function checkWhatsNew() {
     // Check URL parameter
     const urlParams = new URLSearchParams(window.location.search);
     const showWhatsNew = urlParams.get('whats-new') === 'true';
+    const showWelcome = urlParams.get('welcome') === 'true';
+    if (showWelcome) document.getElementById('release-heading').textContent = 'Welcome to X-Posed';
     
     // Also check storage flag
     let storageShowWhatsNew = false;
@@ -610,7 +590,7 @@ async function checkWhatsNew() {
         console.debug('Could not check whats-new storage flag');
     }
     
-    if (showWhatsNew || storageShowWhatsNew) {
+    if (showWelcome || showWhatsNew || storageShowWhatsNew) {
         banner.style.display = 'block';
         
         // Scroll to top to show banner
@@ -631,12 +611,12 @@ async function checkWhatsNew() {
                     console.debug('Could not save whats-new seen flag');
                 }
                 
-                // Remove URL parameter if present
-                if (showWhatsNew) {
-                    const newUrl = new URL(window.location.href);
-                    newUrl.searchParams.delete('whats-new');
-                    window.history.replaceState({}, document.title, newUrl);
-                }
+                // Read the current URL after the async write, preserving any
+                // settings shortcut or history navigation that happened meanwhile.
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.delete('whats-new');
+                newUrl.searchParams.delete('welcome');
+                window.history.replaceState({}, document.title, newUrl);
             });
         }
     }

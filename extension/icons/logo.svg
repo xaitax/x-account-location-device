@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>X-Posed</title>
+  <desc>Four soft mint ribbons form an open X in front of a muted teal outline globe, on a Graphite tile.</desc>
+  <rect x="4" y="4" width="120" height="120" rx="27" fill="#191C20"/>
+  <defs>
+    <path id="x-posed-ribbon" d="M22 24H39.4C44.4 24 47.2 25.9 50.8 30L61 43C64.1 46.4 64 49.1 61 51.8L51.7 60.2C49.1 62.7 46.8 63.8 43.4 61.7L39.3 59C34.9 56 32.9 52.8 30.5 48.2L18.5 28C17.1 25.6 18.4 24 22 24Z"/>
+  </defs>
+  <g stroke="#568579" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="64" cy="64" r="47" stroke-width="2.2"/>
+    <ellipse cx="64" cy="64" rx="13.2" ry="47" stroke-width="1.7"/>
+    <path d="M17.6 61.5C38 73 90 73 110.4 61.5" stroke-width="1.7"/>
+  </g>
+  <g fill="#91D2C2">
+    <use href="#x-posed-ribbon"/>
+    <use href="#x-posed-ribbon" transform="translate(128 0) scale(-1 1)"/>
+    <use href="#x-posed-ribbon" transform="translate(0 128) scale(1 -1)"/>
+    <use href="#x-posed-ribbon" transform="translate(128 128) scale(-1 -1)"/>
+  </g>
+</svg>

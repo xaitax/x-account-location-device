@@ -15,27 +15,33 @@
         <div class="whats-new-banner" id="whats-new-banner" role="region" aria-labelledby="whats-new-title" style="display: none;">
             <button type="button" class="whats-new-close" id="whats-new-close" aria-label="Dismiss what's new" data-settings-icon="close"></button>
             <div class="whats-new-content">
-                <h2 id="whats-new-title">What's new in X-Posed <span data-release-version>4.1.1</span></h2>
-                <p class="whats-new-subtitle">More control. Less clutter.</p>
+                <h2 id="whats-new-title"><span id="release-heading">What's new in X-Posed</span> <span data-release-version>4.2.0</span></h2>
+                <p class="whats-new-subtitle">Bigger filters. Shareable details. Still your feed.</p>
 
-                <section class="whats-new-related" aria-labelledby="whats-new-related-title">
-                    <div class="whats-new-feature whats-new-related-copy">
-                        <span class="whats-new-requested">Highly requested</span>
-                        <h3 id="whats-new-related-title">Hide replies and quotes, too</h3>
-                        <p>Collapse replies and quotes of filtered posts, even when the original is only highlighted. Each hidden post shows why and can be revealed with a click.</p>
-                        <p class="whats-new-related-note">Off by default. Always Show still takes priority.</p>
-                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="behavior" data-focus-id="x-g-behavior-hideRelatedPosts">Try related-post filtering <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
-                    </div>
-                    <figure class="whats-new-related-preview" id="release-related-preview">
-                        <figcaption id="release-related-caption">Try the preview · example data</figcaption>
-                        <div id="release-related-placeholder"></div>
-                        <div class="whats-new-example" id="release-related-example" hidden>
-                            <div class="whats-new-example-author"><strong>Example account</strong> <span>@example</span></div>
-                            <p>Here’s a quote of a post that matches your filters.</p>
-                            <div class="whats-new-example-source"><span>Country: Netherlands</span><p>A filtered source post.</p></div>
-                            <button type="button" class="whats-new-preview-reset" id="release-related-reset">Reset preview</button>
+                <div class="whats-new-features">
+                    <section class="whats-new-feature whats-new-region-feature" aria-labelledby="whats-new-regions-title">
+                        <span class="whats-new-requested"><span class="settings-icon" data-settings-icon="map" aria-hidden="true"></span>You asked. It’s here.</span>
+                        <h3 id="whats-new-regions-title">Regions, now with countries.</h3>
+                        <p>X sometimes says “Europe” instead of naming a country. Now a region filter can cover that X label <strong>and the countries you choose inside it</strong>.</p>
+                        <p class="whats-new-feature-note">Pick a few, include them all, or keep matching the label only. Your existing filters stay as they are until you choose.</p>
+                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="add" data-blocking-editor="regions">Choose my regions <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
+                    </section>
+
+                    <section class="whats-new-feature whats-new-card-feature" aria-labelledby="whats-new-cards-title">
+                        <span class="whats-new-feature-eyebrow">A good card deserves to be shared</span>
+                        <h3 id="whats-new-cards-title">Copy or save account cards</h3>
+                        <p>Turn any account card into a crisp PNG—ready to paste into a chat or keep for later. Same lovely card, without buttons or surrounding posts.</p>
+                        <div class="release-export-guide">
+                            <span class="release-export-guide-icon settings-icon" data-settings-icon="copy" aria-hidden="true"></span><span><strong>Copy PNG</strong> to paste it</span>
+                            <span class="release-export-guide-icon settings-icon" data-settings-icon="download" aria-hidden="true"></span><span><strong>Save PNG</strong> to keep it</span>
                         </div>
-                    </figure>
+                        <p class="whats-new-feature-note">Open an account card on X, then use either icon. Images are created on your device. If copying is blocked, Save PNG has you covered.</p>
+                    </section>
+                </div>
+
+                <section class="whats-new-polish" aria-labelledby="whats-new-polish-title">
+                    <h3 id="whats-new-polish-title">A little extra polish</h3>
+                    <p>A short hover delay means fewer accidental popups. Blue, gold and grey verification get their proper colors. Saved filters get matching icons, and more countries and territories get their flags.</p>
                 </section>
                 <div class="whats-new-actions">
                     <a href="#panel-general" class="btn btn-primary whats-new-open" data-target="panel-general">Continue to settings</a>
@@ -46,13 +52,14 @@
                         <span class="settings-icon" data-settings-icon="heart" aria-hidden="true"></span>
                         Made possible by you
                     </h3>
-                    <p><strong>A huge thank you to everyone who has donated.</strong> You keep X-Posed free and the community cache running. September's server bill: <strong>US$273.32</strong>. Donations are entirely optional, but help tremendously.</p>
+                    <p><strong>A massive thank you to everyone who has donated.</strong> Your generosity helps keep the community cache and infrastructure paid for—and X-Posed free for everyone. Donations are entirely optional and deeply appreciated.</p>
                     <div class="whats-new-support-actions">
                         <a href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener noreferrer" class="btn whats-new-support-action">
                             <span class="settings-icon" data-settings-icon="coffee" aria-hidden="true"></span>
                             Buy me a coffee
                         </a>
                         <a href="#panel-about" class="btn whats-new-support-action whats-new-open" data-target="panel-about">
+                            <span class="settings-icon" data-settings-icon="wallet" aria-hidden="true"></span>
                             Crypto options
                             <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span>
                         </a>
@@ -64,7 +71,7 @@
 
         <header class="options-header">
             <div class="header-content">
-                <img src="../icons/icon48.png" alt="" class="header-icon" width="36" height="36">
+                <img src="../icons/logo.svg" alt="" class="header-icon" width="56" height="56">
                 <div>
                     <span class="header-brand">X-Posed</span>
                     <h1 tabindex="-1">Settings</h1>
@@ -447,7 +454,7 @@
                 </h2>
 
                 <div class="about-info">
-                    <p><strong>X-Posed</strong> v<span id="version">4.1.1</span></p>
+                    <p><strong>X-Posed</strong> v<span id="version">4.2.0</span></p>
                     <p class="text-muted">See where X users are located and what devices they use.</p>
                     
                     <div class="about-links">

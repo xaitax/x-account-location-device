@@ -27,9 +27,10 @@ button:focus:not(:focus-visible) { outline: none; }
 .brand-logo { display: block; flex-shrink: 0; object-fit: contain; }
 .brand h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 600; letter-spacing: -.025em; white-space: nowrap; }
 .version { display: block; min-height: 16px; margin-top: 1px; color: var(--xp-text-dim); font-size: 11px; line-height: 1.4; }
-.support-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 5px 8px; margin-right: -8px; border-radius: 6px; color: var(--xp-text-dim); font-size: 12px; }
+.support-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 5px 8px; margin-right: -8px; border: 1px solid var(--xp-support-line); border-radius: 6px; background: var(--xp-support-soft); color: var(--xp-support); font-size: 12px; }
 .support-link .popup-icon, .support-link svg { width: 15px; height: 15px; flex-basis: 15px; }
-.support-link:hover { background: var(--xp-surface); color: var(--xp-accent); }
+.support-link:hover { border-color: var(--xp-support); background: var(--xp-support-soft); color: var(--xp-support); }
+.support-link:focus-visible { outline-color: var(--xp-support); }
 
 .extension-state { display: flex; align-items: center; gap: 11px; min-height: 80px; padding: 13px; border: 1px solid var(--xp-border); border-radius: 10px; background: var(--xp-surface); }
 .state-icon { width: 32px; height: 32px; flex-basis: 32px; border-radius: 8px; background: var(--xp-surface-2); color: var(--xp-text-dim); }

@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from './constants.js';
 import { FILTER_SOURCES } from './filter-registry.js';
 import { ACCOUNT_COUNT_FILTERS, isAccountCountThreshold } from './account-counts.js';
 import { BADGE_SIZES } from './badge-appearance.js';
+import { normalizeRegionCountrySelections } from './region-membership.js';
 
 export const BACKUP_FORMAT = '2.4';
 
@@ -20,6 +21,10 @@ export function prepareBackupImport(data) {
         for (const [key, fallback] of Object.entries(DEFAULT_SETTINGS)) {
             if (!Object.hasOwn(data.settings, key)) continue;
             const value = data.settings[key];
+            if (key === 'regionCountrySelections') {
+                result.settings[key] = normalizeRegionCountrySelections(value, { strict: true });
+                continue;
+            }
             const countRule = ACCOUNT_COUNT_FILTERS.find(rule => rule.key === key);
             if (typeof value !== typeof fallback ||
                 (key === 'hovercardTrigger' && !['hover', 'click'].includes(value)) ||

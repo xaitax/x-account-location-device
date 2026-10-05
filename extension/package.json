@@ -1,6 +1,6 @@
 {
   "name": "x-posed-extension",
-  "version": "4.1.1",
+  "version": "4.2.0",
   "description": "See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.",
   "type": "module",
   "scripts": {
@@ -17,6 +17,8 @@
     "package:firefox": "rimraf dist/firefox && npm run build:firefox && node scripts/zip.js firefox",
     "package": "npm run package:chrome && npm run package:firefox",
     "check:parsers": "node scripts/check-parsers.mjs",
+    "check:regions": "node scripts/check-regions.mjs",
+    "check:hover-intent": "node scripts/check-hover-intent.mjs",
     "check:build": "node scripts/check-build.mjs",
     "lint": "eslint src/**/*.js && npm run check:parsers",
     "lint:fix": "eslint src/**/*.js --fix"

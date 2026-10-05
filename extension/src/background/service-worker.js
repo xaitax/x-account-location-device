@@ -562,9 +562,31 @@ function publishSettings({ data, revision }) {
     return { success: true, data, revision };
 }
 
-/** Persist a partial settings patch before acknowledging or broadcasting it. */
+/** Persist a settings patch or atomic region edit before acknowledging or broadcasting it. */
 async function handleSetSettings(newSettings) {
-    await settings.set(newSettings);
+    if (newSettings && Object.hasOwn(newSettings, 'regionCountrySelection')) {
+        // Transport-only command; the singular key is never a stored preference.
+        const update = newSettings.regionCountrySelection;
+        if (Object.keys(newSettings).length !== 1 || !update || typeof update !== 'object' ||
+            Array.isArray(update) || !Object.hasOwn(update, 'region') || !Object.hasOwn(update, 'countries') ||
+            (Object.hasOwn(update, 'activate') && typeof update.activate !== 'boolean')) {
+            throw new TypeError('Invalid region-country update.');
+        }
+        await settings.setRegionCountries(update.region, update.countries, {
+            activate: update.activate === true, regionStore: filterStores.blockedRegions
+        });
+        if (update.activate === true) {
+            const snapshot = settings.snapshot();
+            const regions = filterStores.blockedRegions.snapshot();
+            broadcastToAll([
+                { type: MESSAGE_TYPES.SETTINGS_UPDATED, payload: snapshot.data, revision: snapshot.revision },
+                { type: MESSAGE_TYPES.BLOCKED_REGIONS_UPDATED, payload: regions.data, revision: regions.revision }
+            ]);
+            return { success: true, ...snapshot, blockedRegions: regions.data, regionsRevision: regions.revision };
+        }
+    } else {
+        await settings.set(newSettings);
+    }
     return publishSettings(settings.snapshot());
 }
 
@@ -971,19 +993,19 @@ async function handleInstalled(details) {
             console.warn('Could not enable cloud cache on install:', cloudErr);
         }
 
-        // Open options page to welcome new users
-        browserAPI.runtime.openOptionsPage();
+        // The same release tour introduces the extension to new users.
+        const welcomeUrl = browserAPI.runtime.getURL('options/options.html') + '?welcome=true';
+        browserAPI.tabs.create({ url: welcomeUrl });
     } else if (details.reason === 'update') {
         // Extension updated
         const previousVersion = details.previousVersion || '1.0.0';
         console.log('Updated from version:', previousVersion);
         
-        // Major/minor updates show "What's New"; 4.1.1 is a feature-bearing patch.
+        // Major/minor updates show "What's New"; ordinary patches stay quiet.
         const prevMajorMinor = previousVersion.split('.').slice(0, 2).join('.');
         const currentMajorMinor = VERSION.split('.').slice(0, 2).join('.');
-        const featurePatch = VERSION === '4.1.1' && previousVersion !== VERSION;
         
-        if (prevMajorMinor !== currentMajorMinor || featurePatch) {
+        if (prevMajorMinor !== currentMajorMinor) {
             console.log(`🆕 Feature update: ${previousVersion} → ${VERSION}`);
             
             // Mark that we should show the "What's New" banner

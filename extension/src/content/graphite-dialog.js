@@ -1,24 +1,25 @@
 /** Graphite filtering dialog. All changes use the existing revisioned storage API. */
-import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, MESSAGE_TYPES } from '../shared/constants.js';
+import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, MESSAGE_TYPES, canonicalCountry } from '../shared/constants.js';
 import { createElement, formatCountryName, describeTagRisk } from '../shared/utils.js';
 import { normalizeLinkRule, normalizeDomain, normalizeExactUrl, findBlockedDomain, DOMAIN_LIMITS } from '../shared/domain-utils.js';
 import { createSnapshotTracker } from '../shared/state-sync.js';
 import { createBlockingModeControl } from '../shared/blocking-mode-control.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
 import { ACCOUNT_COUNT_FILTERS, isAccountCountThreshold } from '../shared/account-counts.js';
+import { getRegionCountries, getRegionDescription, getIncludedRegionCountries, hasRegionCountrySelection } from '../shared/region-membership.js';
 import { flagImage } from './icons.js';
 import { dialogIcon as glyph } from './dialog-icons.js';
 
 const SOURCES = [
     { key: 'countries', title: 'Countries', label: 'Country', icon: 'globe', hint: 'Countries reported by X.' },
-    { key: 'regions', title: 'X regions', label: 'X region', icon: 'map', hint: 'Regional labels reported by X.' },
+    { key: 'regions', title: 'Regions', label: 'Region', icon: 'map', hint: 'X region labels and optional member countries.' },
     { key: 'tags', title: 'Display name', label: 'Display name', icon: 'tag', hint: 'Words or emoji in display names.' },
     { key: 'bioTags', title: 'Bio text', label: 'Bio text', icon: 'info', hint: 'Words or phrases in profile bios.' },
     { key: 'links', title: 'Domains & URLs', label: 'Link', icon: 'share', hint: 'Whole websites or exact URLs.' },
     { key: 'pcf', title: 'Account labels', label: 'Account label', icon: 'verified', hint: 'Parody, Commentary, Fan or grey checkmark.' },
     { key: 'affiliations', title: 'Organization affiliation', label: 'Organization', icon: 'affiliation', hint: 'Organization names or handles.' },
     { key: 'languages', title: 'Post languages', label: 'Post language', icon: 'languages', hint: 'The language X detects in a post.' },
-    { key: 'allowedUsers', title: 'Always Show', label: 'Account', icon: 'shield' }
+    { key: 'allowedUsers', title: 'Always Show', label: 'Account', icon: 'atSign' }
 ].map(view => ({ ...FILTER_SOURCES.find(source => source.kind === view.key), ...view }));
 // This is a presentation label. Keep the source and setting keys stable for backups.
 const COUNT_SOURCE = { key: 'accountCounts', title: 'Activity & names', icon: 'chart', hint: 'Following, total posts and digits in account names.' };
@@ -136,6 +137,8 @@ function createBlockingSurface(config, container = null) {
     let deferredFocusId = '';
     const pending = new Set();
     const drafts = Object.create(null);
+    const expandedRegions = new Set();
+    const regionQueries = Object.create(null);
     const view = { tab: 'add', editor: null, query: '', source: 'all', catalogQuery: '', selectedOnly: false, userQuery: '', linkMode: 'auto', clearKind: null, countMetric: ACCOUNT_COUNT_FILTERS[0].key };
 
     const overlay = embedded ? null : el('div', `${CSS_CLASSES.MODAL_OVERLAY} xp-graphite-overlay`);
@@ -241,6 +244,7 @@ function createBlockingSurface(config, container = null) {
             response = await config.onSettingsChange?.(patch);
             if (!response?.success || !response.data) throw new Error('Save failed');
             updateSettings(response.data, response.revision);
+            if (Array.isArray(response.blockedRegions)) updateList('regions', response.blockedRegions, response.regionsRevision);
             setStatus('Changes saved');
         } catch {
             response = { success: false };
@@ -304,13 +308,31 @@ function createBlockingSurface(config, container = null) {
         const label = source.key === 'links' ? (value.includes('://') ? 'Exact URL' : 'Domain') : source.label;
         const kind = el('span', 'xp-g-kind', label);
         const content = el('span', `xp-g-value${source.key === 'links' ? ' mono' : ''}`);
-        const icon = locationIcon(source.key, value);
-        if (icon) content.append(icon);
-        content.append(el('span', '', sourceLabel(source.key, value)));
+        content.append(locationIcon(source.key, value) || glyph(source.icon, 18));
+        const text = el('span', '', sourceLabel(source.key, value));
+        if (source.key === 'regions') {
+            row.classList.add('xp-g-region-saved-row');
+            const included = getIncludedRegionCountries(value, settings.regionCountrySelections);
+            text.append(el('small', '', included.length
+                ? `X label + ${included.length} ${included.length === 1 ? 'country' : 'countries'}` : 'X label only'));
+        }
+        content.append(text);
         const remove = iconButton(`Remove ${label}: ${sourceLabel(source.key, value)}`, 'close', () => mutate(source.key, 'remove', value));
         remove.id = `x-g-remove-${source.key}-${encodeURIComponent(value)}`;
         remove.disabled = pending.has(`${source.key}:${value}`) || pending.has(`${source.key}:undefined`);
-        row.append(kind, content, remove);
+        if (source.key === 'regions') {
+            const actions = el('div', 'xp-g-row-actions');
+            const edit = button('Edit', () => {
+                expandedRegions.add(value);
+                navigate('add', 'regions');
+                findById(`x-g-region-expand-${encodeURIComponent(value)}`)?.focus({ preventScroll: true });
+                findById(`x-g-region-${encodeURIComponent(value)}`)?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+            }, 'xp-g-button ghost');
+            edit.id = `x-g-edit-region-${encodeURIComponent(value)}`;
+            edit.setAttribute('aria-label', `Edit ${sourceLabel(source.key, value)} region filter`);
+            actions.append(edit, remove);
+            row.append(kind, content, actions);
+        } else row.append(kind, content, remove);
         return row;
     }
 
@@ -328,8 +350,10 @@ function createBlockingSurface(config, container = null) {
         const metric = ACCOUNT_COUNT_FILTERS.find(item => item.key === key);
         const row = el('div', 'xp-g-row xp-g-count-row');
         row.dataset.countKey = key;
-        const value = el('span', 'xp-g-value', `${countFormat.format(settings[key])} or more`);
-        if (metric.requiresProfile && settings.profileEnrichment === false) value.append(el('small', '', 'Inactive: profile details disabled'));
+        const value = el('span', 'xp-g-value');
+        const text = el('span', '', `${countFormat.format(settings[key])} or more`);
+        if (metric.requiresProfile && settings.profileEnrichment === false) text.append(el('small', '', 'Inactive: profile details disabled'));
+        value.append(glyph(COUNT_SOURCE.icon, 18), text);
         const actions = el('div', 'xp-g-row-actions');
         const edit = button('Edit', () => {
             view.countMetric = key;
@@ -425,6 +449,7 @@ function createBlockingSurface(config, container = null) {
     }
 
     function renderCatalog(kind) {
+        if (kind === 'regions') return renderRegions();
         const container = el('div');
         const source = SOURCES.find(item => item.key === kind);
         const toolbar = el('div', 'xp-g-catalog-tools');
@@ -440,9 +465,8 @@ function createBlockingSurface(config, container = null) {
         const catalog = [...CATALOGS[kind]];
         for (const value of sets[kind]) if (!catalog.some(item => item.value === value)) catalog.push({ value, label: sourceLabel(kind, value) });
         const shown = catalog.filter(item => (!view.selectedOnly || sets[kind].has(item.value)) && `${item.label} ${item.value}`.toLocaleLowerCase().includes(query));
-        container.append(el('p', 'xp-g-help', kind === 'regions' ? 'Regions match the label reported by X. Selecting Europe does not select individual European countries.'
-            : kind === 'languages' ? 'Uses the language X detects for the post, not the author’s country. Unknown languages are not filtered.'
-                : kind === 'pcf' ? 'Uses X’s account labels and rendered grey verification badge, not words in a bio.' : 'Select as many countries as you need. Your selection stays saved when you search.'), toolbar,
+        container.append(el('p', 'xp-g-help', kind === 'languages' ? 'Uses the language X detects for the post, not the author’s country. Unknown languages are not filtered.'
+            : kind === 'pcf' ? 'Uses X’s account labels and rendered grey verification badge, not words in a bio.' : 'Select as many countries as you need. Your selection stays saved when you search.'), toolbar,
         el('p', 'xp-g-catalog-summary', `${sets[kind].size} selected · ${shown.length} shown`));
         const list = el('div', 'xp-g-list');
         for (const item of shown) {
@@ -461,6 +485,161 @@ function createBlockingSurface(config, container = null) {
         container.append(list);
         if (!shown.length) container.append(empty(view.selectedOnly && !sets[kind].size ? 'Nothing selected yet' : 'No matches', 'Your other selections are still saved.', 'Show all', () => { view.catalogQuery = ''; view.selectedOnly = false; render(); }));
         return container;
+    }
+
+    function saveRegionCountries(regionKey, countries, { activate = false } = {}) {
+        return changeSettings({ regionCountrySelection: {
+            region: regionKey, countries: countries === null ? null : [...countries], ...(activate ? { activate: true } : {})
+        } });
+    }
+
+    function renderRegions() {
+        const container = el('div', 'xp-g-regions');
+        const toolbar = el('div', 'xp-g-catalog-tools');
+        const segmented = el('div', 'xp-g-segmented');
+        for (const [selected, text] of [[false, 'All'], [true, `Selected (${sets.regions.size})`]]) {
+            const choice = button(text, () => { view.selectedOnly = selected; render(); });
+            choice.id = `x-g-catalog-${selected ? 'selected' : 'all'}`;
+            choice.setAttribute('aria-pressed', String(view.selectedOnly === selected));
+            segmented.append(choice);
+        }
+        toolbar.append(search('x-g-catalog-search', 'Find region or country', view.catalogQuery, value => { view.catalogQuery = value; }), segmented);
+        const query = view.catalogQuery.trim().toLocaleLowerCase();
+        const canonicalQuery = canonicalCountry(view.catalogQuery.trim());
+        const catalog = [...CATALOGS.regions];
+        for (const value of sets.regions) if (!catalog.some(item => item.value === value)) catalog.push({ value, label: sourceLabel('regions', value) });
+        const shown = catalog.filter(item => (!view.selectedOnly || sets.regions.has(item.value)) && (
+            `${item.label} ${item.value} ${getRegionCountries(item.value).map(formatCountryName).join(' ')}`.toLocaleLowerCase().includes(query) ||
+            (query && getRegionCountries(item.value).includes(canonicalQuery))));
+        const includedCountries = new Set([...sets.regions].flatMap(regionKey => getIncludedRegionCountries(regionKey, settings.regionCountrySelections)));
+        const summary = [`${sets.regions.size} ${sets.regions.size === 1 ? 'region' : 'regions'} selected`];
+        if (includedCountries.size) summary.push(`${includedCountries.size} ${includedCountries.size === 1 ? 'country' : 'countries'} included`);
+        summary.push(`${shown.length} shown`);
+        container.append(el('p', 'xp-g-help', 'Select an X region label, or expand a region to choose countries and territories.'), toolbar,
+            el('p', 'xp-g-catalog-summary', summary.join(' · ')));
+        const list = el('div', 'xp-g-region-list');
+        for (const item of shown) list.append(renderRegion(item));
+        container.append(list);
+        if (!shown.length) {
+            container.append(empty(view.selectedOnly && !sets.regions.size ? 'Nothing selected yet' : 'No matching regions',
+                'Your other selections are still saved.', 'Show all', () => { view.catalogQuery = ''; view.selectedOnly = false; render(); }));
+        } else container.append(el('p', 'xp-g-region-note', 'Countries can belong to several regions. Other region and country filters still apply when you deselect a country here.'));
+        return container;
+    }
+
+    function renderRegion(item) {
+        const regionKey = item.value;
+        const id = encodeURIComponent(regionKey);
+        const selected = sets.regions.has(regionKey);
+        const expanded = expandedRegions.has(regionKey);
+        const countries = getRegionCountries(regionKey);
+        const include = hasRegionCountrySelection(regionKey, settings.regionCountrySelections);
+        const included = new Set(getIncludedRegionCountries(regionKey, settings.regionCountrySelections));
+        const regionBusy = pending.has(`regions:${regionKey}`) || pending.has('regions:undefined');
+        const busy = regionBusy || pending.has('settings');
+        const row = el('section', 'xp-g-region');
+        row.id = `x-g-region-${id}`;
+        row.dataset.selected = String(selected);
+        const heading = el('div', 'xp-g-region-heading');
+        const disclosure = button('', () => {
+            if (expandedRegions.has(regionKey)) expandedRegions.delete(regionKey);
+            else expandedRegions.add(regionKey);
+            render();
+        }, 'xp-g-region-disclosure');
+        disclosure.id = `x-g-region-expand-${id}`;
+        disclosure.setAttribute('aria-expanded', String(expanded));
+        disclosure.setAttribute('aria-controls', `x-g-region-panel-${id}`);
+        disclosure.setAttribute('aria-label', `${expanded ? 'Hide' : 'View'} ${item.label} countries and region options`);
+        const text = el('span', 'xp-g-region-text');
+        const name = el('strong', '', item.label);
+        name.id = `x-g-region-name-${id}`;
+        const coverage = selected ? include ? `X label + ${included.size} of ${countries.length} countries` : countries.length ? `X label only · ${countries.length} countries available` : 'X label only'
+            : countries.length ? `${countries.length} ${countries.length === 1 ? 'country' : 'countries'} · View list` : 'X label only';
+        const coverageText = el('small', 'xp-g-region-coverage', coverage);
+        coverageText.id = `x-g-region-coverage-${id}`;
+        disclosure.setAttribute('aria-describedby', coverageText.id);
+        text.append(name, coverageText);
+        const arrow = glyph('chevronRight', 16);
+        arrow.classList.add('xp-g-region-chevron');
+        disclosure.append(locationIcon('regions', regionKey), text, arrow);
+        const toggle = el('label', 'xp-g-region-toggle');
+        const input = createElement('input', {
+            type: 'checkbox', id: `x-g-choice-regions-${id}`, 'aria-label': `Filter ${item.label}`
+        });
+        input.checked = selected;
+        input.disabled = busy;
+        input.addEventListener('change', () => {
+            if (input.checked) expandedRegions.add(regionKey);
+            mutate('regions', input.checked ? 'add' : 'remove', regionKey);
+        });
+        toggle.append(input);
+        heading.append(disclosure, toggle);
+        const panel = el('div', 'xp-g-region-panel');
+        panel.id = `x-g-region-panel-${id}`;
+        panel.hidden = !expanded;
+        panel.setAttribute('role', 'group');
+        panel.setAttribute('aria-labelledby', name.id);
+        if (expanded) {
+            if (countries.length) {
+                const description = getRegionDescription(regionKey);
+                if (description) panel.append(el('p', 'xp-g-region-definition', description));
+                const controls = el('div', 'xp-g-region-controls');
+                const inclusion = el('label', 'xp-g-region-include');
+                const includeInput = createElement('input', { type: 'checkbox', id: `x-g-region-include-${id}` });
+                includeInput.checked = include;
+                includeInput.disabled = busy;
+                includeInput.addEventListener('change', () => saveRegionCountries(regionKey, includeInput.checked ? countries : null,
+                    { activate: includeInput.checked }));
+                inclusion.append(includeInput, el('span', '', 'Include countries'));
+                const count = el('span', 'xp-g-region-member-count', include ? `${included.size} of ${countries.length} included` : `${countries.length} countries & territories`);
+                controls.append(inclusion, count);
+                panel.append(controls);
+                if (!selected) panel.append(el('p', 'xp-g-region-hint', 'Choosing countries automatically enables this region. Include countries selects all.'));
+                else if (!include) panel.append(el('p', 'xp-g-region-hint', 'Choose individual countries below, or use Include countries to select them all.'));
+                const tools = el('div', 'xp-g-region-country-tools');
+                tools.append(search(`x-g-region-search-${id}`, `Search ${item.label} countries`, regionQueries[regionKey] || '', value => { regionQueries[regionKey] = value; }));
+                const actions = el('div', 'xp-g-region-country-actions');
+                for (const [title, members] of [['All', countries], ['None', []]]) {
+                    const action = button(title, () => saveRegionCountries(regionKey, members, { activate: members.length > 0 }), 'xp-g-button ghost');
+                    action.id = `x-g-region-${title.toLowerCase()}-${id}`;
+                    action.setAttribute('aria-label', `${title === 'All' ? 'Include all' : 'Deselect all'} ${item.label} countries`);
+                    action.disabled = busy;
+                    actions.append(action);
+                }
+                tools.append(actions);
+                panel.append(tools);
+                const countryQuery = (regionQueries[regionKey] || '').trim().toLocaleLowerCase();
+                const canonicalCountryQuery = canonicalCountry((regionQueries[regionKey] || '').trim());
+                const members = countries.filter(country => `${country} ${formatCountryName(country)}`.toLocaleLowerCase().includes(countryQuery) ||
+                    (countryQuery && country === canonicalCountryQuery));
+                const grid = el('div', 'xp-g-region-countries');
+                grid.id = `x-g-region-countries-${id}`;
+                grid.setAttribute('role', 'group');
+                grid.setAttribute('aria-label', `${item.label} countries`);
+                for (const country of members) {
+                    const label = el('label', 'xp-g-region-country');
+                    const member = createElement('input', { type: 'checkbox', id: `x-g-region-country-${id}-${encodeURIComponent(country)}` });
+                    member.checked = include && included.has(country);
+                    member.disabled = busy;
+                    member.addEventListener('change', () => {
+                        const next = new Set(getIncludedRegionCountries(regionKey, settings.regionCountrySelections));
+                        if (member.checked) next.add(country); else next.delete(country);
+                        saveRegionCountries(regionKey, countries.filter(value => next.has(value)), { activate: member.checked });
+                    });
+                    label.dataset.selected = String(member.checked);
+                    label.dataset.disabled = String(member.disabled);
+                    const flag = flagImage(country);
+                    label.append(member);
+                    if (flag) label.append(flag);
+                    label.append(el('span', '', formatCountryName(country)));
+                    grid.append(label);
+                }
+                panel.append(grid);
+                if (!members.length) panel.append(el('p', 'xp-g-region-hint', 'No matching countries. Your selection is unchanged.'));
+            } else panel.append(el('p', 'xp-g-region-hint', 'This saved label has no country mapping. It still matches the region reported by X.'));
+        }
+        row.append(heading, panel);
+        return row;
     }
 
     function settingCheckbox(key, text, help) {
@@ -790,6 +969,7 @@ function createBlockingSurface(config, container = null) {
             ? (focused === body && deferredFocusId ? deferredFocusId : focused.id) : '';
         const selection = focusId && typeof focused.selectionStart === 'number' ? [focused.selectionStart, focused.selectionEnd] : null;
         const scrollTop = body.scrollTop;
+        const regionScroll = [...body.querySelectorAll('.xp-g-region-countries')].map(node => [node.id, node.scrollTop]);
         const count = filterTotal();
         // Keep the tab nodes stable so keyboard focus survives broadcasts.
         if (!tabs.children.length) {for (const [key, text] of [['add', 'Add filter'], ['saved', 'Saved filters'], ['allowed', 'Always Show'], ['behavior', 'Behavior']]) {
@@ -840,6 +1020,12 @@ function createBlockingSurface(config, container = null) {
         } else fragment.append(view.tab === 'add' ? renderChooser() : view.tab === 'saved' ? renderLibrary() : view.tab === 'allowed' ? renderUsers() : renderBehavior());
         body.replaceChildren(fragment);
         body.scrollTop = preserveFocus ? scrollTop : 0;
+        if (preserveFocus) {
+            for (const [id, scroll] of regionScroll) {
+                const replacement = findById(id);
+                if (replacement) replacement.scrollTop = scroll;
+            }
+        }
         if (focusId) {
             const replacement = findById(focusId);
             if (replacement && body.contains(replacement) && !replacement.disabled) {

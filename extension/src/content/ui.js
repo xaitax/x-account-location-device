@@ -192,9 +192,39 @@ export function sanitizeText(text) {
  * Find the insertion point for badge in UserCell
  */
 export function findUserCellInsertionPoint(userCell, screenName) {
+    // X reuses list rows. Drop any previous layout hints before checking the
+    // current structure; the scoped styles only apply while a badge is present.
+    userCell.querySelectorAll('.x-user-cell-handle-row, .x-user-cell-handle-link, .x-user-cell-handle-meta')
+        .forEach(node => node.classList.remove('x-user-cell-handle-row', 'x-user-cell-handle-link', 'x-user-cell-handle-meta'));
+
     const allSpans = userCell.querySelectorAll('span');
     for (const span of allSpans) {
         if (span.textContent === `@${screenName}`) {
+            const link = span.closest('a[href]');
+            if (link && userCell.contains(link) && link.parentElement) {
+                const row = link.parentElement;
+                // Only restyle the dedicated handle wrapper, never the name
+                // column, a combined name/handle link, or the Follow controls.
+                const isHandleOnly = link.textContent.trim() === `@${screenName}` && !link.querySelector('img, svg');
+                const isHandleRow = row !== userCell && Array.from(row.childNodes).every(child =>
+                    child === link || (child.nodeType === Node.TEXT_NODE && !child.textContent.trim()) ||
+                    (child.nodeType === Node.ELEMENT_NODE && child.matches(`.${CSS_CLASSES.INFO_BADGE}, .${CSS_CLASSES.FLAG_SHIMMER}`)));
+                if (isHandleOnly && isHandleRow) {
+                    row.classList.add('x-user-cell-handle-row');
+                    link.classList.add('x-user-cell-handle-link');
+
+                    const metadata = row.parentElement;
+                    const followIndicator = metadata?.querySelector('[data-testid="userFollowIndicator"]');
+                    if (metadata !== userCell && followIndicator && !row.contains(followIndicator) &&
+                        Array.from(metadata.children).every(child => child === row ||
+                            (child.contains(followIndicator) && !child.querySelector('a, button, [role="button"], [data-testid^="UserAvatar-Container-"]')))) {
+                        metadata.classList.add('x-user-cell-handle-meta');
+                    }
+                }
+                // Both loading and finished badges belong outside the native
+                // profile link so their controls cannot navigate to the profile.
+                return { target: row, ref: link.nextSibling };
+            }
             return { target: span.parentElement, ref: span.nextSibling };
         }
     }

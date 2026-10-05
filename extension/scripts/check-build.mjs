@@ -35,7 +35,7 @@ for (const browser of browsers) {
     }
     for (const html of ['popup/popup.html', 'options/options.html']) {
         const text = read(`${prefix}${html}`).toString('utf8');
-        for (const match of text.matchAll(/(?:src|href)="([^"#]+\.(?:css|js|png))"/g)) {
+        for (const match of text.matchAll(/(?:src|href)="([^"#]+\.(?:css|js|png|svg))"/g)) {
             assert.ok(fs.existsSync(path.resolve(root, prefix, path.dirname(html), match[1])), `${browser}: missing ${match[1]}`);
         }
     }
