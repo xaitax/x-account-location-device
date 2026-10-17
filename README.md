@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md">Version 4.2</a> ·
+  <a href="CHANGELOG.md">Version 4.3</a> ·
   <a href="#features">Features</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#filtering">Filtering</a> ·
@@ -44,21 +44,21 @@ X-Posed is a free, open-source browser extension for Chrome and Firefox. It brin
 
 Install the extension, reload X, and browse while signed in. Open an account badge for details, or choose **Manage filters** in the extension popup to configure your timeline.
 
-This README describes source version 4.2.0. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
+This README describes source version 4.3.0. Browser-store updates roll out separately. For local installation, see [Build from source](#build-from-source).
 
 **iPhone and iPad:** a separate [X-Posed Location companion app](https://apps.apple.com/us/app/x-posed-location/id6755918713) offers username lookups. It is not the browser extension and does not provide the same timeline features.
 
 ## Features
 
 - **Account context, inline.** Country flags, Apple/Android/Web source icons and location warnings beside usernames. Choose which indicators you see, select Small/Medium/Large badges, or turn off the background for icons only. Preview changes in **Settings → Display**.
-- **Compact account details.** Open a badge for country, connection source, account age, blue/gold/grey verification, handle changes, affiliation and follower, following, post and media counts, where available. Hover, click and touch controls are supported. Icon-only Copy PNG and Save PNG controls export the card's current design locally, without buttons or surrounding posts; use Save PNG when image copying is unavailable.
+- **Compact account details.** Open a badge for the profile picture, country, connection source, account age, blue/gold/grey verification, handle changes, affiliation and follower, following, post and media counts, where available. Hover, click and touch controls are supported. Copy and Save controls export the card's current design locally, including its profile picture but without buttons or surrounding posts; use Save when image copying is unavailable.
 - **Your timeline, your filters.** Hide matching posts or keep them visible with a subtle highlight. Search saved rules and exempt accounts with **Always Show**.
 - **Local statistics.** See how many identifiable posts your filters catch, with country, region and device breakdowns. Explore world maps for filtering activity and locally cached accounts.
 - **Share evidence.** Preview an image, edit its caption, then choose Quote, Reply or New post, or save the image. You review and submit the post yourself.
 - **Consistent controls.** Light and dark themes, a compact popup, the optional Blocking link in X's sidebar, settings backups and a configurable Hide/Highlight keyboard shortcut.
 - **Community cache.** Reuse public account records shared by the community to reduce repeat X lookups. You can turn it off and continue using direct X lookups and your local cache.
 
-Version 4.2 brings a heavily requested addition: region filters can match X's region label **and the countries you choose inside it**. Browse each region's flags, pick a few countries or include them all; existing region filters stay label-only until you opt in. Refined account cards also gain icon-only **Copy PNG** and **Save PNG** actions. Read the [changelog](CHANGELOG.md) for the release details.
+Version 4.3 brings quick country, region and account filters directly to account cards. Account filters use permanent User IDs, so they keep matching after handle changes. Cards also explain when a country is included through a region, show available cached details sooner, and let you copy an ID-based profile link. Optional List highlighting keeps matches readable in curated X List feeds. Read the [changelog](CHANGELOG.md) for the release details.
 
 ## Filtering
 
@@ -87,7 +87,7 @@ Filters affect what you see locally. They do not block or mute accounts on X.
 - **Accounts you follow can be exempt too.** Enable **Always Show → Always show accounts I follow**, off by default. It applies as X loads follow status; already-loaded accounts may need a refresh or further browsing. Confirmed followed accounts bypass filters, while unknown status uses normal filtering. No extra requests are made, and **Use profile details** can remain off. Follow status stays in page-session memory, is cleared when the signed-in account changes, and is never uploaded or backed up. Only the preference is included in backups. Quoted authors are checked independently.
 - **Quotes keep their own rules by default.** A matching quoted account can collapse independently, with a **Show quoted post** control and the matching reasons. Language and location-warning filters apply to the enclosing post, not independently to its quoted author.
 - **Hide related posts, optionally.** Enable **Behavior → Hide replies and quotes of filtered posts** to collapse whole replies and quotes, even when their source is only highlighted. Each gets a reason and **Show post** control. This uses relationships X already loads, without extra requests. Unknown sources keep normal filtering, and existing exceptions still apply. Authors are not added to your filters.
-- **Opened posts stay readable.** A main post identified by its own permalink is highlighted rather than hidden when deliberately opened. Replies retain their normal rules. Matching accounts in people lists are highlighted, never removed.
+- **Opened posts respect explicit account filters.** Broad filters highlight a deliberately opened main post rather than hiding it, but a direct account filter still hides it in Hide mode. Replies retain their normal rules. Posts you explicitly reveal stay readable, and matching accounts in people lists are highlighted, never removed.
 - **Missing information is not guessed.** Language filtering uses X's displayed-text language marker; auto-translation can make the original language unavailable. Unknown languages are not filtered, and government status requires the account's own grey checkmark.
 
 ### Domains and exact URLs

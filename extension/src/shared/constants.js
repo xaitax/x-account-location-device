@@ -12,6 +12,17 @@
 // Version is injected at build time from package.json
 export const VERSION = '__BUILD_VERSION__';
 
+/** Preserve immutable account IDs without ever rounding a snowflake through Number. */
+export function normalizeAccountId(value) {
+    // Unlike $, this end assertion cannot accept a trailing Unicode line break.
+    return typeof value === 'string' && /^[1-9][0-9]{0,19}(?![\s\S])/.test(value) ? value : '';
+}
+
+/** Fresh passive identity wins over older About data cached under a reused handle. */
+export function observedAccountId(info, profile) {
+    return normalizeAccountId(profile?.userId ?? info?.meta?.restId) || null;
+}
+
 // Storage keys
 export const STORAGE_KEYS = {
     CACHE: 'x_location_cache_v4',
@@ -24,6 +35,7 @@ export const STORAGE_KEYS = {
     BLOCKED_AFFILIATIONS: 'x_blocked_affiliations',
     BLOCKED_LINKS: 'x_blocked_links',
     ALLOWED_USERS: 'x_allowed_users',
+    BLOCKED_ACCOUNTS: 'x_blocked_accounts',
     SETTINGS: 'x_location_settings',
     HEADERS: 'x_api_headers',
     THEME: 'x_theme_preference',
@@ -162,6 +174,8 @@ export const MESSAGE_TYPES = {
     SET_BLOCKED_LINKS: 'SET_BLOCKED_LINKS',
     GET_ALLOWED_USERS: 'GET_ALLOWED_USERS',
     SET_ALLOWED_USERS: 'SET_ALLOWED_USERS',
+    GET_BLOCKED_ACCOUNTS: 'GET_BLOCKED_ACCOUNTS',
+    SET_BLOCKED_ACCOUNTS: 'SET_BLOCKED_ACCOUNTS',
     GET_STATISTICS: 'GET_STATISTICS',
     GET_FILTER_STATISTICS: 'GET_FILTER_STATISTICS',
     RECORD_FILTER_STATISTICS: 'RECORD_FILTER_STATISTICS',
@@ -191,6 +205,7 @@ export const MESSAGE_TYPES = {
     BLOCKED_AFFILIATIONS_UPDATED: 'BLOCKED_AFFILIATIONS_UPDATED',
     BLOCKED_LINKS_UPDATED: 'BLOCKED_LINKS_UPDATED',
     ALLOWED_USERS_UPDATED: 'ALLOWED_USERS_UPDATED',
+    BLOCKED_ACCOUNTS_UPDATED: 'BLOCKED_ACCOUNTS_UPDATED',
     FILTER_STATISTICS_RESET: 'FILTER_STATISTICS_RESET',
     THEME_UPDATED: 'THEME_UPDATED'
 
@@ -240,7 +255,8 @@ export const DEFAULT_SETTINGS = {
     // (STORAGE_KEYS.CLOUD_CACHE_ENABLED) because the background reads it before settings
     // load. A `cloudCacheEnabled: false` used to sit here, read by nothing, riding along
     // in every settings export saying "false" even for users who had the cache on.
-    highlightBlockedTweets: false  // If true, highlight instead of hide blocked tweets
+    highlightBlockedTweets: false,  // If true, highlight instead of hide blocked tweets
+    highlightInLists: false  // Use Highlight in curated List feeds without changing the general preference (issue #15).
 };
 
 // Bearer token for X API (public, embedded in X's own code)

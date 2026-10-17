@@ -9,7 +9,7 @@
  */
 
 import browserAPI from '../shared/browser-api.js';
-import { MESSAGE_TYPES, Z_INDEX, isRegion } from '../shared/constants.js';
+import { CACHE_CONFIG, MESSAGE_TYPES, Z_INDEX, isRegion, observedAccountId } from '../shared/constants.js';
 import { LRUCache } from '../shared/lru-cache.js';
 import { getAccountVerification } from '../shared/account-verification.js';
 import { deviceIcon, flagImage } from './icons.js';
@@ -17,6 +17,9 @@ import { dialogIcon } from './dialog-icons.js';
 import { getProfile } from './profile-cache.js';
 import { renderDisplayName, resolveDisplayNamePresentation } from './display-name.js';
 import { createHovercardPng } from './hovercard-image.js';
+import { createQuickFilterControl } from './hovercard-filters.js';
+import { createCardTooltip } from './hovercard-tooltip.js';
+import { resolveCardAvatar } from './hovercard-avatar.js';
 
 /**
  * Thousands-separated count, or null when we have no number.
@@ -60,24 +63,93 @@ export function hasNewerObservation(current, candidate) {
     return currentTime !== null && (candidateTime === null || currentTime > candidateTime);
 }
 
-function resolveHovercardInfo(candidate, initialInfo) {
-    if (!hasNewerObservation(initialInfo, candidate)) return candidate;
-    const meta = candidate?.meta && !candidate.meta.partial && initialInfo.meta?.partial
-        ? candidate.meta : { ...candidate?.meta, ...initialInfo.meta };
-    // Reuse rich metadata without rolling a newer badge back to older signals.
-    // Select accuracy with its location/device, including a missing accuracy field.
-    return {
-        ...candidate, ...initialInfo,
-        location: initialInfo.location,
-        device: initialInfo.device,
-        locationAccurate: initialInfo.locationAccurate,
-        meta
-    };
+// A lean page/cloud response can have `meta` without being a complete About
+// response. Explicit null/false values are known answers, not missing data.
+function hasRichMetadata(info) {
+    const meta = info?.meta;
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta) || meta.partial) return false;
+    const fields = ['name', 'avatarUrl', 'createdAt', 'restId', 'affiliateUsername', 'affiliate',
+        'usernameChanges', 'profileImageShape', 'blueVerified', 'verified', 'verifiedType',
+        'identityVerified', 'verifiedSinceMsec', 'protected', 'createdCountryAccurate', 'learnMoreUrl'];
+    return fields.every(field => Object.hasOwn(meta, field) && meta[field] !== undefined) &&
+        ['blueVerified', 'verified', 'identityVerified', 'protected', 'createdCountryAccurate']
+            .every(field => typeof meta[field] === 'boolean');
+}
+
+function metadataObservedAt(info, now = Date.now()) {
+    const time = Object.hasOwn(info || {}, 'metaTimestamp') ? info.metaTimestamp : info?.timestamp;
+    return Number.isFinite(time) && time > 0 && time <= now ? time : null;
+}
+
+function hasUsableMetadata(info, now = Date.now()) {
+    if (!hasRichMetadata(info)) return false;
+    const observedAt = metadataObservedAt(info, now);
+    const deadline = Object.hasOwn(info, 'metaExpiresAt') ? info.metaExpiresAt : info.expiresAt;
+    if (deadline !== undefined && (!Number.isFinite(deadline) || deadline <= now)) return false;
+    // Unknown age may be displayed, but can never suppress revalidation.
+    return observedAt === null || observedAt + CACHE_CONFIG.EXPIRY_MS > now;
+}
+
+function hasConflictingSharedMetadata(complete, partial) {
+    const createdAt = typeof partial?.createdAt === 'string' ? Date.parse(partial.createdAt) : NaN;
+    if (Number.isFinite(createdAt) && createdAt !== Date.parse(complete?.createdAt)) return true;
+    if (typeof partial?.usernameChanges === 'number' && partial.usernameChanges !== complete?.usernameChanges) return true;
+    const label = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const previousLabels = [label(complete?.affiliate?.name), label(complete?.affiliateUsername)];
+    return [label(partial?.affiliate?.name), label(partial?.affiliateUsername)]
+        .some(value => value && !previousLabels.includes(value));
+}
+
+function mergeHovercardInfo(candidate, current) {
+    if (!candidate) return current || {};
+    if (!current) return candidate;
+    const candidateWins = !hasNewerObservation(current, candidate) &&
+        (hasNewerObservation(candidate, current) || hasRichMetadata(candidate) || !hasRichMetadata(current));
+    const newest = candidateWins ? candidate : current;
+    const older = candidateWins ? current : candidate;
+    if (hasUsableMetadata(newest) || !hasUsableMetadata(older)) return newest;
+    // A later signal-only observation must not discard known details, nor may
+    // an old handle snapshot donate another account's identity or warning.
+    const sameAccount = /^\d+$/.test(String(newest.meta?.restId || '')) &&
+        String(newest.meta.restId) === String(older.meta?.restId);
+    const sameSignals = newest.location === older.location && newest.device === older.device &&
+        (newest.locationAccurate === false) === (older.locationAccurate === false);
+    if (!sameAccount || !sameSignals || hasConflictingSharedMetadata(older.meta, newest.meta)) return newest;
+    const merged = { ...newest, meta: older.meta, metaTimestamp: metadataObservedAt(older) };
+    const deadline = Object.hasOwn(older, 'metaExpiresAt') ? older.metaExpiresAt : older.expiresAt;
+    if (deadline !== undefined) merged.metaExpiresAt = deadline;
+    else delete merged.metaExpiresAt;
+    return merged;
+}
+
+function selectKnownHovercardInfo(initialInfo, cached, now = Date.now()) {
+    const initialId = initialInfo?.meta?.restId;
+    const cachedId = cached?.data?.meta?.restId;
+    if (initialId && cachedId && String(initialId) !== String(cachedId)) cached = null;
+    let info = mergeHovercardInfo(cached?.data, initialInfo);
+    const complete = hasUsableMetadata(info, now);
+    if (hasRichMetadata(info) && !complete) {
+        // Do not resurrect metadata past its original hard expiry.
+        info = { ...info, meta: { partial: true, name: info.meta.name, restId: info.meta.restId } };
+    }
+    return { info, complete, observedAt: complete ? metadataObservedAt(info, now) : null };
+}
+
+function sameMetadataSnapshot(left, right) {
+    const observedAt = metadataObservedAt(left);
+    const deadline = info => info?.metaExpiresAt ?? info?.expiresAt ??
+        (metadataObservedAt(info) === null ? null : metadataObservedAt(info) + CACHE_CONFIG.EXPIRY_MS);
+    return observedAt !== null && observedAt === metadataObservedAt(right) && deadline(left) === deadline(right) &&
+        left?.location === right?.location && left?.device === right?.device &&
+        (left?.locationAccurate === false) === (right?.locationAccurate === false) &&
+        JSON.stringify(left?.meta) === JSON.stringify(right?.meta);
 }
 
 function syncBadgeInfo(screenName, info, initialInfo) {
-    if (!info || (info.location === initialInfo?.location && info.device === initialInfo?.device &&
-        (info.locationAccurate === false) === (initialInfo?.locationAccurate === false))) return;
+    if (!info || info === initialInfo || (info.location === initialInfo?.location && info.device === initialInfo?.device &&
+        (info.locationAccurate === false) === (initialInfo?.locationAccurate === false) &&
+        JSON.stringify(info.meta) === JSON.stringify(initialInfo?.meta) &&
+        metadataObservedAt(info) === metadataObservedAt(initialInfo))) return;
     try {
         document.dispatchEvent(new CustomEvent('xposed:authoritative-info', {
             detail: { screenName, info }
@@ -138,6 +210,78 @@ function createEl(tag, className, text = null) {
     if (className) el.className = className;
     if (text !== null && text !== undefined) el.textContent = text;
     return el;
+}
+
+/** Keep snowflake IDs as strings: converting them to Number loses precision. */
+function profileUrlForUserId(userId) {
+    return typeof userId === 'string' && /^[1-9][0-9]{0,19}$/.test(userId)
+        ? `https://x.com/i/user/${userId}` : null;
+}
+
+function createUserIdValue(userId) {
+    const value = createEl('span', 'x-posed-user-id-value', safeText(userId, 40));
+    const url = profileUrlForUserId(userId);
+    if (!url) return value;
+
+    const control = createEl('span', 'x-posed-user-id-control');
+    control.dataset.xUserId = userId;
+    const button = createEl('button', 'x-posed-user-id-copy');
+    button.type = 'button';
+    const icon = createEl('span', 'x-posed-user-id-icon');
+    icon.setAttribute('aria-hidden', 'true');
+    const status = createEl('span', 'x-posed-sr-only');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    const fallback = createEl('a', 'x-posed-user-id-fallback x-posed-link', url);
+    fallback.href = url;
+    fallback.target = '_blank';
+    fallback.rel = 'noreferrer noopener';
+    fallback.title = 'Copy this link address manually';
+    fallback.hidden = true;
+    let pending = false;
+    let resetTimer = null;
+    const isCurrent = () => button.isConnected &&
+        button.closest('.x-posed-user-id-control')?.dataset.xUserId === userId;
+    const feedback = (message = '', success = false) => {
+        button.removeAttribute('title');
+        button.dataset.xTooltipHeading = message || 'Copy profile link';
+        button.dataset.xTooltipDescription = success ? 'Paste it to share a link to this account.'
+            : 'Copies a link based on this account’s permanent User ID. It still works if the handle changes.';
+        button.setAttribute('aria-label', message || `Copy permanent profile link for user ID ${userId}`);
+        button.classList.toggle('x-posed-user-id-copy--success', success);
+        icon.replaceChildren(dialogIcon(success ? 'check' : 'copy', 13));
+        status.textContent = message;
+    };
+    feedback();
+    button.append(value, icon);
+    control.append(button, status, fallback);
+    button.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (pending) return;
+        pending = true;
+        clearTimeout(resetTimer);
+        button.setAttribute('aria-busy', 'true');
+        try {
+            if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('Clipboard unavailable');
+            // Initiate inside the click gesture, without another lookup or await.
+            await navigator.clipboard.writeText(url);
+            if (!isCurrent()) return;
+            fallback.hidden = true;
+            feedback('Profile link copied', true);
+            resetTimer = setTimeout(() => {
+                if (isCurrent()) feedback();
+            }, 1800);
+        } catch {
+            if (!isCurrent()) return;
+            feedback('Could not copy. Copy the link below manually.');
+            fallback.hidden = false;
+        } finally {
+            pending = false;
+            button.removeAttribute('aria-busy');
+        }
+    });
+    return control;
 }
 
 function createTag({ label, tone = 'neutral', title = '' }) {
@@ -204,7 +348,7 @@ function setLocationWarningHelp(card, open) {
     help.style.setProperty('--xp-help-pointer-x', `${pointerX}px`);
 }
 
-function createLocationWarning(card) {
+function createLocationWarning(card, helpParent = card) {
     const warning = createEl('div', 'x-posed-card-warning');
     const copy = createEl('span', 'x-posed-warning-copy', 'Location may be inaccurate');
     const button = createEl('button', 'x-posed-warning-why', 'Why?');
@@ -249,7 +393,7 @@ function createLocationWarning(card) {
         if (open) button.dataset.pinned = 'true';
     });
     warning.append(dialogIcon('warn', 15), copy, button);
-    card.appendChild(help);
+    helpParent.appendChild(help);
     return warning;
 }
 
@@ -257,6 +401,7 @@ function createRow({ label, value, primary = false }) {
     let cls = 'x-posed-row';
     if (primary) cls += ' x-posed-row--primary';
     const row = createEl('div', cls);
+    row.dataset.xCardKey = label;
 
     const left = createEl('div', 'x-posed-row-left');
     const labelEl = createEl('span', 'x-posed-row-label', label);
@@ -302,6 +447,9 @@ function positionCard(card, anchorEl) {
         return;
     }
     const rect = anchorEl.getBoundingClientRect();
+    // Adding a Hide filter can hide the anchor itself. Keep the open card in
+    // place so its Remove action stays reachable, rather than jumping to (0,0).
+    const previousPosition = rect.width === 0 && rect.height === 0 ? card.getBoundingClientRect() : null;
 
     // Desired placement: right of badge if possible; otherwise above/below.
     const margin = 10;
@@ -317,16 +465,16 @@ function positionCard(card, anchorEl) {
 
     const cardRect = card.getBoundingClientRect();
 
-    let left = rect.right + margin;
-    let top = rect.top - 6;
+    let left = previousPosition ? previousPosition.left : rect.right + margin;
+    let top = previousPosition ? previousPosition.top : rect.top - 6;
 
     // Prefer flipping to the left of the badge if it would overflow the right edge.
-    if (left + cardRect.width > window.innerWidth - margin) {
+    if (!previousPosition && left + cardRect.width > window.innerWidth - margin) {
         left = rect.left - cardRect.width - margin;
     }
 
     // No horizontal room either side: drop below the badge.
-    if (left < margin) {
+    if (!previousPosition && left < margin) {
         top = rect.bottom + margin;
     }
 
@@ -335,7 +483,7 @@ function positionCard(card, anchorEl) {
     left = Math.max(margin, left);
 
     // Flip above the badge if it would overflow the bottom edge, then clamp.
-    if (top + cardRect.height > window.innerHeight - margin) {
+    if (!previousPosition && top + cardRect.height > window.innerHeight - margin) {
         top = rect.top - cardRect.height - margin;
     }
     top = Math.min(top, window.innerHeight - cardRect.height - margin);
@@ -367,18 +515,83 @@ function describeHovercardError(response) {
     }
 }
 
-function buildCardContent({ screenName, displayName = '', displayNamePresentation = null, fallbackName = '', info, loading = false, errorText = '', allowlistControl = null, imageControl = null, onClose }) {
+/** Update only changed content; keep reading position, focus and live controls. */
+function patchCardNode(current, next) {
+    if (current.nodeType !== next.nodeType || current.nodeName !== next.nodeName) {
+        current.replaceWith(next);
+        return next;
+    }
+    // Do not reload a displayed avatar on metadata-only refreshes, or retry a
+    // failed URL on every patch. A changed URL gets its own load/error handlers.
+    if (current.nodeType === Node.ELEMENT_NODE && current.classList.contains('x-posed-card-avatar')) {
+        if (current.dataset.xAvatarUrl !== next.dataset.xAvatarUrl) {
+            current.replaceWith(next);
+            return next;
+        }
+        current.dataset.shape = next.dataset.shape;
+        return current;
+    }
+    // Its explanation owns interaction state and listeners, not account data.
+    if (current.nodeType === Node.ELEMENT_NODE && current.classList.contains('x-posed-card-warning')) return current;
+    // The header exception control owns live membership, save state and focus.
+    // Metadata refreshes render a placeholder, never a replacement control.
+    if (current.nodeType === Node.ELEMENT_NODE && current.classList.contains('x-posed-allowlist-control')) return current;
+    if (current.nodeType === Node.ELEMENT_NODE && current.classList.contains('x-posed-user-id-control')) {
+        if (current.dataset.xUserId === next.dataset.xUserId) return current;
+        // A genuinely changed ID needs fresh listeners and must not inherit an
+        // earlier clipboard result. Same-ID enrichment keeps focus and feedback.
+        current.dataset.xUserId = next.dataset.xUserId;
+        current.replaceChildren(...Array.from(next.childNodes));
+        return current;
+    }
+    if (current.isEqualNode(next)) return current;
+    if (current.nodeType === Node.TEXT_NODE) {
+        if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+        return current;
+    }
+    for (const attribute of Array.from(current.attributes)) {
+        if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+    }
+    for (const attribute of Array.from(next.attributes)) {
+        if (current.getAttribute(attribute.name) !== attribute.value) {
+            current.setAttributeNS(attribute.namespaceURI, attribute.name, attribute.value);
+        }
+    }
+    const key = node => node.nodeType === Node.ELEMENT_NODE
+        ? `${node.nodeName}:${node.dataset?.xCardKey || node.getAttribute('class')?.split(' ')[0] || ''}` : node.nodeName;
+    const previous = Array.from(current.childNodes);
+    const used = new Set();
+    let cursor = current.firstChild;
+    for (const desired of Array.from(next.childNodes)) {
+        const match = previous.find(node => !used.has(node) && key(node) === key(desired));
+        const atCursor = match === cursor;
+        const node = match ? patchCardNode(match, desired) : desired;
+        if (match) used.add(match);
+        // Recursive patches may replace the matched node (for example a new
+        // avatar URL). Its old reference is no longer a valid insertion point.
+        if (atCursor) cursor = node;
+        if (node !== cursor) current.insertBefore(node, cursor);
+        cursor = node.nextSibling;
+    }
+    for (const node of previous) if (!used.has(node) && node.parentNode === current) node.remove();
+    return current;
+}
+
+function buildCardContent({ screenName, displayName = '', displayNamePresentation = null, fallbackName = '', info, avatar = null, loading = false, errorText = '', allowlistControl = null, allowlistStatus = null, imageControl = null, quickFilterControl = null, onClose, update = false }) {
     const card = ensureCard();
     const focusedElement = card.contains(document.activeElement) ? document.activeElement : null;
     const focusedClose = focusedElement?.classList.contains('x-posed-card-close');
     const focusedLink = focusedElement?.classList.contains('x-posed-link');
     const focusedBody = focusedElement?.classList.contains('x-posed-card-body');
     const focusedWarning = focusedElement?.classList.contains('x-posed-warning-why');
+    const focusedUserId = focusedElement?.classList.contains('x-posed-user-id-copy');
     const accountKey = String(screenName || '').toLowerCase();
     const scrollTop = card.dataset.xScreenName === accountKey
         ? card.querySelector('.x-posed-card-body')?.scrollTop || 0 : 0;
+    const patch = update && card.dataset.xScreenName === accountKey && card.querySelector('.x-posed-card-body');
+    const rendered = patch ? createEl('div') : card;
     card.dataset.xScreenName = accountKey;
-    card.replaceChildren();
+    if (!patch) card.replaceChildren();
     card.setAttribute('aria-label', `Account details for @${safeText(screenName, 20)}`);
 
     const meta = info?.meta || {};
@@ -386,13 +599,35 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
     // Header
     const header = createEl('div', 'x-posed-card-header');
 
-    // The cached profile image can be stale or blurry. Lead with the visible
-    // name and account signals without fetching another profile avatar.
+    // Prefer the avatar already owned by this author on X. Image loading never
+    // holds up the card or adds another account lookup.
+    if (avatar?.url) {
+        const picture = createEl('img', 'x-posed-card-avatar');
+        picture.alt = '';
+        picture.width = 48;
+        picture.height = 48;
+        picture.decoding = 'async';
+        picture.referrerPolicy = 'no-referrer';
+        picture.draggable = false;
+        picture.dataset.shape = avatar.shape === 'square' ? 'square' : 'circle';
+        picture.dataset.xAvatarUrl = avatar.url;
+        picture.addEventListener('error', () => {
+            picture.hidden = true;
+            picture.closest('.x-posed-card-header')?.removeAttribute('data-has-avatar');
+        });
+        header.dataset.hasAvatar = 'true';
+        header.appendChild(picture);
+    }
     const titleWrap = createEl('div', 'x-posed-title');
     const nameLine = createEl('div', 'x-posed-name-line');
     const nameEl = createEl('span', 'x-posed-name');
     renderDisplayName(nameEl, displayName || meta.name || fallbackName || screenName, displayNamePresentation);
     const handleEl = createEl('span', 'x-posed-handle', `@${safeText(screenName, 20)}`);
+    handleEl.title = handleEl.textContent;
+    const handleLine = createEl('div', 'x-posed-handle-line');
+    handleLine.appendChild(handleEl);
+    const exceptionControl = allowlistControl || (patch && card.querySelector('.x-posed-allowlist-control')
+        ? createEl('div', 'x-posed-allowlist-control') : null);
     nameLine.appendChild(nameEl);
 
     // Business/Government take precedence: X also marks some gold accounts
@@ -420,17 +655,20 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
     const aff = meta.affiliate;
 
     titleWrap.appendChild(nameLine);
-    titleWrap.appendChild(handleEl);
+    titleWrap.appendChild(handleLine);
     if (tags.childNodes.length > 0) titleWrap.appendChild(tags);
 
     header.appendChild(titleWrap);
+    const headerActions = createEl('div', 'x-posed-header-actions');
+    if (exceptionControl) headerActions.appendChild(exceptionControl);
     const closeButton = createEl('button', 'x-posed-card-close');
     closeButton.type = 'button';
     closeButton.setAttribute('aria-label', 'Close account details');
     closeButton.title = 'Close account details';
     closeButton.appendChild(dialogIcon('close', 16));
     closeButton.addEventListener('click', onClose);
-    header.appendChild(closeButton);
+    headerActions.appendChild(closeButton);
+    header.appendChild(headerActions);
 
     // Body
     const body = createEl('div', 'x-posed-card-body');
@@ -459,7 +697,7 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
     if (signals.childNodes.length) body.appendChild(signals);
 
     if (info?.locationAccurate === false) {
-        body.appendChild(createLocationWarning(card));
+        body.appendChild(createLocationWarning(card, rendered));
     }
 
     // Activity counts, harvested from the profile data X already ships
@@ -480,6 +718,7 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
             const exactCount = formatCount(value);
             if (exactCount === null) continue;
             const stat = createEl('div', 'x-posed-stat');
+            stat.dataset.xCardKey = label;
             stat.title = `${exactCount} ${label}`;
             stat.setAttribute('role', 'group');
             stat.setAttribute('aria-label', stat.title);
@@ -546,8 +785,9 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
     }
 
     // Keep this technical, stable identifier last, apart from account history.
-    if (meta.restId) {
-        const identifier = createRow({ label: 'User ID', value: safeText(meta.restId, 40) });
+    const accountId = observedAccountId(info, profile);
+    if (accountId) {
+        const identifier = createRow({ label: 'User ID', value: createUserIdValue(accountId) });
         identifier.classList.add('x-posed-row--identifier');
         metadata.appendChild(identifier);
     }
@@ -576,26 +816,51 @@ function buildCardContent({ screenName, displayName = '', displayNamePresentatio
         body.appendChild(createEl('div', 'x-posed-empty', 'No extra account metadata available.'));
     }
 
-    card.appendChild(header);
-    card.appendChild(body);
-    if (allowlistControl || imageControl) {
-        const footer = allowlistControl || createEl('div', 'x-posed-card-actions');
-        const actionRow = footer.querySelector('.x-posed-card-action-row') || createEl('div', 'x-posed-card-action-row');
-        if (!actionRow.parentElement) footer.prepend(actionRow);
-        if (imageControl) {
-            actionRow.appendChild(imageControl.element);
-            footer.appendChild(imageControl.status);
+    rendered.appendChild(header);
+    rendered.appendChild(body);
+    if (!patch && (allowlistControl || imageControl || quickFilterControl)) {
+        const footer = createEl('div', 'x-posed-card-actions');
+        const actionRow = createEl('div', 'x-posed-card-action-row');
+        if (quickFilterControl) actionRow.appendChild(quickFilterControl.element);
+        if (imageControl) actionRow.appendChild(imageControl.element);
+        const sectionCount = Number(!!quickFilterControl) + Number(!!imageControl);
+        if (sectionCount) {
+            actionRow.dataset.count = String(sectionCount);
+            actionRow.style.setProperty('--xp-card-section-count', String(sectionCount));
+            footer.appendChild(actionRow);
         }
+        // Feedback stays below both sections without interrupting their action rows.
+        if (quickFilterControl) footer.appendChild(quickFilterControl.status);
+        if (allowlistStatus) footer.appendChild(allowlistStatus);
+        if (imageControl) footer.appendChild(imageControl.status);
         card.appendChild(footer);
     }
-    body.scrollTop = scrollTop;
+    if (patch) {
+        patchCardNode(card.querySelector('.x-posed-card-header'), header);
+        patchCardNode(card.querySelector('.x-posed-card-body'), body);
+        const help = card.querySelector('.x-posed-warning-help');
+        if (info?.locationAccurate !== false) help?.remove();
+        else if (!help) card.appendChild(rendered.querySelector('.x-posed-warning-help'));
+    }
+    const liveHeader = card.querySelector('.x-posed-card-header');
+    const liveAvatar = liveHeader.querySelector('.x-posed-card-avatar');
+    // Populate only the final live image, not a detached patch candidate. This
+    // avoids even starting another image load when its URL has not changed.
+    if (liveAvatar && liveAvatar.getAttribute('src') !== liveAvatar.dataset.xAvatarUrl) {
+        liveAvatar.src = liveAvatar.dataset.xAvatarUrl;
+    }
+    if (liveAvatar && !liveAvatar.hidden) liveHeader.dataset.hasAvatar = 'true';
+    else liveHeader.removeAttribute('data-has-avatar');
+    const liveBody = card.querySelector('.x-posed-card-body');
+    liveBody.scrollTop = scrollTop;
     // Refreshing metadata must not drop keyboard focus while someone is reading
     // the card or using its account exception control.
     if (focusedElement?.isConnected) focusedElement.focus({ preventScroll: true });
-    else if (focusedClose) closeButton.focus({ preventScroll: true });
-    else if (focusedBody) body.focus({ preventScroll: true });
-    else if (focusedWarning) (card.querySelector('.x-posed-warning-why') || closeButton).focus({ preventScroll: true });
-    else if (focusedLink) (card.querySelector('.x-posed-link') || closeButton).focus({ preventScroll: true });
+    else if (focusedClose) card.querySelector('.x-posed-card-close').focus({ preventScroll: true });
+    else if (focusedBody) liveBody.focus({ preventScroll: true });
+    else if (focusedUserId) (card.querySelector('.x-posed-user-id-copy') || card.querySelector('.x-posed-card-close')).focus({ preventScroll: true });
+    else if (focusedWarning) (card.querySelector('.x-posed-warning-why') || card.querySelector('.x-posed-card-close')).focus({ preventScroll: true });
+    else if (focusedLink) (card.querySelector('.x-posed-link') || card.querySelector('.x-posed-card-close')).focus({ preventScroll: true });
     return card;
 }
 
@@ -616,12 +881,18 @@ class HovercardController {
         this.generation = 0;
         this.allowlistState = null;
         this.imageState = null;
+        this.actionTooltip = null;
         this.allowlistWrites = new Map();
+        this.filterContext = null;
+        this.quickFilterState = null;
+        this.quickFilterWrites = new Map();
         this._clickMode = false;
 
         // Per-session cache to avoid repeated API hits while you hover around.
         // Bounded LRU so a long browsing session can't grow it without limit
-        // (entries are also TTL-checked on read). screenName -> { data, fetchedAt }
+        // (entries are also TTL-checked on read). checkedAt is only a short
+        // revalidation receipt, not a new observation or a renewed hard expiry.
+        // screenName -> { data, fetchedAt, checkedAt }
         this.hoverCache = new LRUCache(200);
         this.inFlight = new Map(); // screenName -> Promise
         this.cacheTtlMs = 60 * 1000; // 60s
@@ -639,13 +910,44 @@ class HovercardController {
         this._handleHoverIntentCancel = this._handleHoverIntentCancel.bind(this);
     }
 
+    /** Private content-session state: never fetch settings or expose a page-global mutation API. */
+    configureFilters(context) {
+        this.filterContext = typeof context?.getState === 'function' && typeof context?.sendMessage === 'function'
+            ? context : null;
+    }
+
+    syncFilters() {
+        this.quickFilterState?.refresh();
+    }
+
+    _createQuickFilters(handle, info, viewId) {
+        if (!this.filterContext) return null;
+        const generation = this.generation;
+        let control = null;
+        const isCurrent = () => control !== null && this.generation === generation && this.viewId === viewId &&
+            this.currentScreenName === handle && this.quickFilterState === control &&
+            this.card?.classList.contains('x-posed-hovercard-visible') && this.card.contains(control.element);
+        control = createQuickFilterControl({
+            handle, info, ...this.filterContext, writes: this.quickFilterWrites, isCurrent,
+            onChange: () => {
+                if (isCurrent() && this.currentAnchor?.isConnected) positionCard(this.card, this.currentAnchor);
+            }
+        });
+        return control;
+    }
+
+    _disposeQuickFilters() {
+        this.quickFilterState?.dispose();
+        this.quickFilterState = null;
+    }
+
     /**
      * @param {HTMLElement} badgeEl
      * @param {object} opts
      * @param {boolean} [opts.clickToOpen] - open on click instead of hover (issue #38).
      *   Touch devices always use click regardless, since they have no hover at all.
      */
-    attach(badgeEl, { screenName, displayName = '', displayNamePresentation = null, info, csrfToken = null, clickToOpen = false }) {
+    attach(badgeEl, { screenName, displayName = '', displayNamePresentation = null, info, getInfo = null, csrfToken = null, clickToOpen = false }) {
         if (!badgeEl || badgeEl.dataset.xPosedHovercardAttached === 'true') return;
         badgeEl.dataset.xPosedHovercardAttached = 'true';
         const detailsButton = badgeEl.querySelector('.x-badge-details');
@@ -666,13 +968,13 @@ class HovercardController {
                 this.card?.classList.contains('x-posed-hovercard-visible');
             if (open && this._clickMode) this.hide();
             else {
-                this.show(badgeEl, { screenName, displayName, displayNamePresentation, info, csrfToken, clickToOpen: true });
+                this.show(badgeEl, { screenName, displayName, displayNamePresentation, info, getInfo, csrfToken, clickToOpen: true });
                 if (e.detail === 0) this.card?.querySelector('.x-posed-card-close')?.focus({ preventScroll: true });
             }
         });
         if (!useClick) {
             const onEnter = () => {
-                this._scheduleHoverIntent(badgeEl, { screenName, displayName, displayNamePresentation, info, csrfToken });
+                this._scheduleHoverIntent(badgeEl, { screenName, displayName, displayNamePresentation, info, getInfo, csrfToken });
             };
             const onLeave = () => {
                 this._cancelHoverIntent(badgeEl);
@@ -697,7 +999,7 @@ class HovercardController {
         }
         // Passing another badge must not interrupt a pinned card, a keyboard
         // reader or an explicit Copy/Save operation. Clicking can still switch.
-        if (!anchorEl?.isConnected || document.hidden || this._clickMode || this.imageState?.pending ||
+        if (!anchorEl?.isConnected || document.hidden || this._clickMode || this.imageState?.pending || this.quickFilterState?.pending ||
             (visible && (this.card.contains(document.activeElement) ||
                 this.currentAnchor?.contains(document.activeElement)))) return;
 
@@ -708,7 +1010,7 @@ class HovercardController {
             if (this.hoverIntent !== intent) return;
             this._cancelHoverIntent();
             if (intent.generation !== this.generation || !anchorEl.isConnected || document.hidden ||
-                !anchorEl.matches(':hover') || this._clickMode || this.imageState?.pending ||
+                !anchorEl.matches(':hover') || this._clickMode || this.imageState?.pending || this.quickFilterState?.pending ||
                 this.card?.contains(document.activeElement) || this.currentAnchor?.contains(document.activeElement)) {
                 this.hideSoon();
                 return;
@@ -754,7 +1056,25 @@ class HovercardController {
         this.hideTimeout = null;
     }
 
-    show(anchorEl, { screenName, displayName = '', displayNamePresentation = null, info, csrfToken = null, clickToOpen = false }) {
+    _knownBadgeInfo(info, getInfo) {
+        try {
+            const latest = getInfo?.();
+            if (latest && typeof latest === 'object' && !Array.isArray(latest)) return mergeHovercardInfo(latest, info);
+        } catch { /* A detached badge can still use its original snapshot. */ }
+        return info || {};
+    }
+
+    _isFreshKnownInfo(known, cached, now = Date.now()) {
+        if (!known.complete || known.observedAt === null) return false;
+        if (now - known.observedAt < this.cacheTtlMs) return true;
+        // A successful revalidation may return the original RAM observation.
+        // Rate-limit repeated IPC, without making that observation younger or
+        // extending its hard expiry. Partial/unknown data never gets a receipt.
+        return Number.isFinite(cached?.checkedAt) && cached.checkedAt > 0 && cached.checkedAt <= now &&
+            now - cached.checkedAt < this.cacheTtlMs && sameMetadataSnapshot(cached.data, known.info);
+    }
+
+    show(anchorEl, { screenName, displayName = '', displayNamePresentation = null, info, getInfo = null, csrfToken = null, clickToOpen = false }) {
         this._cancelHoverIntent();
         if (!anchorEl || !anchorEl.isConnected) return;
 
@@ -767,6 +1087,9 @@ class HovercardController {
         if (this.currentAnchor === anchorEl && this.card?.classList.contains('x-posed-hovercard-visible') &&
             !useClick) return;
         this._disposeImageState();
+        this._disposeQuickFilters();
+        this.actionTooltip?.dispose();
+        this.actionTooltip = null;
         this.currentAnchor?.querySelector('.x-badge-details')?.setAttribute('aria-expanded', 'false');
         this.currentAnchor = anchorEl;
         this._clickMode = useClick;
@@ -780,19 +1103,36 @@ class HovercardController {
         // cached name, and never write observed DOM text into the account cache.
         const headerName = displayName;
         const presentation = resolveDisplayNamePresentation(displayNamePresentation);
+        const key = this.currentScreenName;
+        const cached = this.hoverCache.get(key);
+        const known = selectKnownHovercardInfo(this._knownBadgeInfo(info, getInfo), cached);
+        const fresh = this._isFreshKnownInfo(known, cached);
+        this.quickFilterState = this._createQuickFilters(key, known.info, viewId);
+        if (known.complete) {
+            this.hoverCache.set(key, { data: known.info, fetchedAt: cached?.fetchedAt || Date.now(),
+                checkedAt: sameMetadataSnapshot(cached?.data, known.info) ? cached?.checkedAt : undefined });
+        }
 
-        // Show immediate card (using whatever we currently know)
+        // Resolve the latest badge and warm cache synchronously, before the
+        // first paint. Complete-but-soft-stale details refresh quietly below.
         this.card = buildCardContent({
-            screenName, displayName: headerName, displayNamePresentation: presentation, info, loading: true,
-            allowlistControl: this.allowlistState?.element, imageControl: this.imageState, onClose: this._handleClose
+            screenName, displayName: headerName, displayNamePresentation: presentation, info: known.info, loading: !known.complete,
+            avatar: resolveCardAvatar({ anchor: anchorEl, screenName, info: known.info, profile: getProfile(screenName) }),
+            allowlistControl: this.allowlistState?.element, allowlistStatus: this.allowlistState?.status, imageControl: this.imageState,
+            quickFilterControl: this.quickFilterState, onClose: this._handleClose
         });
         this.card.classList.add('x-posed-hovercard-visible');
+        this.actionTooltip = createCardTooltip(this.card);
+        this.syncFilters();
         positionCard(this.card, anchorEl);
         if (this.allowlistState) this._loadAllowlist(this.allowlistState);
 
-        // Request rich metadata only when the card opens, with short TTL caching.
-        // Pass the badge's known info so an error card can still show it (issue #14).
-        this._fetchAndUpdate(anchorEl, screenName, csrfToken, info, viewId, headerName, presentation).catch(() => {});
+        // Keep the original short freshness window, measured from observation
+        // rather than copying partial data into another cache. No pre-hover RPC.
+        if (!fresh) {
+            this._fetchAndUpdate(anchorEl, screenName, csrfToken, known.info, viewId, headerName, presentation, getInfo).catch(() => {});
+        }
+        syncBadgeInfo(screenName, known.info, info);
 
         // Keep visible if hovering card in hover mode.
         this.card.removeEventListener('mouseenter', this._handleCardEnter);
@@ -817,7 +1157,7 @@ class HovercardController {
     }
 
     hideSoon(delayMs = 120) {
-        if (this.hoverIntent || this._clickMode || this.imageState?.pending || this.card?.contains(document.activeElement) ||
+        if (this.hoverIntent || this._clickMode || this.imageState?.pending || this.quickFilterState?.pending || this.card?.contains(document.activeElement) ||
             this.currentAnchor?.contains(document.activeElement)) return;
         if (this.hideTimeout) clearTimeout(this.hideTimeout);
         this.hideTimeout = setTimeout(() => this.hide(), delayMs);
@@ -825,7 +1165,10 @@ class HovercardController {
 
     hide() {
         this._cancelHoverIntent();
+        this.actionTooltip?.dispose();
+        this.actionTooltip = null;
         this._disposeImageState();
+        this._disposeQuickFilters();
         this._clearHideTimeout();
 
         if (this._repositionRafId !== null) {
@@ -876,6 +1219,13 @@ class HovercardController {
 
     _handleKeyDown(event) {
         if (event.key !== 'Escape' || !this.card?.classList.contains('x-posed-hovercard-visible')) return;
+        if (this.actionTooltip?.dismiss()) {
+            if (this.card.contains(document.activeElement) || this.currentAnchor?.contains(document.activeElement)) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            return;
+        }
         if (this.card.querySelector('.x-posed-warning-why[aria-expanded="true"]')) {
             setLocationWarningHelp(this.card, false);
             event.preventDefault();
@@ -902,8 +1252,8 @@ class HovercardController {
     }
 
     _handleFocusOut() {
-        // Metadata refreshes temporarily detach focused controls. Let the
-        // rebuild restore focus before deciding that the reader left the card.
+        // A disappearing metadata row or a new account view can move focus.
+        // Let that update finish before deciding the reader left the card.
         const generation = this.generation;
         const viewId = this.viewId;
         queueMicrotask(() => {
@@ -944,9 +1294,13 @@ class HovercardController {
     }
 
     _createImageState(handle, viewId) {
-        const element = createEl('div', 'x-posed-export-actions');
+        const element = createEl('div', 'x-posed-export-actions x-posed-footer-section');
         element.setAttribute('role', 'group');
-        element.setAttribute('aria-label', 'Account card image');
+        const heading = createEl('div', 'x-posed-footer-section-heading', 'Card');
+        heading.id = 'x-posed-card-image-heading';
+        element.setAttribute('aria-labelledby', heading.id);
+        const controls = createEl('div', 'x-posed-footer-section-controls');
+        element.append(heading, controls);
         const status = createEl('div', 'x-posed-export-status');
         status.setAttribute('role', 'status');
         status.setAttribute('aria-live', 'polite');
@@ -954,16 +1308,19 @@ class HovercardController {
         const state = { handle, viewId, generation: this.generation, element, status,
             buttons: [], pending: false, controller: null, resetTimer: null, success: '', message: '', error: false };
         for (const action of ['copy', 'save']) {
-            const button = createEl('button', 'x-posed-export-button');
+            const button = createEl('button', 'x-posed-export-button x-posed-card-action');
             button.type = 'button';
             button.dataset.action = action;
+            const icon = createEl('span', 'x-posed-card-action-icon');
+            icon.setAttribute('aria-hidden', 'true');
+            button.append(icon, createEl('span', 'x-posed-card-action-label', action === 'copy' ? 'Copy' : 'Save'));
             button.addEventListener('click', event => {
                 event.preventDefault();
                 event.stopPropagation();
                 this._exportImage(state, action);
             });
             state.buttons.push(button);
-            element.appendChild(button);
+            controls.appendChild(button);
         }
         this._renderImageState(state);
         return state;
@@ -973,14 +1330,20 @@ class HovercardController {
         for (const button of state.buttons) {
             const action = button.dataset.action;
             const success = state.success === action;
-            const label = action === 'copy' ? 'Copy account card as PNG' : 'Save account card as PNG';
+            const label = action === 'copy' ? 'Copy card as an image' : 'Save card as an image';
             button.setAttribute('aria-label', label);
-            button.title = success ? (action === 'copy' ? 'PNG copied' : 'PNG download started') : label;
+            button.removeAttribute('title');
+            button.dataset.xTooltipHeading = success ? (action === 'copy' ? 'Card copied' : 'Download started')
+                : action === 'copy' ? 'Copy account card' : 'Save account card';
+            button.dataset.xTooltipDescription = action === 'copy'
+                ? 'Copies this card as an image. Paste it into a message, post or document.'
+                : 'Downloads this card as an image so you can keep it or share it later.';
             // Keep keyboard focus while busy. The handler guards repeat activation.
             button.setAttribute('aria-disabled', String(state.pending));
             button.setAttribute('aria-busy', String(state.pending));
             button.classList.toggle('x-posed-export-button--success', success);
-            button.replaceChildren(dialogIcon(success ? 'check' : action === 'copy' ? 'copy' : 'download', 16));
+            button.querySelector('.x-posed-card-action-icon').replaceChildren(
+                dialogIcon(success ? 'check' : action === 'copy' ? 'copy' : 'download', 18));
         }
         state.status.textContent = state.message;
         state.status.hidden = !state.message;
@@ -996,14 +1359,14 @@ class HovercardController {
         state.error = false;
         if (action === 'copy' && (!navigator.clipboard?.write || !window.ClipboardItem)) {
             state.error = true;
-            state.message = 'Image copying is unavailable here. Use Save PNG.';
+            state.message = 'Image copying is unavailable here. Use Save instead.';
             this._renderImageState(state);
             return;
         }
         const controller = new AbortController();
         state.controller = controller;
         state.pending = true;
-        state.message = 'Creating PNG…';
+        state.message = 'Creating card image…';
         let png;
         let transfer;
         try {
@@ -1041,7 +1404,7 @@ class HovercardController {
         Promise.all([png, transfer]).then(() => {
             if (!this._isCurrentImageState(state) || controller.signal.aborted) return;
             state.success = action;
-            state.message = action === 'copy' ? 'PNG copied. Paste it wherever images are supported.' : 'PNG download started.';
+            state.message = action === 'copy' ? 'Card copied. Paste it wherever images are supported.' : 'Card download started.';
             state.resetTimer = setTimeout(() => {
                 if (!this._isCurrentImageState(state)) return;
                 state.resetTimer = null;
@@ -1054,7 +1417,7 @@ class HovercardController {
             if (!this._isCurrentImageState(state) || error?.name === 'AbortError') return;
             state.error = true;
             state.message = action === 'copy'
-                ? 'Couldn’t copy the image. Use Save PNG, or try copying again.'
+                ? 'Couldn’t copy the image. Use Save, or try copying again.'
                 : 'Couldn’t create the image. Please try again.';
         }).finally(() => {
             if (!this._isCurrentImageState(state)) return;
@@ -1074,14 +1437,12 @@ class HovercardController {
 
     _createAllowlistState(handle, viewId) {
         if (!/^[a-z0-9_]{1,15}$/.test(handle)) return null;
-        const element = createEl('div', 'x-posed-card-actions');
-        const button = createEl('button', 'x-blocker-btn x-blocker-btn-secondary x-posed-allowlist-button');
+        const element = createEl('div', 'x-posed-allowlist-control');
+        const button = createEl('button', 'x-posed-allowlist-button');
         button.type = 'button';
         const status = createEl('div', 'x-posed-allowlist-status');
         status.setAttribute('aria-live', 'polite');
-        const actionRow = createEl('div', 'x-posed-card-action-row');
-        actionRow.appendChild(button);
-        element.append(actionRow, status);
+        element.appendChild(button);
         const state = { handle, viewId, generation: this.generation, element, button, status,
             allowed: null, pending: true, error: '', message: '' };
         this._renderAllowlist(state);
@@ -1097,18 +1458,30 @@ class HovercardController {
 
     _renderAllowlist(state) {
         const { button, status, handle, allowed, pending } = state;
-        button.disabled = pending;
+        // Keep a focused header action in the tab order while its write settles.
+        // The click handler already guards pending operations.
+        button.setAttribute('aria-disabled', String(pending));
         button.setAttribute('aria-busy', String(pending));
         button.setAttribute('aria-pressed', String(allowed === true));
-        const label = pending && allowed !== null ? 'Saving…'
+        const action = pending && allowed !== null ? 'Saving Always Show'
             : state.error && allowed === null ? 'Retry Always Show'
-                : allowed ? `Stop always showing @${handle}` : `Always show @${handle}`;
-        button.replaceChildren(dialogIcon('shield', 15), createEl('span', null, label));
-        button.title = allowed ? 'Apply your filters to this account again.' : 'Exempt this account from your filters.';
+                : allowed ? 'Remove Always Show' : 'Always show';
+        button.replaceChildren(dialogIcon('shield', 16));
+        button.setAttribute('aria-label', `Always show @${handle}. ${action}${pending ? '…' : '.'}`);
+        button.removeAttribute('title');
+        button.dataset.xTooltipHeading = allowed ? 'Let filters apply again' : 'Always show this account';
+        button.dataset.xTooltipDescription = allowed
+            ? `Removes the exception for @${handle}. Your saved filters can match this account again.`
+            : `Keeps @${handle} visible, even when the account matches one of your filters.`;
+        if (state.error && allowed === null) {
+            button.dataset.xTooltipHeading = 'Couldn’t check Always Show';
+            button.dataset.xTooltipDescription = 'Select this button to try again.';
+        }
         status.textContent = state.error || state.message || (pending && allowed === null ? 'Checking Always Show…' : '');
         status.hidden = !status.textContent;
         status.setAttribute('role', state.error ? 'alert' : 'status');
         status.classList.toggle('x-posed-allowlist-error', !!state.error);
+        if (this._isCurrentAllowlist(state)) this.syncFilters();
         if (this._isCurrentAllowlist(state)) positionCard(this.card, this.currentAnchor);
     }
 
@@ -1178,29 +1551,11 @@ class HovercardController {
         }
     }
 
-    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}, viewId = this.viewId, displayName = '', displayNamePresentation = null) {
+    async _fetchAndUpdate(anchorEl, screenName, csrfToken, initialInfo = {}, viewId = this.viewId, displayName = '', displayNamePresentation = null, getInfo = null) {
         const generation = this.generation;
         const key = String(screenName || '').toLowerCase();
         if (!key) return;
         const fallbackName = initialInfo?.meta?.name || '';
-
-        const cached = this.hoverCache.get(key);
-        if (cached && Date.now() - cached.fetchedAt < this.cacheTtlMs) {
-            const info = resolveHovercardInfo(cached.data, initialInfo);
-            if (info !== cached.data) this.hoverCache.set(key, { ...cached, data: info });
-            syncBadgeInfo(screenName, info, initialInfo);
-            if (this._isCurrentView(anchorEl, screenName, viewId)) {
-                this.card = buildCardContent({
-                    screenName, displayName, displayNamePresentation, fallbackName, info, loading: false,
-                    allowlistControl: this.allowlistState?.element,
-                    imageControl: this.imageState,
-                    onClose: this._handleClose
-                });
-                this.card.classList.add('x-posed-hovercard-visible');
-                positionCard(this.card, anchorEl);
-            }
-            return;
-        }
 
         if (!this.inFlight.has(key)) {
             const p = browserAPI.runtime
@@ -1219,40 +1574,44 @@ class HovercardController {
         // Requests cannot be cancelled through runtime messaging. Ignore every
         // local effect when a pagehide/teardown has ended their owning session.
         if (this.generation !== generation) return;
+        const known = selectKnownHovercardInfo(this._knownBadgeInfo(initialInfo, getInfo), this.hoverCache.get(key));
 
         if (!response?.success || !response.data) {
             const msg = describeHovercardError(response);
             if (this._isCurrentView(anchorEl, screenName, viewId)) {
                 this.card = buildCardContent({
-                    screenName, displayName, displayNamePresentation, info: initialInfo, loading: false, errorText: msg,
-                    allowlistControl: this.allowlistState?.element,
-                    imageControl: this.imageState,
-                    onClose: this._handleClose
+                    screenName, displayName, displayNamePresentation, info: known.info, loading: false,
+                    avatar: resolveCardAvatar({ anchor: anchorEl, screenName, info: known.info, profile: getProfile(screenName) }),
+                    errorText: known.complete ? '' : msg, onClose: this._handleClose, update: true
                 });
                 this.card.classList.add('x-posed-hovercard-visible');
+                this.quickFilterState?.updateInfo(known.info);
                 positionCard(this.card, anchorEl);
             }
             return;
         }
 
-        const fresh = resolveHovercardInfo(response.data, initialInfo);
-        this.hoverCache.set(key, { data: fresh, fetchedAt: Date.now() });
+        const selected = selectKnownHovercardInfo(mergeHovercardInfo(response.data, known.info), null);
+        const fresh = selected.info;
+        this.hoverCache.set(key, { data: fresh, fetchedAt: Date.now(),
+            checkedAt: hasUsableMetadata(response.data) && selected.complete && sameMetadataSnapshot(response.data, fresh)
+                ? Date.now() : undefined });
 
         // Issue #23: the badge may have rendered from a stale cloud-cache snapshot (cloud
         // entries carry no `meta`, so this hover forced a live, authoritative fetch). If the
         // live location/device or accuracy disagree with what the badge was given, tell the content
-        // layer to refresh the cached entry and re-render the badge, so the flag next to the
-        // name matches this card. Gated on an actual difference to avoid needless churn.
-        syncBadgeInfo(screenName, fresh, initialInfo);
+        // layer to retain both signals AND rich metadata for other visible badges.
+        // Metadata-only enrichment updates their snapshots without replacing DOM.
+        syncBadgeInfo(screenName, fresh, known.info);
 
         if (this._isCurrentView(anchorEl, screenName, viewId)) {
             this.card = buildCardContent({
                 screenName, displayName, displayNamePresentation, fallbackName, info: fresh, loading: false,
-                allowlistControl: this.allowlistState?.element,
-                imageControl: this.imageState,
-                onClose: this._handleClose
+                avatar: resolveCardAvatar({ anchor: anchorEl, screenName, info: fresh, profile: getProfile(screenName) }),
+                onClose: this._handleClose, update: true
             });
             this.card.classList.add('x-posed-hovercard-visible');
+            this.quickFilterState?.updateInfo(fresh);
             positionCard(this.card, anchorEl);
         }
     }
@@ -1284,6 +1643,8 @@ class HovercardController {
         this.hoverCache.clear();
         this.inFlight.clear();
         this.allowlistWrites.clear();
+        this.quickFilterWrites.clear();
+        this.filterContext = null;
 
         const card = document.getElementById(CARD_ID);
         if (card) card.remove();

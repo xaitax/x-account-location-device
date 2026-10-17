@@ -14,6 +14,7 @@ import {
     injectSidebarLink,
     removeSidebarLink,
     syncSidebarSettings,
+    updateBadgeInfo,
     cleanupUI,
     showToast
 } from './ui.js';
@@ -279,7 +280,10 @@ function syncFollowingSetting(force = false) {
     if (changed || force) {
         window.dispatchEvent(new CustomEvent('x-posed-set-following', { detail: JSON.stringify(context) }));
         // Clearing the old viewer must also remove any already-rendered exemptions.
-        if (changed && isEnabled && !isCleanedUp) updateBlockedTweets(currentFilters());
+        if (changed && isEnabled && !isCleanedUp) {
+            updateBlockedTweets(currentFilters());
+            hovercard.syncFilters();
+        }
     }
 }
 
@@ -332,6 +336,7 @@ function setupFollowingListener(current) {
         // Identity may now be unknown, leaving configureFollowing disabled. Even
         // then, clear exemptions already painted for the former viewer.
         updateBlockedTweets(currentFilters());
+        hovercard.syncFilters();
     });
     current.listen(window, 'x-posed-following', event => {
         if (current.disposed || !settingsLoaded || !isEnabled || settings.alwaysShowFollowing !== true) return;
@@ -340,7 +345,10 @@ function setupFollowingListener(current) {
         let batch;
         try { batch = JSON.parse(event.detail); } catch { return; }
         const changed = mergeFollowingBatch(batch);
-        if (changed.size) updateBlockedTweets(currentFilters(), changed);
+        if (changed.size) {
+            updateBlockedTweets(currentFilters(), changed);
+            hovercard.syncFilters();
+        }
     });
 
     // Sidebar changes cover the DOM identity fallback. Cookie/account changes can
@@ -415,7 +423,7 @@ function setupProfileListener(current) {
         if (!Array.isArray(users) || users.length === 0) return;
 
         const changedUsers = new Set();
-        const hasProfileTextFilters = filterSets.blockedBioTags.size > 0 ||
+        const hasProfileTextFilters = filterSets.blockedAccounts.size > 0 || filterSets.blockedBioTags.size > 0 ||
             filterSets.blockedPcf.size > 0 || filterSets.blockedLinks.size > 0;
         const activeCounts = ACCOUNT_COUNT_FILTERS.filter(rule =>
             rule.requiresProfile && isAccountCountThreshold(settings[rule.key], rule.max) && settings[rule.key] > 0);
@@ -436,6 +444,7 @@ function setupProfileListener(current) {
             if ((hasProfileTextFilters && textChanged) || countChanged) changedUsers.add(entry.u.toLowerCase());
         }
         debug(`Harvested ${users.length} profile(s) from X's own response`);
+        hovercard.syncFilters();
 
         // Re-derive only affected authors. Count-only updates need a pass when an
         // active count becomes known or changes its verdict, not for every increment.
@@ -479,19 +488,26 @@ function setupBackgroundListener(current) {
  * Issue #23: a badge can render from a stale cloud-cache snapshot while the hovercard's
  * (authoritative) live fetch returns fresher location/device or accuracy, so the badge
  * disagrees with the popup until the row happens to re-process. The hovercard dispatches
- * this event when it sees a difference; we refresh the warm local cache and re-render the
- * affected badges so the two stay in sync.
+ * this event when it learns richer data. Keep that warm snapshot even when the badge's
+ * visible signals are unchanged; only replace badge DOM if the flag/device/warning changes.
  */
 function setupAuthoritativeInfoListener(current) {
     const onAuthoritativeInfo = event => {
         const { screenName, info } = event.detail || {};
-        if (!screenName || !info) return;
-        if (hasNewerObservation(userInfoCache.get(screenName), info)) return;
+        if (typeof screenName !== 'string' || !/^[a-zA-Z0-9_]{1,15}$/.test(screenName) ||
+            !info || typeof info !== 'object' || Array.isArray(info)) return;
+        const key = screenName.toLowerCase();
+        // X may use different handle capitalization in separate author roots.
+        // Compare every warm alias before accepting a late response so it cannot
+        // replace a newer observation cached under another spelling.
+        const aliases = Array.from(userInfoCache.entries())
+            .filter(([name]) => name.toLowerCase() === key);
+        if (aliases.some(([_name, cached]) => hasNewerObservation(cached, info))) return;
 
-        // Adopt the authoritative data so future (re)processing uses it, then rebuild the
-        // badges that are showing this user. Clearing the processed markers + re-running
-        // processElement rebuilds the badge from the now-fresh cache (no new API call).
+        // Adopt rich metadata as well as the visible signals. Replacing references
+        // leaves the original response and any existing badge snapshots untouched.
         userInfoCache.set(screenName, info);
+        for (const [name] of aliases) userInfoCache.set(name, info);
 
         // Defer the DOM rebuild one microtask: this event is dispatched synchronously from
         // the hovercard mid-update, so removing the anchored badge now would yank the
@@ -499,12 +515,17 @@ function setupAuthoritativeInfoListener(current) {
         // first keeps the open card from jumping.
         queueMicrotask(() => {
             if (current.disposed) return;
-            const key = screenName.toLowerCase();
             // The hovercard also carries this account marker. Only X's observed
             // author roots may be reprocessed, never our own account-details UI.
             document.querySelectorAll(`${SELECTORS.USERNAME}[data-x-screen-name], ${SELECTORS.USER_CELL}[data-x-screen-name]`).forEach(el => {
                 if ((el.dataset.xScreenName || '').toLowerCase() !== key) return;
+                const author = el.dataset.xScreenName;
+                const latestInfo = userInfoCache.get(screenName) || info;
+                userInfoCache.set(author, latestInfo);
                 const badge = el.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+                // Enrichment must not cancel pending hover intent or disturb
+                // focus, the open card, or a running Copy/Save operation.
+                if (updateBadgeInfo(badge, author, latestInfo)) return;
                 const focusedControl = badge?.contains(document.activeElement)
                     ? document.activeElement.closest('.x-capture-btn') ? '.x-capture-btn' : '.x-badge-details'
                     : null;
@@ -521,6 +542,12 @@ function setupAuthoritativeInfoListener(current) {
                     replacement.querySelector(focusedControl)?.focus({ preventScroll: true });
                 }
             });
+            // Identity and affiliation can change a verdict even when the
+            // visible flag/device signals did not change.
+            if (filterSets.blockedAffiliations.size || filterSets.blockedAccounts.size) {
+                updateBlockedTweets(currentFilters(), new Set([key]));
+            }
+            hovercard.syncFilters();
         });
     };
 
@@ -553,6 +580,7 @@ async function handleBackgroundMessage(type, payload, revision) {
     if (source) {
         filterSets[source.field] = new Set(payload);
         syncModalState(source.kind, payload, revision);
+        hovercard.syncFilters();
         // Affiliation filters must re-check unknown cached evidence, not treat it as empty.
         if (source.kind === 'affiliations' && filterSets[source.field].size > 0) {
             reprocessRowsMissingAffiliation();
@@ -571,6 +599,7 @@ async function handleBackgroundMessage(type, payload, revision) {
             debug('Settings updated:', settings);
             syncSidebarSettings(settings, revision);
             syncModalSettings(settings, revision);
+            hovercard.syncFilters();
             syncFollowingSetting();
             syncPostRelationsSetting();
             
@@ -601,9 +630,10 @@ async function handleBackgroundMessage(type, payload, revision) {
             if (prevSettings.profileEnrichment !== settings.profileEnrichment || prevSettings.enabled !== settings.enabled) {
                 syncEnrichmentSetting();
                 if (!isEnabled || settings.profileEnrichment === false) clearProfiles();
+                hovercard.syncFilters();
             }
             if (isEnabled && (!areRegionCountrySelectionsEqual(prevSettings.regionCountrySelections, settings.regionCountrySelections) ||
-                ['profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation',
+                ['highlightInLists', 'profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation',
                     ...ACCOUNT_COUNT_FILTERS.map(rule => rule.key)]
                     .some(key => prevSettings[key] !== settings[key]))) {
                 updateBlockedTweets(currentFilters());
@@ -769,6 +799,10 @@ async function initialize() {
  * These functions close over the module state and are reused
  */
 function createMemoizedFunctions(current) {
+    hovercard.configureFilters({
+        getState: () => current.disposed ? null : getBlockingState(),
+        sendMessage: message => current.disposed ? Promise.resolve(cancelledResponse()) : sendMessage(message)
+    });
     const context = {
         get settings() { return settings; },
         get csrfToken() { return csrfToken; },

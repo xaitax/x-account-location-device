@@ -11,7 +11,7 @@
 import browserAPI from '../shared/browser-api.js';
 import { prepareBackupImport } from '../shared/backup.js';
 import { MESSAGE_TYPES, VERSION, STORAGE_KEYS, TIMING, affiliationWasChecked } from '../shared/constants.js';
-import { userCache, filterStores, blockedAffiliations, settings, headersStorage, initializeStorage } from '../shared/storage.js';
+import { userCache, filterStores, blockedAffiliations, settings, headersStorage, initializeStorage, UserCacheStorage } from '../shared/storage.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
 import { apiClient, API_ERROR_CODES } from './api-client.js';
 import { calculateStatistics } from '../shared/utils.js';
@@ -302,6 +302,9 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
 
                 // Keep whichever record actually knows about affiliation. Without this a
                 // lean cloud entry could overwrite a richer local one we already had.
+                // A hover may have filled/enriched RAM while the cloud lookup waited.
+                // Never choose against the stale pre-await cache snapshot.
+                localEntry = userCache.get(screenName) || null;
                 const cloudIsRicher = !wantsRicherRecord(cloudData);
                 const best = (cloudIsRicher || !localEntry) ? cloudData : localEntry;
 
@@ -309,12 +312,14 @@ async function _resolveUserInfo({ screenName, csrfToken }) {
 
                 // A source observation can expire while the lookup is in flight.
                 // Only serve it if the cache accepts its original deadline.
-                if (userCache.set(screenName, best)) {
+                userCache.set(screenName, best);
+                const accepted = userCache.get(screenName);
+                if (accepted) {
                     return {
                         success: true,
-                        data: best,
+                        data: accepted,
                         cached: true,
-                        source: best === cloudData ? 'cloud' : 'local'
+                        source: best === cloudData && accepted.fromCloud === true ? 'cloud' : 'local'
                     };
                 }
             }
@@ -407,7 +412,7 @@ async function handleFetchHovercardInfo({ screenName, csrfToken }) {
     // rendering a half-empty card for cloud-sourced ones.
     if (userCache.has(screenName)) {
         const cached = userCache.get(screenName);
-        if (cached && cached.meta && !cached.meta.partial) {
+        if (UserCacheStorage.hasCompleteMetadata(cached)) {
             return { success: true, data: cached, source: 'local' };
         }
     }
@@ -420,17 +425,20 @@ async function handleFetchHovercardInfo({ screenName, csrfToken }) {
         };
 
         // Persist enriched response locally to speed up future hovers
-        userCache.set(screenName, data);
+        const acceptedWrite = userCache.set(screenName, data);
+        const accepted = userCache.get(screenName) || data;
 
         // Contribute to the cloud. This is the hovercard path, so `data` is the full
         // record — location/device plus affiliation, account age, id and handle-change
         // count. Opening a hovercard is therefore how affiliation coverage grows for
         // everyone, without any lookup ever costing an extra X API call.
-        if (cloudCache.isEnabled() && cloudCache.isConfigured()) {
+        if (acceptedWrite && cloudCache.isEnabled() && cloudCache.isConfigured()) {
             cloudCache.contribute(screenName, data);
         }
 
-        return { success: true, data, source: 'api' };
+        // A concurrent observation can win the cache's freshness/identity guard.
+        // Return that winner too; never display or contribute a rejected reply.
+        return { success: true, data: accepted, source: acceptedWrite ? 'api' : 'local' };
     } catch (error) {
         // Issue #14: drop stale stored headers on auth failure (the in-page fetch
         // fallback in the content script recovers the lookup).

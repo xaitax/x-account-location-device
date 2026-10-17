@@ -4,7 +4,7 @@
  */
 
 import browserAPI from './browser-api.js';
-import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS, canonicalCountry, affiliationWasChecked } from './constants.js';
+import { STORAGE_KEYS, CACHE_CONFIG, DEFAULT_SETTINGS, canonicalCountry, affiliationWasChecked, normalizeAccountId } from './constants.js';
 import { LRUCache } from './lru-cache.js';
 import { normalizeLinkRule } from './domain-utils.js';
 import { FILTER_SOURCES } from './filter-registry.js';
@@ -33,6 +33,111 @@ class UserCacheStorage {
         this.saveTimeoutId = null;
     }
 
+    /** X handles are case-insensitive, including legacy persisted cache keys. */
+    static key(screenName) {
+        return typeof screenName === 'string' ? screenName.trim().toLowerCase() : '';
+    }
+
+    /** A lean/page/cloud meta object is not a completed AboutAccount projection. */
+    static hasMetadataShape(data) {
+        const meta = data?.meta;
+        if (!meta || meta.partial || typeof meta !== 'object' || Array.isArray(meta)) return false;
+        const required = [
+            'name', 'avatarUrl', 'createdAt', 'restId', 'affiliateUsername', 'affiliate', 'usernameChanges',
+            'profileImageShape', 'blueVerified', 'verified', 'verifiedType', 'identityVerified',
+            'verifiedSinceMsec', 'protected', 'createdCountryAccurate', 'learnMoreUrl'
+        ];
+        return required.every(key => Object.hasOwn(meta, key) && meta[key] !== undefined) &&
+            ['blueVerified', 'verified', 'identityVerified', 'protected', 'createdCountryAccurate']
+                .every(key => typeof meta[key] === 'boolean');
+    }
+
+    /** Rich metadata has its own age; a newer partial signal cannot refresh it. */
+    static metadataTimestamp(data, now = Date.now()) {
+        return UserCacheStorage.observationTimestamp(
+            Object.hasOwn(data || {}, 'metaTimestamp') ? { timestamp: data.metaTimestamp } : data, now);
+    }
+
+    static hasCompleteMetadata(data, now = Date.now()) {
+        if (!UserCacheStorage.hasMetadataShape(data)) return false;
+        const observedAt = UserCacheStorage.metadataTimestamp(data, now);
+        if (observedAt === null) return false;
+        const deadline = Object.hasOwn(data, 'metaExpiresAt') ? data.metaExpiresAt : observedAt + CACHE_CONFIG.EXPIRY_MS;
+        return Number.isFinite(deadline) && Math.min(deadline, observedAt + CACHE_CONFIG.EXPIRY_MS) > now;
+    }
+
+    /** Attach RAM-only metadata provenance, clamped to its original source deadline. */
+    static withMetadataDeadline(entry, now = Date.now()) {
+        const { value, expiry } = entry;
+        if (!UserCacheStorage.hasMetadataShape(value)) {
+            if (!Object.hasOwn(value, 'metaTimestamp') && !Object.hasOwn(value, 'metaExpiresAt')) return entry;
+            const copy = { ...value };
+            delete copy.metaTimestamp;
+            delete copy.metaExpiresAt;
+            return { ...entry, value: copy };
+        }
+        const metaTimestamp = UserCacheStorage.metadataTimestamp(value, now);
+        const sourceDeadline = metaTimestamp === null ? null : metaTimestamp + CACHE_CONFIG.EXPIRY_MS;
+        const existingDeadline = Object.hasOwn(value, 'metaExpiresAt') ? value.metaExpiresAt : sourceDeadline;
+        const metaExpiresAt = Number.isFinite(existingDeadline) && sourceDeadline !== null
+            ? Math.min(expiry, existingDeadline, sourceDeadline) : null;
+        if (value.metaTimestamp === metaTimestamp && value.metaExpiresAt === metaExpiresAt) return entry;
+        return { ...entry, value: { ...value, metaTimestamp, metaExpiresAt } };
+    }
+
+    /** Null cloud defaults are unknown; differing observed shared values require enrichment. */
+    static sharedMetadataConflicts(fullMeta, partialMeta) {
+        const createdAt = Date.parse(partialMeta?.createdAt);
+        if (Number.isFinite(createdAt) && createdAt !== Date.parse(fullMeta?.createdAt)) return true;
+        if (typeof partialMeta?.usernameChanges === 'number' && partialMeta.usernameChanges !== fullMeta?.usernameChanges) return true;
+        const label = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
+        const previousLabels = [label(fullMeta?.affiliate?.name), label(fullMeta?.affiliateUsername)];
+        return [label(partialMeta?.affiliate?.name), label(partialMeta?.affiliateUsername)]
+            .some(value => value && !previousLabels.includes(value));
+    }
+
+    /** Pick the authoritative observation without renewing either source's deadline. */
+    static selectEntry(previous, candidate, now = Date.now()) {
+        candidate = UserCacheStorage.withMetadataDeadline(candidate, now);
+        if (!previous || previous.expiry <= now) return candidate;
+        previous = UserCacheStorage.withMetadataDeadline(previous, now);
+        const previousTime = UserCacheStorage.observationTimestamp(previous.value, now);
+        const candidateTime = UserCacheStorage.observationTimestamp(candidate.value, now);
+        const previousFull = UserCacheStorage.hasCompleteMetadata(previous.value, now);
+        const candidateFull = UserCacheStorage.hasCompleteMetadata(candidate.value, now);
+        const candidateOlder = previousTime !== null && (candidateTime === null || candidateTime < previousTime);
+        const sameTime = previousTime === candidateTime;
+        // At the same source time, a complete live observation beats a cloud subset.
+        if (candidateOlder || (sameTime && previousFull && !candidateFull) ||
+            (sameTime && previous.value.fromCloud === false && candidate.value.fromCloud === true)) {
+            return previous;
+        }
+
+        // Keep full in-memory details across a newer compatible subset, but never
+        // carry them over changed location/device/accuracy or a recycled handle.
+        const sameSignals = previous.value.location === candidate.value.location &&
+            previous.value.device === candidate.value.device &&
+            (previous.value.locationAccurate === false) === (candidate.value.locationAccurate === false);
+        const previousId = previous.value.meta?.restId;
+        const candidateId = candidate.value.meta?.restId;
+        const sameAccount = typeof previousId === 'string' && /^[0-9]{1,20}$/.test(previousId) &&
+            typeof candidateId === 'string' && candidateId === previousId;
+        if (previousFull && !candidateFull && sameSignals && sameAccount &&
+            !UserCacheStorage.sharedMetadataConflicts(previous.value.meta, candidate.value.meta)) {
+            return {
+                ...candidate,
+                value: { ...candidate.value,
+                    // These transient fields are intentionally excluded by toPersistedValue.
+                    metaTimestamp: previous.value.metaTimestamp,
+                    metaExpiresAt: previous.value.metaExpiresAt,
+                    // Null/absent cloud defaults must not erase known full fields
+                    // or affiliation artwork. This remains the old full projection.
+                    meta: previous.value.meta }
+            };
+        }
+        return candidate;
+    }
+
     async load() {
         try {
             const result = await browserAPI.storage.local.get(STORAGE_KEYS.CACHE);
@@ -46,7 +151,8 @@ class UserCacheStorage {
                 // Load non-expired entries with their original expiry times,
                 // keeping the persisted `{ value, expiry }` shape in memory.
                 for (const [key, data] of Object.entries(stored)) {
-                    if (!data || !Number.isFinite(data.expiry) || !data.value) continue;
+                    const cacheKey = UserCacheStorage.key(key);
+                    if (!cacheKey || !data || !Number.isFinite(data.expiry) || !data.value) continue;
 
                     const value = UserCacheStorage.fromPersistedValue(data.value);
                     // Older saves dropped the source timestamp. Keep that age explicitly
@@ -56,7 +162,8 @@ class UserCacheStorage {
                         ? data.expiry
                         : Math.min(data.expiry, timestamp + CACHE_CONFIG.EXPIRY_MS);
                     if (expiry > now) {
-                        this.cache.set(key, { value: { ...value, timestamp }, expiry });
+                        const entry = { value: { ...value, timestamp }, expiry };
+                        this.cache.set(cacheKey, UserCacheStorage.selectEntry(this.cache.get(cacheKey), entry, now));
                         loadedCount++;
                     } else {
                         expiredCount++;
@@ -221,10 +328,11 @@ class UserCacheStorage {
     }
 
     get(screenName) {
-        const entry = this.cache.get(screenName);
+        const key = UserCacheStorage.key(screenName);
+        const entry = key ? this.cache.get(key) : null;
         if (!entry) return undefined;
         if (entry.expiry <= Date.now()) {
-            this.delete(screenName);
+            this.delete(key);
             return undefined;
         }
         return entry.value;
@@ -250,11 +358,15 @@ class UserCacheStorage {
      * @returns {boolean} whether the value was accepted
      */
     set(screenName, data) {
-        if (!data || typeof data !== 'object') return false;
+        const key = UserCacheStorage.key(screenName);
+        if (!key || !data || typeof data !== 'object') return false;
         const now = Date.now();
         const isUndatedLive = !Object.hasOwn(data, 'timestamp') && data.fromCloud !== true;
         const timestamp = isUndatedLive ? now : UserCacheStorage.observationTimestamp(data, now);
-        const previous = this.cache.get(screenName);
+        const previous = this.cache.get(key);
+        // Re-selecting the same accepted snapshot is not a new observation or
+        // persistence mutation. Undated live inputs still need their initial stamp.
+        if (Object.hasOwn(data, 'timestamp') && previous?.value === data && previous.expiry > now) return true;
         let expiry;
         if (timestamp === null) {
             // Re-selecting the same legacy local record after a cloud lookup must not
@@ -266,7 +378,9 @@ class UserCacheStorage {
             if (previous?.value === data) expiry = Math.min(expiry, previous.expiry);
             if (expiry <= now) return false;
         }
-        this.cache.set(screenName, { value: { ...data, timestamp }, expiry });
+        const entry = UserCacheStorage.selectEntry(previous, { value: { ...data, timestamp }, expiry }, now);
+        if (entry === previous) return false;
+        this.cache.set(key, entry);
         this.dirty = true;
         this.scheduleSave();
         return true;
@@ -277,7 +391,7 @@ class UserCacheStorage {
     }
 
     delete(screenName) {
-        const result = this.cache.delete(screenName);
+        const result = this.cache.delete(UserCacheStorage.key(screenName));
         if (result) {
             this.dirty = true;
             this.scheduleSave();
@@ -534,7 +648,7 @@ const normalizeLanguage = value => {
     if (!value || typeof value !== 'string') return '';
     return value.trim().toLowerCase().split('-')[0];
 };
-// Allowlisted accounts are stored as the lowercase screen name (X handles are
+// Allowlisted accounts use the lowercase screen name (X handles are
 // case-insensitive). Accepts an optional leading "@" and enforces X's handle rule
 // (1-15 chars, alphanumeric + underscore); anything else is rejected.
 const normalizeUsername = value => {
@@ -583,6 +697,7 @@ class SettingsStorage {
             if (typeof this.settings.showBadgeBackground !== 'boolean') {
                 this.settings.showBadgeBackground = DEFAULT_SETTINGS.showBadgeBackground;
             }
+            this.settings.highlightInLists = this.settings.highlightInLists === true;
             for (const { key, max } of ACCOUNT_COUNT_FILTERS) {
                 if (!isAccountCountThreshold(this.settings[key], max)) this.settings[key] = DEFAULT_SETTINGS[key];
             }
@@ -600,6 +715,7 @@ class SettingsStorage {
         try {
             if (!BADGE_SIZES.includes(values.badgeSize)) throw new TypeError('Invalid badge size.');
             if (typeof values.showBadgeBackground !== 'boolean') throw new TypeError('Invalid badge background preference.');
+            if (typeof values.highlightInLists !== 'boolean') throw new TypeError('Invalid List highlighting preference.');
             normalizeRegionCountrySelections(values.regionCountrySelections, { strict: true });
             for (const { key, max } of ACCOUNT_COUNT_FILTERS) {
                 if (!isAccountCountThreshold(values[key], max)) throw new TypeError(`Invalid account-count threshold: ${key}.`);
@@ -808,7 +924,8 @@ const FILTER_STORAGE_OPTIONS = {
     affiliations: { label: 'blocked affiliations', normalize: normalizeLower },
     links: { label: 'blocked linked domains and URLs', normalize: normalizeLinkRule },
     // First run only. Removing the default keeps it removed (issue #26).
-    allowedUsers: { label: 'always-show accounts', normalize: normalizeUsername, defaults: ['xaitax'] }
+    allowedUsers: { label: 'always-show accounts', normalize: normalizeUsername, defaults: ['xaitax'] },
+    accounts: { label: 'filtered accounts', normalize: normalizeAccountId }
 };
 
 export const filterStores = Object.freeze(Object.fromEntries(FILTER_SOURCES.map(source => [
@@ -818,7 +935,7 @@ export const filterStores = Object.freeze(Object.fromEntries(FILTER_SOURCES.map(
 // Preserve the public singleton exports used by existing consumers.
 export const {
     blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedPcf,
-    blockedLanguages, blockedAffiliations, blockedLinks, allowedUsers
+    blockedLanguages, blockedAffiliations, blockedLinks, allowedUsers, blockedAccounts
 } = filterStores;
 export const userCache = new UserCacheStorage();
 export const settings = new SettingsStorage();

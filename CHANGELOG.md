@@ -2,6 +2,17 @@
 
 All notable changes to X-Posed will be documented in this file.
 
+## [4.3.0] - 2026-10-17
+
+Quick filters where you need them, and account cards worth sharing.
+
+### Improvements
+
+- **Quick filters from account cards:** Add or remove the account’s country, X-reported region or the account itself directly from its card. Account filters use permanent User IDs, so they keep matching after handle changes. In Hide mode, a direct account filter also hides individually opened posts. Actions follow your current Hide/Highlight setting, respect Always Show and use your existing filters with no extra requests. Manage account filters in **Blocking → Accounts** or **Saved filters**; X follows and blocks stay unchanged.
+- **Profile pictures in account cards:** A larger, softly rounded-square picture sits beside the display name and handle, including in replies and quoted posts. Always Show is now a compact shield beside Close, with its explanatory tooltip. Pictures reuse the matching image already on X or existing account data, without another account lookup, and are included when you copy or save the card.
+- **Highlight filtered posts in Lists:** Optional **Blocking → Behavior → Highlight matching posts in Lists** uses highlighting in curated X List feeds while Home and other feeds keep your general Hide/Highlight setting. Off by default, with no extra requests; the separate **Hide replies and quotes** rule still applies ([#15](https://github.com/xaitax/x-account-location-device/issues/15)).
+- **Copy an ID-based profile link:** Click the User ID in an account card to copy its `https://x.com/i/user/…` link, which stays the same when the handle changes. Includes copy feedback and a manual link if clipboard access is blocked, with no extra account requests ([#76](https://github.com/xaitax/x-account-location-device/issues/76)).
+
 ## [4.2.0] - 2026-10-05
 
 A heavily requested community feature—regions with selectable countries—plus cleaner account cards and easy PNG exports.

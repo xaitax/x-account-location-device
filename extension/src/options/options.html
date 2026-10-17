@@ -15,44 +15,33 @@
         <div class="whats-new-banner" id="whats-new-banner" role="region" aria-labelledby="whats-new-title" style="display: none;">
             <button type="button" class="whats-new-close" id="whats-new-close" aria-label="Dismiss what's new" data-settings-icon="close"></button>
             <div class="whats-new-content">
-                <h2 id="whats-new-title"><span id="release-heading">What's new in X-Posed</span> <span data-release-version>4.2.0</span></h2>
-                <p class="whats-new-subtitle">Bigger filters. Shareable details. Still your feed.</p>
+                <h2 id="whats-new-title"><span id="release-heading">What's new in X-Posed</span> <span data-release-version>4.3.0</span></h2>
+                <p class="whats-new-subtitle">Your feed. Your rules. Now a little easier.</p>
 
                 <div class="whats-new-features">
-                    <section class="whats-new-feature whats-new-region-feature" aria-labelledby="whats-new-regions-title">
-                        <span class="whats-new-requested"><span class="settings-icon" data-settings-icon="map" aria-hidden="true"></span>You asked. It’s here.</span>
-                        <h3 id="whats-new-regions-title">Regions, now with countries.</h3>
-                        <p>X sometimes says “Europe” instead of naming a country. Now a region filter can cover that X label <strong>and the countries you choose inside it</strong>.</p>
-                        <p class="whats-new-feature-note">Pick a few, include them all, or keep matching the label only. Your existing filters stay as they are until you choose.</p>
-                        <a href="#panel-blocking" class="whats-new-feature-link whats-new-open" data-target="panel-blocking" data-blocking-tab="add" data-blocking-editor="regions">Choose my regions <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span></a>
+                    <section class="whats-new-feature" aria-labelledby="whats-new-filters-title">
+                        <h3 id="whats-new-filters-title"><span class="settings-icon" data-settings-icon="shield" aria-hidden="true"></span>See it. Filter it.</h3>
+                        <p>Open a card on X and filter the account, country or region in a click. Your <strong>Hide or Highlight</strong> choice applies, and account filters keep working even if the handle changes.</p>
                     </section>
 
                     <section class="whats-new-feature whats-new-card-feature" aria-labelledby="whats-new-cards-title">
-                        <span class="whats-new-feature-eyebrow">A good card deserves to be shared</span>
-                        <h3 id="whats-new-cards-title">Copy or save account cards</h3>
-                        <p>Turn any account card into a crisp PNG—ready to paste into a chat or keep for later. Same lovely card, without buttons or surrounding posts.</p>
-                        <div class="release-export-guide">
-                            <span class="release-export-guide-icon settings-icon" data-settings-icon="copy" aria-hidden="true"></span><span><strong>Copy PNG</strong> to paste it</span>
-                            <span class="release-export-guide-icon settings-icon" data-settings-icon="download" aria-hidden="true"></span><span><strong>Save PNG</strong> to keep it</span>
-                        </div>
-                        <p class="whats-new-feature-note">Open an account card on X, then use either icon. Images are created on your device. If copying is blocked, Save PNG has you covered.</p>
+                        <h3 id="whats-new-cards-title"><span class="settings-icon" data-settings-icon="copy" aria-hidden="true"></span>A card worth sharing.</h3>
+                        <p>Profile picture, location and the useful details, all in one tidy card. Use <strong>Copy</strong> to paste it into a chat, or <strong>Save</strong> to keep it for later.</p>
                     </section>
                 </div>
 
-                <section class="whats-new-polish" aria-labelledby="whats-new-polish-title">
-                    <h3 id="whats-new-polish-title">A little extra polish</h3>
-                    <p>A short hover delay means fewer accidental popups. Blue, gold and grey verification get their proper colors. Saved filters get matching icons, and more countries and territories get their flags.</p>
-                </section>
                 <div class="whats-new-actions">
                     <a href="#panel-general" class="btn btn-primary whats-new-open" data-target="panel-general">Continue to settings</a>
                     <a href="https://github.com/xaitax/x-account-location-device/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer" class="whats-new-changelog">Full changelog &amp; credits</a>
                 </div>
-                <section class="whats-new-cta" aria-labelledby="whats-new-support-title">
-                    <h3 id="whats-new-support-title" class="whats-new-support-title">
-                        <span class="settings-icon" data-settings-icon="heart" aria-hidden="true"></span>
-                        Made possible by you
-                    </h3>
-                    <p><strong>A massive thank you to everyone who has donated.</strong> Your generosity helps keep the community cache and infrastructure paid for—and X-Posed free for everyone. Donations are entirely optional and deeply appreciated.</p>
+                <aside class="whats-new-cta" aria-labelledby="whats-new-support-title">
+                    <div class="whats-new-support-copy">
+                        <h3 id="whats-new-support-title" class="whats-new-support-title">
+                            <span class="settings-icon" data-settings-icon="heart" aria-hidden="true"></span>
+                            You make this possible
+                        </h3>
+                        <p><strong>A massive thank-you to everyone who’s donated.</strong> You help pay for the community cache and infrastructure, and keep X-Posed free for everyone.</p>
+                    </div>
                     <div class="whats-new-support-actions">
                         <a href="https://ko-fi.com/M4M61EP5XL" target="_blank" rel="noopener noreferrer" class="btn whats-new-support-action">
                             <span class="settings-icon" data-settings-icon="coffee" aria-hidden="true"></span>
@@ -63,9 +52,8 @@
                             Crypto options
                             <span class="settings-icon" data-settings-icon="chevronRight" aria-hidden="true"></span>
                         </a>
-                        <span class="whats-new-support-note">Bitcoin, Ethereum and USDC on Ethereum, added by request.</span>
                     </div>
-                </section>
+                </aside>
             </div>
         </div>
 
@@ -454,7 +442,7 @@
                 </h2>
 
                 <div class="about-info">
-                    <p><strong>X-Posed</strong> v<span id="version">4.2.0</span></p>
+                    <p><strong>X-Posed</strong> v<span id="version">4.3.0</span></p>
                     <p class="text-muted">See where X users are located and what devices they use.</p>
                     
                     <div class="about-links">

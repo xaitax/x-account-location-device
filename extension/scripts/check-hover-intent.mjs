@@ -8,14 +8,22 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { parseAst } from 'rollup/parseAst';
 import { LRUCache } from '../src/shared/lru-cache.js';
+import { CACHE_CONFIG } from '../src/shared/constants.js';
+import { resolveCardAvatar } from '../src/content/hovercard-avatar.js';
 
 const source = fs.readFileSync(new URL('../src/content/hovercard.js', import.meta.url), 'utf8');
-const declarations = parseAst(source).body.filter(node =>
+const ast = parseAst(source).body;
+const declarations = ast.filter(node =>
     (node.type === 'ClassDeclaration' && node.id.name === 'HovercardController') ||
     (node.type === 'VariableDeclaration' && node.declarations.some(declaration =>
         ['TOUCH', 'HOVER_INTENT_MS'].includes(declaration.id.name))));
 assert.equal(declarations.length, 3, 'Test the production controller and its actual hover delay');
-const controllerSource = declarations.map(node => source.slice(node.start, node.end)).join('\n');
+// Retain the production data-selection helpers used by show(), rather than
+// replacing the new first-paint policy with another mock implementation.
+const helperBoundary = ast.find(node => node.type === 'FunctionDeclaration' && node.id.name === 'isSafeHttpsUrl').start;
+const helpers = ast.map(node => node.type === 'ExportNamedDeclaration' ? node.declaration : node)
+    .filter(node => node?.start < helperBoundary && ['FunctionDeclaration', 'VariableDeclaration'].includes(node.type));
+const controllerSource = [...helpers, ...declarations].map(node => source.slice(node.start, node.end)).join('\n');
 
 class EventTargetDouble {
     constructor() { this.listeners = new Map(); }
@@ -82,12 +90,15 @@ function environment({ touch = false, clickOnly = false } = {}) {
     document.hidden = false;
     const window = new EventTargetDouble();
     window.matchMedia = () => ({ matches: !touch });
+    class ClockDate extends Date { static now() { return 1800000000000 + time; } }
     const requests = [];
+    const tooltips = [];
     const card = new ElementDouble(document);
     card.close = new ElementDouble(document);
     card.close.parent = card;
     document.getElementById = () => card;
-    const context = vm.createContext({ window, document, LRUCache, CARD_ID: 'x-posed-hovercard',
+    const context = vm.createContext({ window, document, LRUCache, CACHE_CONFIG, Date: ClockDate, CARD_ID: 'x-posed-hovercard',
+        resolveCardAvatar, getProfile: () => null,
         setTimeout: (callback, delay) => {
             const id = nextId++;
             timers.set(id, { callback, at: time + delay });
@@ -103,6 +114,15 @@ function environment({ touch = false, clickOnly = false } = {}) {
         queueMicrotask: callback => callback(),
         resolveDisplayNamePresentation: value => value,
         positionCard() {}, setLocationWarningHelp() {},
+        createCardTooltip() {
+            const tooltip = { dismissResult: false, dismissCalls: 0, disposeCalls: 0,
+                refresh() {},
+                dismiss() { this.dismissCalls++; const result = this.dismissResult; this.dismissResult = false; return result; },
+                dispose() { this.disposeCalls++; }
+            };
+            tooltips.push(tooltip);
+            return tooltip;
+        },
         buildCardContent: () => card });
     vm.runInContext(`${controllerSource}\nglobalThis.Controller = HovercardController;`, context);
     const controller = new context.Controller();
@@ -135,12 +155,13 @@ function environment({ touch = false, clickOnly = false } = {}) {
     const noIntentListeners = () => {
         for (const [target, types] of [[document, ['keydown', 'pointerdown', 'visibilitychange']],
             [window, ['scroll', 'resize', 'blur']]]) {
-            for (const type of types) assert.equal(
-                target.listeners.get(type)?.has(controller._handleHoverIntentCancel) || false,
-                false, `Remove pending-only ${type} listener`);
+            for (const type of types) {
+                assert.equal(target.listeners.get(type)?.has(controller._handleHoverIntentCancel) || false,
+                    false, `Remove pending-only ${type} listener`);
+            }
         }
     };
-    return { controller, document, window, requests, card, badge, advance, options,
+    return { controller, document, window, requests, tooltips, card, badge, advance, options,
         noIntentListeners, timers };
 }
 
@@ -265,6 +286,45 @@ check('Escape cancels unopened intent without consuming the key', () => {
     assert.equal(escape.prevented, false); assert.equal(escape.stopped, false);
     assert.equal(e.requests.length, 0);
     e.noIntentListeners();
+});
+
+check('Escape dismisses a visible explanatory tooltip first and only the second Escape closes the card', () => {
+    const e = environment(); const a = e.badge('alpha');
+    a.dispatch('click', { target: a.details, detail: 0 });
+    const tooltip = e.controller.actionTooltip; tooltip.dismissResult = true;
+    const first = e.document.dispatch('keydown', { key: 'Escape' });
+    assert.equal(first.prevented, true); assert.equal(first.stopped, true);
+    assert.equal(tooltip.dismissCalls, 1); assert.equal(e.controller.currentAnchor, a);
+    assert.equal(e.document.activeElement, e.card.close);
+    const second = e.document.dispatch('keydown', { key: 'Escape' });
+    assert.equal(second.prevented, true); assert.equal(second.stopped, true);
+    assert.equal(tooltip.dismissCalls, 2); assert.equal(e.controller.currentAnchor, null);
+    assert.equal(e.document.activeElement, a.details, 'Card dismissal restores the initiating control');
+    assert.deepEqual(e.requests, ['alpha']);
+});
+
+check('A tooltip dismissal reporting no visible layer does not swallow the card Escape action', () => {
+    const e = environment(); const a = e.badge('alpha');
+    a.dispatch('click', { target: a.details, detail: 0 });
+    const tooltip = e.controller.actionTooltip; tooltip.dismissResult = false;
+    const escape = e.document.dispatch('keydown', { key: 'Escape' });
+    assert.equal(tooltip.dismissCalls, 1);
+    assert.equal(e.controller.currentAnchor, null);
+    assert.equal(escape.prevented, true); assert.equal(e.document.activeElement, a.details);
+});
+
+check('Hiding, teardown and replacing a card dispose its owned tooltip exactly once', () => {
+    for (const action of ['hide', 'teardown', 'replace']) {
+        const e = environment(); const a = e.badge('alpha'); a.dispatch('click', { target: a.details });
+        const previous = e.controller.actionTooltip;
+        if (action === 'replace') {
+            const b = e.badge('beta'); e.controller.show(b, { ...e.options('beta'), clickToOpen: true });
+            assert.notEqual(e.controller.actionTooltip, previous);
+            assert.equal(e.controller.currentAnchor, b);
+        } else e.controller[action]();
+        assert.equal(previous.disposeCalls, 1, action);
+        if (action !== 'replace') assert.equal(e.controller.actionTooltip, null);
+    }
 });
 
 check('pointerdown, scroll, resize and window blur cancel pending intent', () => {

@@ -4,6 +4,7 @@
  * observed but is now unknown. Nothing here reads storage or makes requests.
  */
 import { DOMAIN_LIMITS, normalizeDomain, normalizeExactUrl, extractDomainHosts, extractExactUrls } from './domain-utils.js';
+import { normalizeAccountId } from './constants.js';
 
 export const PROFILE_LIMITS = Object.freeze({
     MAX_ENTRIES: 500,
@@ -23,7 +24,7 @@ export const PROFILE_LIMITS = Object.freeze({
 const WIRE_FIELDS = Object.freeze({
     b: 'bio', o: 'location', w: 'websiteHosts', l: 'bioHosts', h: 'locationHosts',
     W: 'websiteUrls', L: 'bioUrls', H: 'locationUrls',
-    p: 'pcf', f: 'followers', g: 'following', t: 'tweets', m: 'media'
+    p: 'pcf', f: 'followers', g: 'following', t: 'tweets', m: 'media', i: 'userId'
 });
 
 export function isProfileUsername(value) {
@@ -111,6 +112,9 @@ function entityLinks(user, group) {
 export function projectProfileUser(user) {
     if (!user || typeof user !== 'object' || !isProfileUsername(user.core?.screen_name)) return null;
     const result = { u: user.core.screen_name.toLowerCase() };
+    // Use only X's explicit decimal identity, never a JSON number or a handle guess.
+    const userId = normalizeAccountId(user.rest_id);
+    if (userId) result.i = userId;
     const bio = user.profile_bio?.description;
     if (typeof bio === 'string') result.b = bio.slice(0, PROFILE_LIMITS.MAX_BIO_LENGTH);
 
@@ -155,9 +159,11 @@ export function projectProfileUser(user) {
  * its previously observed hosts stale until replacement entities arrive.
  */
 export function mergeProjectedProfile(previous, patch) {
-    const next = { ...previous, ...patch };
+    // A reused handle must not inherit the previous person's text or counters.
+    const base = normalizeAccountId(patch?.i) && patch.i !== previous?.i ? {} : previous;
+    const next = { ...base, ...patch };
     for (const [text, fields] of [['b', ['l', 'L']], ['o', ['h', 'H']]]) {
-        if (Object.hasOwn(patch, text) && patch[text] !== previous?.[text]) {
+        if (Object.hasOwn(patch, text) && patch[text] !== base?.[text]) {
             for (const field of fields) {
                 if (!Object.hasOwn(patch, field)) delete next[field];
             }

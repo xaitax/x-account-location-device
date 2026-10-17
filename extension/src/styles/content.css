@@ -73,59 +73,182 @@
 
 .x-posed-card-actions {
     flex-shrink: 0;
-    padding: 10px 14px;
+    padding: 12px 10px;
     border-top: 1px solid var(--xp-border);
 }
-.x-posed-card-action-row { display: flex; align-items: center; gap: 8px; }
-.x-posed-card-action-row .x-posed-allowlist-button { flex: 0 1 auto; min-width: 0; }
-.x-posed-export-actions { display: flex; flex: none; align-items: center; gap: 4px; margin-left: auto; }
-.x-posed-export-button {
-    appearance: none;
+.x-posed-card-action-row {
     display: grid;
-    place-items: center;
-    width: 30px;
-    height: 32px;
-    padding: 0;
+    position: relative;
+    grid-template-columns: repeat(var(--xp-card-section-count, 2), minmax(0, 1fr));
+    gap: 12px;
+}
+.x-posed-card-action-row[data-count="2"]::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 2px;
+    bottom: 4px;
+    border-left: 1px solid var(--xp-border);
+    pointer-events: none;
+}
+.x-posed-footer-section { min-width: 0; }
+.x-posed-footer-section-heading {
+    margin: 0 0 8px;
+    padding: 0 6px;
+    color: var(--xp-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+}
+.x-posed-footer-section-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+}
+.x-posed-card-action {
+    appearance: none;
+    display: flex;
+    position: relative;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    height: 50px;
+    padding: 6px 4px;
+    margin: 0;
     border: 1px solid transparent;
     border-radius: 7px;
     background: transparent;
     color: var(--xp-text-dim);
+    font: inherit;
+    font-size: 12px;
+    line-height: 14px;
+    font-weight: 500;
+    text-align: center;
     cursor: pointer;
 }
-.x-posed-export-button svg { width: 16px; height: 16px; }
-.x-posed-export-button:hover { background: var(--xp-surface-2); color: var(--xp-text); border-color: var(--xp-border); }
-.x-posed-export-button:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: 2px; }
-.x-posed-export-button[aria-disabled="true"] { opacity: .55; cursor: wait; }
+.x-posed-card-action-icon, .x-posed-quick-filter-icon { display: flex; flex: none; width: 18px; height: 18px; }
+.x-posed-card-action-icon > svg, .x-posed-quick-filter-icon > svg { display: block; width: 18px; height: 18px; }
+.x-posed-card-action-label { flex: none; white-space: nowrap; color: var(--xp-text); }
+.x-posed-card-action-check { position: absolute; display: flex; width: 10px; height: 10px; right: 4px; top: 4px; }
+.x-posed-card-action-check > svg { display: block; width: 10px; height: 10px; }
+.x-posed-card-action-coverage { position: absolute; display: grid; place-items: center; width: 10px; height: 10px; right: 4px; top: 4px; }
+.x-posed-card-action-coverage::before { content: ''; width: 7px; border-top: 1.5px solid currentColor; }
+.x-posed-card-action:hover { border-color: var(--xp-border); background: var(--xp-surface-2); }
+.x-posed-card-action:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: -2px; }
+/* A dashed outline means a saved region covers this country, not a direct toggle.
+   Keep the direct checkmark separate: clicking still adds a country rule only. */
+.x-posed-card-action[data-coverage="region"] {
+    border: 1px dashed var(--xp-accent-line);
+    color: var(--xp-accent);
+    background: color-mix(in srgb, var(--xp-accent-soft) 50%, transparent);
+}
+.x-posed-card-action[data-coverage="region"]:hover { background: var(--xp-accent-soft); }
+.x-posed-card-action[aria-pressed="true"] { border-color: var(--xp-accent-line); color: var(--xp-accent); background: var(--xp-accent-soft); }
+.x-posed-card-action[data-coverage="region"] .x-posed-card-action-label,
+.x-posed-card-action[aria-pressed="true"] .x-posed-card-action-label,
+.x-posed-export-button--success .x-posed-card-action-label { color: inherit; }
+.x-posed-quick-controls[data-exempt="true"] .x-posed-card-action[data-coverage="region"],
+.x-posed-quick-controls[data-exempt="true"] .x-posed-card-action[aria-pressed="true"] {
+    color: var(--xp-text-dim);
+    border-color: var(--xp-border);
+    background: transparent;
+}
+.x-posed-card-action[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.x-posed-card-action[aria-busy="true"] { cursor: progress; }
 .x-posed-export-button--success { color: var(--xp-accent); }
-.x-posed-export-status { margin-top: 7px; font-size: 12px; line-height: 1.4; color: var(--xp-text-dim); }
-.x-posed-export-status--error { color: var(--xp-danger); }
-.x-posed-card-actions .x-posed-allowlist-button {
+.x-posed-allowlist-control { flex: none; }
+.x-posed-allowlist-button {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    max-width: 100%;
-    padding: 7px 10px;
+    justify-content: center;
+    gap: 5px;
+    min-height: 36px;
+    padding: 0 8px;
     margin: 0;
-    border: 1px solid var(--xp-border);
+    appearance: none;
+    border: 1px solid transparent;
     border-radius: 7px;
-    background: var(--xp-surface-2);
-    color: var(--xp-text);
-    font-family: var(--xp-font-ui);
-    font-size: 12px;
+    background: transparent;
+    color: var(--xp-text-dim);
+    font: inherit;
+    font-size: 11px;
     font-weight: 500;
-    line-height: 1.5;
-    text-align: left;
+    line-height: 14px;
     cursor: pointer;
+    white-space: nowrap;
+}
+.x-posed-allowlist-button:hover { border-color: var(--xp-border); background: var(--xp-surface-2); color: var(--xp-text); }
+.x-posed-allowlist-button[aria-pressed="true"] { color: var(--xp-accent); background: var(--xp-accent-soft); border-color: var(--xp-accent-line); }
+.x-posed-allowlist-button svg { width: 14px; height: 14px; flex: none; }
+.x-posed-allowlist-button[aria-disabled="true"] { cursor: wait; opacity: .6; }
+.x-posed-allowlist-button:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: 2px; }
+.x-posed-quick-filter-status, .x-posed-allowlist-status, .x-posed-export-status {
+    margin-top: 7px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--xp-danger);
     overflow-wrap: anywhere;
 }
-.x-posed-card-actions .x-posed-allowlist-button:hover { border-color: var(--xp-accent); background: var(--xp-surface-2); }
-.x-posed-card-actions .x-posed-allowlist-button[aria-pressed="true"] { color: var(--xp-accent); }
-.x-posed-allowlist-button svg { width: 15px; height: 15px; flex-shrink: 0; }
-.x-posed-allowlist-button:disabled { cursor: wait; opacity: .6; }
-.x-posed-allowlist-button:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: 2px; }
-.x-posed-allowlist-status { margin-top: 7px; font-size: 12px; line-height: 1.4; color: var(--xp-text-dim); }
-.x-posed-allowlist-status.x-posed-allowlist-error { color: var(--xp-danger); }
+/* Success and exception notices stay available to screen readers without
+   adding another row. Failed writes/exports remain visible and actionable. */
+.x-posed-quick-filter-status:not([data-tone="error"]),
+.x-posed-allowlist-status:not(.x-posed-allowlist-error),
+.x-posed-export-status:not(.x-posed-export-status--error) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    clip-path: inset(50%);
+}
 .x-posed-hovercard [hidden] { display: none !important; }
+
+/* Fixed inside the card, like the location explanation: the bubble escapes the
+   scroll/overflow clip but remains part of the card's hover/focus ownership. */
+.x-posed-action-tooltip {
+    position: fixed;
+    z-index: 2;
+    width: max-content;
+    max-width: min(276px, calc(100vw - 24px));
+    padding: 10px 12px;
+    border: 1px solid var(--xp-border);
+    border-radius: 8px;
+    background: var(--xp-surface-2);
+    background: color-mix(in srgb, var(--xp-surface-2) 90%, var(--xp-accent) 10%);
+    border-color: color-mix(in srgb, var(--xp-border) 75%, var(--xp-accent) 25%);
+    color: var(--xp-text);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
+    font-family: var(--xp-font-ui);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+.x-posed-action-tooltip-heading { display: block; margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--xp-accent); color: color-mix(in srgb, var(--xp-accent) 75%, var(--xp-text) 25%); }
+.x-posed-action-tooltip-description { display: block; color: var(--xp-text); }
+.x-posed-action-tooltip::after {
+    content: '';
+    position: absolute;
+    left: var(--xp-tooltip-arrow-x, 50%);
+    bottom: -5px;
+    width: 8px;
+    height: 8px;
+    background: var(--xp-surface-2);
+    background: color-mix(in srgb, var(--xp-surface-2) 90%, var(--xp-accent) 10%);
+    border-right: 1px solid var(--xp-border);
+    border-bottom: 1px solid var(--xp-border);
+    border-color: color-mix(in srgb, var(--xp-border) 75%, var(--xp-accent) 25%);
+    transform: translateX(-50%) rotate(45deg);
+}
+.x-posed-action-tooltip[data-placement="bottom"]::after { top: -5px; bottom: auto; transform: translateX(-50%) rotate(225deg); }
+.x-posed-action-tooltip[data-scrollable="true"] { overflow-x: hidden; scrollbar-width: thin; }
+.x-posed-action-tooltip[data-scrollable="true"]::after { display: none; }
 
 /* Touch / no-hover (e.g. Firefox for Android): the dossier opens on tap and renders
    as a bottom sheet filling the width, overriding the desktop anchor positioning
@@ -142,7 +265,7 @@
         max-height: 78dvh;
         border-radius: 12px 12px 0 0 !important;
     }
-    .x-posed-card-actions { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+    .x-posed-card-actions { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }
 
 /* Sidebar "Blocking" link reuses X's fill-style nav icon wrapper; force the shield
@@ -366,22 +489,56 @@
 }
 .x-posed-card-header {
     position: relative;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     flex-shrink: 0;
-    gap: 10px;
-    align-items: flex-start;
+    column-gap: 10px;
+    row-gap: 4px;
+    align-items: start;
     padding: 14px 16px 12px;
 }
+.x-posed-card-header[data-has-avatar="true"] { grid-template-columns: 48px minmax(0, 1fr) auto; }
+.x-posed-card-avatar {
+    display: block;
+    grid-column: 1;
+    grid-row: 1 / 3;
+    align-self: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--xp-surface-2);
+}
+.x-posed-card-header[data-has-avatar="true"] .x-posed-name-line { grid-column: 2; }
+.x-posed-card-header[data-has-avatar="true"] .x-posed-handle-line,
+.x-posed-card-header[data-has-avatar="true"] .x-posed-tags { grid-column: 2 / -1; }
+.x-posed-card-header[data-has-avatar="true"] .x-posed-handle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.x-posed-card-header[data-has-avatar="true"] .x-posed-header-actions { grid-column: 3; }
+.x-posed-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    grid-column: 2;
+    grid-row: 1;
+    margin: -2px -5px 0 0;
+}
+.x-posed-header-actions .x-posed-allowlist-button {
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0;
+}
+.x-posed-header-actions .x-posed-allowlist-button svg { width: 16px; height: 16px; }
 
 .x-posed-card-close {
     appearance: none;
     display: grid;
     place-items: center;
     flex-shrink: 0;
-    width: 27px;
-    height: 27px;
+    width: 28px;
+    height: 28px;
     padding: 0;
-    margin: -2px -5px 0 0;
+    margin: 0;
     border: 0;
     border-radius: 6px;
     background: transparent;
@@ -396,14 +553,16 @@
 }
 
 .x-posed-title {
-    min-width: 0;
-    flex: 1;
+    display: contents;
 }
 
 .x-posed-name-line {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    grid-column: 1;
+    grid-row: 1;
 }
 
 .x-posed-name {
@@ -446,16 +605,19 @@
     font-family: var(--xp-font-ui);
     font-size: 13px;
     color: var(--xp-text-dim);
-    margin-top: 1px;
     display: block;
     overflow-wrap: anywhere;
+    min-width: 0;
+    flex: 1;
 }
+.x-posed-handle-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; grid-column: 1 / -1; grid-row: 2; }
 
 .x-posed-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 5px 10px;
-    margin-top: 7px;
+    grid-column: 1 / -1;
+    grid-row: 3;
 }
 
 .x-posed-tag {
@@ -538,6 +700,34 @@
 .x-posed-date-value { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 3px 6px; max-width: 100%; }
 .x-posed-account-age { color: var(--xp-text-dim); font-size: 12px; font-weight: 400; white-space: nowrap; }
 .x-posed-card-metadata .x-posed-row--identifier { margin-top: 5px; padding-top: 8px; border-top: 1px solid var(--xp-border); }
+.x-posed-user-id-control { display: inline-flex; flex-direction: column; align-items: flex-end; max-width: 100%; vertical-align: middle; }
+.x-posed-user-id-copy {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: 100%;
+    min-height: 24px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    cursor: pointer;
+}
+.x-posed-user-id-value { min-width: 0; overflow-wrap: anywhere; user-select: text; }
+.x-posed-user-id-icon { display: inline-flex; flex: 0 0 13px; color: var(--xp-text-dim); opacity: 1; }
+.x-posed-user-id-copy:hover .x-posed-user-id-value { text-decoration: underline; text-underline-offset: 3px; }
+.x-posed-user-id-copy:hover .x-posed-user-id-icon,
+.x-posed-user-id-copy--success .x-posed-user-id-icon { color: var(--xp-accent); }
+.x-posed-user-id-copy:focus-visible { outline: 2px solid var(--xp-accent); outline-offset: 3px; }
+.x-posed-user-id-copy[aria-busy="true"] { cursor: progress; }
+.x-posed-user-id-fallback { max-width: 100%; margin-top: 4px; font-size: 11px; overflow-wrap: anywhere; }
+.x-posed-user-id-fallback[hidden] { display: none; }
 .x-posed-card-stats {
     display: flex;
     background: var(--xp-surface-2);

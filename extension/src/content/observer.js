@@ -3,7 +3,7 @@
  * Handles DOM observation, user processing, and caching
  */
 
-import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, canonicalCountry, GOVERNMENT_LABEL } from '../shared/constants.js';
+import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, canonicalCountry, GOVERNMENT_LABEL, observedAccountId, normalizeAccountId } from '../shared/constants.js';
 import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
@@ -54,21 +54,29 @@ function isAuthorExempt(screenName, allowedUsers, settings, loggedInUser = getLo
         (settings?.alwaysShowFollowing === true && isFollowing(author)));
 }
 
+/** Only the curated List feed overrides Hide; discovery, members and post pages do not. */
+function shouldHighlightMatches(settings, pathname = globalThis.location?.pathname) {
+    return settings.highlightBlockedTweets === true ||
+        (settings.highlightInLists === true && /^\/i\/lists\/[1-9]\d*\/?$/.test(pathname));
+}
+
 /** Assemble the same author verdict for first resolution and live filter updates. */
 function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUserCell,
     loggedInUser = getLoggedInUsername()) {
     const { blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedLinks,
-        blockedPcf, blockedAffiliations, allowedUsers, settings } = filters;
+        blockedPcf, blockedAffiliations, blockedAccounts, allowedUsers, settings } = filters;
     const isExempt = isAuthorExempt(screenName, allowedUsers, settings, loggedInUser);
     const isQuote = isInsideQuoteTweet(element, tweet);
     const location = canonicalCountry(element.dataset.xCountry);
-    const profile = settings.profileEnrichment === false ? null : getProfile(screenName);
+    const observedProfile = getProfile(screenName);
+    const profile = settings.profileEnrichment === false ? null : observedProfile;
     const displayName = blockedTags?.size || settings.minDisplayNameDigits > 0
         ? extractDisplayName(element, false, screenName) : undefined;
     const accountCountReasons = resolveAccountCountReasons(screenName, profile, settings, displayName);
     if (settings.minDisplayNameDigits > 0) displayNameCounts.set(element, countDisplayNameDigits(displayName));
     const reasons = resolveBlockReasons({
         isExempt,
+        isAccountBlocked: blockedAccounts?.has(observedAccountId(info, observedProfile)) === true,
         isBlockedCountry: location !== '' && blockedCountries.has(location),
         isBlockedRegion: matchingBlockedRegions(location, blockedRegions, settings.regionCountrySelections).length > 0,
         isTagBlocked: blockedTags?.size > 0 && hasBlockedTag(displayName, blockedTags),
@@ -82,7 +90,7 @@ function resolveAuthorBlockState(element, screenName, info, filters, tweet, isUs
         isListBlocked: reasons.length > 0,
         // A quoted account's location warning must not hide the quoting author's post.
         isVpnHidden: !isQuote && info?.locationAccurate === false && settings.showVpnUsers === false && !isExempt,
-        highlightMode: settings.highlightBlockedTweets === true,
+        highlightMode: shouldHighlightMatches(settings),
         isQuote,
         neverHide: isUserCell,
         reasons
@@ -108,10 +116,11 @@ function resolveAccountCountReasons(screenName, profile, settings, displayName) 
  * Ordered filter categories, shared by initial resolution and live updates.
  * Presentation never needs to parse a comma-separated verdict or profile text.
  */
-function resolveBlockReasons({ isExempt, isBlockedCountry, isBlockedRegion, isTagBlocked,
+function resolveBlockReasons({ isExempt, isAccountBlocked, isBlockedCountry, isBlockedRegion, isTagBlocked,
     isBioBlocked, isLinkBlocked, isLabelBlocked, isAffiliationBlocked, accountCountReasons = [] }) {
     if (isExempt) return [];
     const reasons = [];
+    if (isAccountBlocked) reasons.push('account');
     if (isBlockedCountry) reasons.push('country');
     if (isBlockedRegion) reasons.push('region');
     if (isTagBlocked) reasons.push('tag');
@@ -124,6 +133,7 @@ function resolveBlockReasons({ isExempt, isBlockedCountry, isBlockedRegion, isTa
 }
 
 const BLOCK_REASON_LABELS = {
+    account: 'Account',
     country: 'Country', region: 'Region', tag: 'Display name', bio: 'Bio or profile location',
     link: 'Linked domain / URL', label: 'Account label', affiliation: 'Affiliation',
     vpn: 'Location warning', language: 'Post language',
@@ -242,9 +252,11 @@ function applyBlockState(element, tweet, { isListBlocked, isVpnHidden, highlight
     // Removing someone from your own follower list hides the information you opened
     // the page to read, and leaves the count looking wrong. Every filter highlights there.
     const matchesFilter = isListBlocked || isVpnHidden;
-    // The post deliberately opened by its own timestamp remains readable. This
-    // runs after the quote branch, so its quoted authors retain independent rules.
-    const keepVisible = neverHide || isFocalTweet(tweet) || tweet?.dataset.xRelatedBlock === 'shown';
+    // Broad filters keep a deliberately opened post readable, but an explicit
+    // account-ID rule must honor Hide even here. People rows and posts the reader
+    // explicitly revealed keep their existing exceptions; quotes were handled above.
+    const keepVisible = neverHide || tweet?.dataset.xRelatedBlock === 'shown' ||
+        (isFocalTweet(tweet) && !reasons.includes('account'));
     const hide = !keepVisible && matchesFilter && !highlightMode;
     const highlight = !hide && matchesFilter;
 
@@ -407,19 +419,23 @@ function relatedVerdict(reasons, location) {
 /** Re-evaluate observed parent facts against current rules, never historical statistics. */
 function knownPostVerdict(record, filters) {
     const screenName = record.author;
+    const authorId = normalizeAccountId(record.authorId);
     const { settings, blockedCountries, blockedRegions, blockedTags, blockedBioTags,
-        blockedLinks, blockedPcf, blockedAffiliations, blockedLanguages, allowedUsers } = filters;
+        blockedLinks, blockedPcf, blockedAffiliations, blockedLanguages, blockedAccounts, allowedUsers } = filters;
     if (screenName && isAuthorExempt(screenName, allowedUsers, settings)) return relatedVerdict([]);
     const info = knownAuthorInfo(screenName);
     const location = effectiveCountry(info, settings.flagFromDevice);
     const country = canonicalCountry(location);
-    const profile = settings.profileEnrichment === false ? null : getProfile(screenName);
+    const observedProfile = getProfile(screenName);
+    const profile = settings.profileEnrichment === false ? null : observedProfile;
     const labels = record.accountLabels || [];
     const isLabelBlocked = [...(blockedPcf || [])].some(value => value === GOVERNMENT_LABEL
         ? labels.includes(GOVERNMENT_LABEL)
         : profile?.pcf ? profile.pcf === value : labels.some(label => label.includes(value)));
     const reasons = resolveBlockReasons({
         isExempt: false,
+        // Historical parents cannot borrow the current owner's ID through a reused handle.
+        isAccountBlocked: authorId !== '' && blockedAccounts?.has(authorId) === true,
         isBlockedCountry: country !== '' && blockedCountries?.has(country),
         isBlockedRegion: matchingBlockedRegions(country, blockedRegions, settings.regionCountrySelections).length > 0,
         isTagBlocked: hasBlockedTag(record.displayName, blockedTags),
@@ -548,7 +564,7 @@ function applyLanguageBlock(tweet, blockedLanguages, settings, allowedUsers) {
     }
 
     if (blocked) {
-        tweet.dataset.xLangBlock = settings.highlightBlockedTweets === true || isFocalTweet(tweet) ||
+        tweet.dataset.xLangBlock = shouldHighlightMatches(settings) || isFocalTweet(tweet) ||
             tweet.dataset.xRelatedBlock === 'shown'
             ? 'highlight' : 'hide';
     } else if (tweet.dataset.xLangBlock) {
@@ -1384,6 +1400,7 @@ export async function processElement(element, {
     blockedPcf,
     blockedLanguages,
     blockedAffiliations,
+    blockedAccounts,
     allowedUsers,
     settings,
     csrfToken,
@@ -1474,6 +1491,7 @@ export async function processElement(element, {
         blockedTags,
         blockedLanguages,
         blockedAffiliations,
+        blockedAccounts,
         blockedBioTags,
         blockedLinks,
         blockedPcf,
@@ -1810,12 +1828,13 @@ function runUpdateBlockedTweets({
     settings = {},
     blockedLanguages = null,
     allowedUsers = null,
-    blockedAffiliations = null
+    blockedAffiliations = null,
+    blockedAccounts = null
 } = {}, changedUsers = null) {
     if (settings.enabled === false) return;
     const filters = {
         blockedCountries, blockedRegions, blockedTags, blockedBioTags, blockedLinks,
-        blockedPcf, settings, blockedLanguages, allowedUsers, blockedAffiliations
+        blockedPcf, settings, blockedLanguages, allowedUsers, blockedAffiliations, blockedAccounts
     };
     const newlyVisible = new Set();
     const loggedInUser = getLoggedInUsername();

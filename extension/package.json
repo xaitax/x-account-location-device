@@ -1,6 +1,6 @@
 {
   "name": "x-posed-extension",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "See where X users are located and what devices they use. Country flags & device icons next to every username. Optional geo-blocking.",
   "type": "module",
   "scripts": {
@@ -18,7 +18,15 @@
     "package": "npm run package:chrome && npm run package:firefox",
     "check:parsers": "node scripts/check-parsers.mjs",
     "check:regions": "node scripts/check-regions.mjs",
+    "check:lists": "node scripts/check-list-highlighting.mjs",
+    "check:quick-filters": "node scripts/check-quick-filters.mjs",
     "check:hover-intent": "node scripts/check-hover-intent.mjs",
+    "check:hover-cache": "node scripts/check-hover-cache.mjs",
+    "check:hover-loading": "node scripts/check-hover-loading.mjs",
+    "check:hover-sync": "node scripts/check-hover-sync.mjs",
+    "check:hover-avatar": "node scripts/check-hover-avatar.mjs",
+    "check:profile-link": "node scripts/check-profile-link.mjs",
+    "check:hover": "npm run check:hover-intent && npm run check:hover-cache && npm run check:hover-loading && npm run check:hover-sync && npm run check:hover-avatar && npm run check:profile-link",
     "check:build": "node scripts/check-build.mjs",
     "lint": "eslint src/**/*.js && npm run check:parsers",
     "lint:fix": "eslint src/**/*.js --fix"

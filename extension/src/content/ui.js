@@ -11,7 +11,7 @@ import { findInsertionPoint, getDeviceCountry, formatCountryName, debounce, thro
 import { deviceIcon, glyph, flagImage } from './icons.js';
 import { showModal } from './modal.js';
 import { captureEvidence } from './evidence-capture.js';
-import { hovercard } from './hovercard.js';
+import { hovercard, hasNewerObservation } from './hovercard.js';
 import { createSnapshotTracker } from '../shared/state-sync.js';
 import { showToast, cleanupNotifications } from './notifications.js';
 import { FILTER_SOURCES } from '../shared/filter-registry.js';
@@ -34,6 +34,11 @@ let sidebarCheckTimeout = null;
 let sidebarGetState = null;
 let sidebarSettings = {};
 const sidebarSnapshots = createSnapshotTracker();
+
+// Metadata can become richer without changing the flag/device badge. Keep a
+// replaceable, account-owned snapshot so opening an existing badge does not
+// replay the incomplete information captured when that badge was created.
+const badgeSnapshots = new WeakMap();
 
 // Cleanup functions registry - using Map with keys to prevent duplicates and memory leaks
 const cleanupRegistry = new Map();
@@ -249,6 +254,21 @@ function makeSep() {
     return sep;
 }
 
+/** Refresh an unchanged badge's snapshot without replacing its DOM or listeners. */
+export function updateBadgeInfo(badge, screenName, info) {
+    const snapshot = badgeSnapshots.get(badge);
+    if (!snapshot || snapshot.screenName !== String(screenName || '').toLowerCase() || !info) return false;
+    const previous = snapshot.info;
+    if (hasNewerObservation(previous, info)) return false;
+    const previousId = previous?.meta?.restId;
+    const nextId = info.meta?.restId;
+    if ((previousId && nextId && previousId !== nextId) ||
+        previous?.location !== info.location || previous?.device !== info.device ||
+        (previous?.locationAccurate === false) !== (info.locationAccurate === false)) return false;
+    snapshot.info = info;
+    return true;
+}
+
 /**
  * Create info badge for a user
  * @param {string|null} [effectiveCountry] - Flag/blocking country already computed
@@ -257,7 +277,9 @@ function makeSep() {
  * @param {Object|null} [displayNamePresentation] - Local, validated name artwork and font source.
  */
 export function createBadge(element, screenName, info, isUserCell, settings, debug, csrfToken = null, effectiveCountry = null, displayName = '', displayNamePresentation = null) {
-    if (element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`)) {
+    const existingBadge = element.querySelector(`.${CSS_CLASSES.INFO_BADGE}`);
+    if (existingBadge) {
+        updateBadgeInfo(existingBadge, screenName, info);
         return;
     }
 
@@ -327,6 +349,9 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
 
     if (!hasContent) return;
 
+    badgeSnapshots.set(badge, { screenName: String(screenName || '').toLowerCase(), info });
+    const getInfo = () => badgeSnapshots.get(badge)?.info || info;
+
     // "More info" affordance: a static circled-i. (The hovercard shows full details on
     // hover; we intentionally do NOT expand any text here so the badge width stays fixed
     // and the capture button never shifts out from under the cursor.)
@@ -367,7 +392,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
                 // Dismiss account details before the share sheet takes focus.
                 // Its Escape handler must not compete with the card behind it.
                 hovercard.hide();
-                captureEvidence(tweet, info, screenName, element);
+                captureEvidence(tweet, getInfo(), screenName, element);
             } else {
                 console.warn('X-Posed: Could not find tweet to capture');
             }
@@ -402,6 +427,7 @@ export function createBadge(element, screenName, info, isUserCell, settings, deb
         displayName,
         displayNamePresentation,
         info,
+        getInfo,
         csrfToken,
         clickToOpen: settings.hovercardTrigger === 'click'
     });

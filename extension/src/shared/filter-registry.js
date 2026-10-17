@@ -12,7 +12,8 @@ export const FILTER_SOURCES = Object.freeze([
     ['languages', 'blockedLanguages', 'BLOCKED_LANGUAGES', 'language', 'languages', 'onLanguageAction'],
     ['affiliations', 'blockedAffiliations', 'BLOCKED_AFFILIATIONS', 'affiliation', 'affiliations', 'onAffiliationAction'],
     ['links', 'blockedLinks', 'BLOCKED_LINKS', 'link', 'links', 'onLinkAction'],
-    ['allowedUsers', 'allowedUsers', 'ALLOWED_USERS', 'username', 'usernames', 'onAllowedUserAction']
+    ['allowedUsers', 'allowedUsers', 'ALLOWED_USERS', 'username', 'usernames', 'onAllowedUserAction'],
+    ['accounts', 'blockedAccounts', 'BLOCKED_ACCOUNTS', 'accountId', 'accountIds', 'onAccountAction']
 ].map(([kind, field, type, valueKey, valuesKey, callback]) => Object.freeze({
     kind, field, valueKey, valuesKey, callback,
     storageKey: STORAGE_KEYS[type],

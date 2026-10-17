@@ -224,36 +224,23 @@ button:focus:not(:focus-visible) { outline: none; }
 .whats-new-subtitle { margin: 0; color: var(--xp-text-dim); font-size: 13px; line-height: 1.6; }
 .whats-new-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; margin-top: 24px; }
 .whats-new-card-feature { padding-inline-start: 32px; border-inline-start: 1px solid var(--xp-border); }
-.whats-new-requested { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 10px; padding: 5px 8px; border-radius: 5px; background: var(--xp-accent-soft); color: var(--xp-accent); font-size: 11px; font-weight: 600; }
-.whats-new-requested .settings-icon, .whats-new-requested .settings-icon svg { width: 14px; height: 14px; flex-basis: 14px; }
-.whats-new-feature-eyebrow { display: inline-flex; align-items: center; min-height: 26px; margin-bottom: 10px; color: var(--xp-text-dim); font-size: 11px; font-weight: 600; }
-.whats-new-feature .whats-new-feature-note { margin-top: 12px; font-size: 12px; }
-.release-export-guide { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 8px 9px; margin-top: 16px; color: var(--xp-text-dim); font-size: 12px; }
-.release-export-guide strong { color: var(--xp-text); font-weight: 600; }
-.release-export-guide .release-export-guide-icon, .release-export-guide .release-export-guide-icon svg { width: 16px; height: 16px; flex-basis: 16px; }
-.whats-new-polish { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 20px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--xp-border); }
-.whats-new-polish h3 { margin: 0; font-size: 12px; font-weight: 600; }
-.whats-new-polish p { margin: 0; color: var(--xp-text-dim); font-size: 12px; line-height: 1.6; }
-.whats-new-cta { margin: 22px 0 0; padding: 18px 20px; border: 1px solid var(--xp-support-line); border-inline-start: 3px solid var(--xp-support); border-radius: 6px; background: var(--xp-support-soft); }
-.whats-new-support-title { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; color: var(--xp-support); font-size: 14px; line-height: 1.5; font-weight: 600; }
-.whats-new-cta p { margin: 0; color: var(--xp-text-dim); font-size: 13px; line-height: 1.75; }
+.whats-new-cta { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--xp-support-line); }
+.whats-new-support-copy { flex: 1; min-width: 0; }
+.whats-new-support-title { display: flex; align-items: center; gap: 9px; margin: 0 0 6px; color: var(--xp-support); font-size: 13px; line-height: 1.5; font-weight: 600; }
+.whats-new-cta p { margin: 0; color: var(--xp-text-dim); font-size: 12px; line-height: 1.6; }
 .whats-new-cta strong { color: var(--xp-text); font-weight: 600; }
 .whats-new-support-action { border-color: var(--xp-support-line); color: var(--xp-support); }
 .whats-new-support-action:hover { border-color: var(--xp-support); background: var(--xp-support-soft); }
 .whats-new-feature { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
-.whats-new-feature h3 { margin: 0 0 10px; font-size: 20px; font-weight: 600; line-height: 1.4; letter-spacing: -.02em; }
+.whats-new-feature h3 { display: flex; align-items: flex-start; gap: 9px; margin: 0 0 10px; font-size: 20px; font-weight: 600; line-height: 1.4; letter-spacing: -.02em; }
+.whats-new-feature h3 .settings-icon { margin-top: 4px; color: var(--xp-accent); }
 .whats-new-feature p { margin: 0; color: var(--xp-text-dim); font-size: 13px; line-height: 1.65; }
 .whats-new-feature p strong { color: var(--xp-text); font-weight: 600; }
-.whats-new-feature-link { display: inline-flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 18px; color: var(--xp-accent); font-size: 13px; font-weight: 600; line-height: 1.5; text-decoration: none; }
-.whats-new-feature-link:hover { text-decoration: underline; }
-.whats-new-feature-link .settings-icon { width: 16px; height: 16px; flex-basis: 16px; color: var(--xp-accent); }
-.whats-new-feature-link .settings-icon svg { width: 16px; height: 16px; }
 .whats-new-actions, .whats-new-support-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .whats-new-actions { margin-top: 22px; }
 .whats-new-changelog, .whats-new-support-actions > a { font-size: 12px; }
 .whats-new-actions + .whats-new-cta { margin-top: 24px; }
-.whats-new-support-actions { margin-top: 16px; }
-.whats-new-support-note { color: var(--xp-text-dim); font-size: 12px; line-height: 1.6; }
+.whats-new-support-actions { flex: 0 0 auto; gap: 8px; }
 .whats-new-banner { overflow-wrap: anywhere; }
 
 @media (max-width: 960px) {
@@ -265,6 +252,7 @@ button:focus:not(:focus-visible) { outline: none; }
     .support-content { flex-direction: column; align-items: flex-start; gap: 14px; }
     .whats-new-features { gap: 24px; }
     .whats-new-card-feature { padding-inline-start: 24px; }
+    .whats-new-cta { align-items: flex-start; flex-direction: column; gap: 12px; }
     .xp-stat-geography { grid-template-columns: minmax(0, 1fr); }
     .xp-stat-map { max-width: 480px; margin: 0 auto; }
     .xp-stat-country-side { border-left: 0; border-top: 1px solid var(--xp-border); }
@@ -287,11 +275,9 @@ button:focus:not(:focus-visible) { outline: none; }
     .btn { min-height: 44px; }
     .section-title { font-size: 22px; }
     .whats-new-banner { padding: 22px; }
-    .whats-new-feature-link { min-height: 44px; }
     .whats-new-content h2 { font-size: 22px; }
     .whats-new-features { grid-template-columns: minmax(0, 1fr); gap: 20px; }
     .whats-new-card-feature { padding-inline-start: 0; padding-top: 20px; border-inline-start: 0; border-top: 1px solid var(--xp-border); }
-    .whats-new-polish { grid-template-columns: minmax(0, 1fr); gap: 6px; }
     .rate-limit-banner { margin-top: 0; }
 }
 
@@ -323,7 +309,8 @@ button:focus:not(:focus-visible) { outline: none; }
     .cloud-warning > .settings-icon svg { width: 16px; height: 16px; }
     .whats-new-banner { padding: 18px; margin-bottom: 22px; }
     .whats-new-content h2 { font-size: 20px; }
-    .whats-new-cta { padding: 14px; }
+    .whats-new-cta { padding-top: 16px; }
+    .whats-new-support-actions { width: 100%; }
     .whats-new-support-actions { align-items: stretch; flex-direction: column; gap: 8px; }
     .whats-new-close { right: 8px; top: 8px; }
     .whats-new-feature h3 { font-size: 18px; }

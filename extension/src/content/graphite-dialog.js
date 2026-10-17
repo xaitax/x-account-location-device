@@ -1,5 +1,5 @@
 /** Graphite filtering dialog. All changes use the existing revisioned storage API. */
-import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, MESSAGE_TYPES, canonicalCountry } from '../shared/constants.js';
+import { COUNTRY_LIST, REGION_LIST, LANGUAGE_LIST, ACCOUNT_LABELS, CSS_CLASSES, MESSAGE_TYPES, canonicalCountry, normalizeAccountId } from '../shared/constants.js';
 import { createElement, formatCountryName, describeTagRisk } from '../shared/utils.js';
 import { normalizeLinkRule, normalizeDomain, normalizeExactUrl, findBlockedDomain, DOMAIN_LIMITS } from '../shared/domain-utils.js';
 import { createSnapshotTracker } from '../shared/state-sync.js';
@@ -13,6 +13,7 @@ import { dialogIcon as glyph } from './dialog-icons.js';
 const SOURCES = [
     { key: 'countries', title: 'Countries', label: 'Country', icon: 'globe', hint: 'Countries reported by X.' },
     { key: 'regions', title: 'Regions', label: 'Region', icon: 'map', hint: 'X region labels and optional member countries.' },
+    { key: 'accounts', title: 'Accounts', label: 'Account', icon: 'users', hint: 'Specific accounts by permanent user ID.' },
     { key: 'tags', title: 'Display name', label: 'Display name', icon: 'tag', hint: 'Words or emoji in display names.' },
     { key: 'bioTags', title: 'Bio text', label: 'Bio text', icon: 'info', hint: 'Words or phrases in profile bios.' },
     { key: 'links', title: 'Domains & URLs', label: 'Link', icon: 'share', hint: 'Whole websites or exact URLs.' },
@@ -299,6 +300,7 @@ function createBlockingSurface(config, container = null) {
         }
         if (kind === 'countries') return formatCountryName(value);
         if (kind === 'allowedUsers') return `@${value}`;
+        if (kind === 'accounts') return `User ID ${value}`;
         return CATALOGS[kind]?.find(item => item.value === value)?.label || value;
     }
 
@@ -680,6 +682,7 @@ function createBlockingSurface(config, container = null) {
             const normalized = normalizeLinkRule(raw);
             return view.linkMode === 'domain' && normalized.includes('://') ? '' : normalized;
         }
+        if (kind === 'accounts') return normalizeAccountId(raw.replace(/^https:\/\/x\.com\/i\/user\//, ''));
         if (kind === 'allowedUsers') { const username = raw.replace(/^@/, '').toLowerCase(); return /^[a-z0-9_]{1,15}$/.test(username) ? username : ''; }
         return kind === 'tags' ? raw : raw.toLowerCase();
     }
@@ -690,12 +693,14 @@ function createBlockingSurface(config, container = null) {
         const form = el('form');
         const inputId = `x-g-input-${kind}`;
         const field = el('div', 'xp-g-field');
-        const label = el('label', '', kind === 'links' ? 'Domain or URL' : kind === 'allowedUsers' ? 'Account handle' : source.title);
+        const accountHandle = kind === 'allowedUsers';
+        const accountId = kind === 'accounts';
+        const label = el('label', '', kind === 'links' ? 'Domain or URL' : accountHandle ? 'Account handle' : accountId ? 'User ID or permanent profile link' : source.title);
         label.htmlFor = inputId;
         const input = createElement('input', { id: inputId, type: 'text', className: 'xp-g-input', autocomplete: 'off',
             ...(kind === 'links' ? { maxlength: String(DOMAIN_LIMITS.MAX_INPUT_LENGTH) }
-                : kind === 'allowedUsers' ? { maxlength: '16' } : {}),
-            placeholder: kind === 'links' ? 'youtube.com/LiveOverflow' : kind === 'allowedUsers' ? '@username' : kind === 'affiliations' ? 'Organization name or handle' : 'Enter text or emoji' });
+                : accountHandle ? { maxlength: '16' } : {}),
+            placeholder: kind === 'links' ? 'youtube.com/LiveOverflow' : accountHandle ? '@username' : accountId ? 'https://x.com/i/user/123456789' : kind === 'affiliations' ? 'Organization name or handle' : 'Enter text or emoji' });
         input.value = drafts[kind] || '';
         input.addEventListener('input', event => { drafts[kind] = input.value; if (!event.isComposing) render(); });
         input.addEventListener('compositionend', () => { drafts[kind] = input.value; render(); });
@@ -703,8 +708,9 @@ function createBlockingSurface(config, container = null) {
         field.append(label, input);
         const help = el('p', 'xp-g-help', kind === 'links' ? 'A bare domain matches the whole site and subdomains. A URL with a path stays an exact URL.'
             : kind === 'allowedUsers' ? 'These accounts bypass all filters. Your follows and blocks on X stay unchanged.'
-                : kind === 'affiliations' ? 'Matches an organization name or handle observed by X-Posed. Some affiliation details appear after opening an account’s hovercard.'
-                    : 'Matches text containing this value, case-insensitively. Emoji and punctuation are supported.');
+                : kind === 'accounts' ? 'Usually, add accounts directly from their hovercards—no need to type an ID. To add one here, paste its numeric User ID or permanent x.com/i/user/ link. Matches survive handle changes, follow Hide or Highlight and respect Always Show. Your follows and blocks on X stay unchanged.'
+                    : kind === 'affiliations' ? 'Matches an organization name or handle observed by X-Posed. Some affiliation details appear after opening an account’s hovercard.'
+                        : 'Matches text containing this value, case-insensitively. Emoji and punctuation are supported.');
         help.id = `${inputId}-help`;
         form.append(field, help);
         const normalized = normalizedDraft(kind);
@@ -733,12 +739,13 @@ function createBlockingSurface(config, container = null) {
         const invalid = Boolean((drafts[kind] || '').trim() && !normalized);
         if (invalid) {
             input.setAttribute('aria-invalid', 'true');
-            form.append(el('p', 'xp-g-notice error', kind === 'allowedUsers' ? 'Use 1–15 letters, numbers or underscores, with an optional @.'
-                : view.linkMode === 'domain' ? 'For a whole-site rule, enter a bare domain such as youtube.com. Choose Exact URL to keep a path.' : 'Enter a valid domain or HTTP(S) URL without spaces or credentials.'));
+            form.append(el('p', 'xp-g-notice error', accountHandle ? 'Use 1–15 letters, numbers or underscores, with an optional @.'
+                : accountId ? 'Enter a User ID of 1–20 digits without a leading zero, or its exact https://x.com/i/user/ID link. @handles cannot be used here.'
+                    : view.linkMode === 'domain' ? 'For a whole-site rule, enter a bare domain such as youtube.com. Choose Exact URL to keep a path.' : 'Enter a valid domain or HTTP(S) URL without spaces or credentials.'));
         }
         if (duplicate) form.append(el('p', 'xp-g-help', 'This filter is already saved.'));
         const actions = el('div', 'xp-g-form-actions');
-        const add = button(kind === 'allowedUsers' ? 'Add account' : 'Add filter', () => form.requestSubmit(), 'xp-g-button primary');
+        const add = button(accountHandle || accountId ? 'Add account' : 'Add filter', () => form.requestSubmit(), 'xp-g-button primary');
         add.disabled = !normalized || Boolean(duplicate) || pending.has(`${kind}:${normalized}`) || pending.has(`${kind}:undefined`);
         actions.append(add); form.append(actions);
         form.addEventListener('submit', event => {
@@ -932,8 +939,11 @@ function createBlockingSurface(config, container = null) {
         }
 
         const filtering = group('Post filtering', 'x-g-behavior-filtering');
+        filtering.rows.append(settingSwitch('highlightInLists', 'Highlight matching posts in Lists',
+            'Use Highlight in curated X List feeds, even when your general setting is Hide. Home and other feeds keep your general setting.',
+            { id: 'x-g-behavior-highlightInLists' }));
         filtering.rows.append(settingSwitch('hideRelatedPosts', 'Hide replies and quotes of filtered posts',
-            'Hide whole replies and quotes of known filter matches, even in Highlight. Use Show post to reveal them.',
+            'Hide whole replies and quotes of known filter matches, even in Highlight or Lists. Use Show post to reveal them.',
             { id: 'x-g-behavior-hideRelatedPosts' }));
         filtering.rows.append(settingSwitch('showVpnUsers', 'Filter accounts with location warnings',
             'Follow Hide or Highlight when X marks a location as uncertain. This is not proof of VPN use.',

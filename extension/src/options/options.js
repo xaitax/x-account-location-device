@@ -29,7 +29,7 @@ const TOGGLES = [
 
 // Presentation order and copy stay local; storage and messaging identifiers are shared.
 const LISTS = Object.entries({
-    countries: 'country filters', regions: 'region filters', tags: 'display-name filters',
+    countries: 'country filters', regions: 'region filters', accounts: 'account filters', tags: 'display-name filters',
     bioTags: 'bio-text filters', links: 'domain and URL filters', pcf: 'account-label filters',
     languages: 'post-language filters', affiliations: 'organization filters', allowedUsers: 'always-show accounts'
 }).map(([kind, label]) => ({ ...FILTER_SOURCES.find(source => source.kind === kind), label }));

@@ -20,7 +20,7 @@ const IMAGE_TIMEOUT = 5000;
 const ARTWORK_TIMEOUT = 10000;
 const RENDER_TIMEOUT = 5000;
 const SYSTEM_FONT = '"Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
-const OMIT = '.x-posed-card-close, .x-posed-card-actions, .x-posed-export-actions, .x-posed-export-status, .x-posed-warning-help, .x-posed-sr-only, [role="tooltip"], button';
+const OMIT = '.x-posed-card-close, .x-posed-header-actions, .x-posed-card-actions, .x-posed-allowlist-control, .x-posed-allowlist-status, .x-posed-export-actions, .x-posed-export-status, .x-posed-warning-help, .x-posed-user-id-fallback, .x-posed-sr-only, [role="tooltip"], button';
 const HTML_TAGS = new Set(['div', 'span', 'p', 'time', 'strong', 'em', 'small', 'b', 'i', 'br', 'img', 'a']);
 const SVG_TAGS = new Set(['svg', 'g', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'defs', 'linearGradient', 'radialGradient', 'stop', 'clipPath', 'mask']);
 const SVG_ATTRIBUTES = new Set(['viewBox', 'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'd', 'points', 'fill', 'fill-rule', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-opacity', 'clip-rule', 'clip-path', 'mask', 'transform', 'id', 'offset', 'stop-color', 'stop-opacity', 'gradientUnits', 'gradientTransform', 'spreadMethod']);
@@ -107,7 +107,14 @@ function createSnapshot(card) {
             if (textLength > MAX_TEXT) throw new Error('This account card contains too much text to capture.');
             return document.createTextNode(source.textContent);
         }
-        if (source.nodeType !== Node.ELEMENT_NODE || source.matches(OMIT) || source.hidden) return null;
+        if (source.nodeType !== Node.ELEMENT_NODE || source.hidden) return null;
+        // The clickable ID remains account data in a PNG, without its copy icon
+        // or transient clipboard feedback. Other buttons are still omitted.
+        if (source.matches('button.x-posed-user-id-copy')) {
+            const value = source.querySelector('.x-posed-user-id-value');
+            return value ? clone(value) : null;
+        }
+        if (source.matches(OMIT)) return null;
         const svg = source.namespaceURI === SVG_NS;
         if (!(svg ? SVG_TAGS : HTML_TAGS).has(source.localName)) return null;
         if (getComputedStyle(source).display === 'none') return null;
@@ -148,7 +155,24 @@ function createSnapshot(card) {
     const body = root.querySelector('.x-posed-card-body');
     if (body) Object.assign(body.style, { height: 'auto', maxHeight: 'none', overflow: 'visible', flex: 'none' });
     const header = root.querySelector('.x-posed-card-header');
-    if (header) header.style.flexShrink = '0';
+    if (header) {
+        // Close and Always Show are UI controls, not exported account data. A
+        // frozen two-column header grid must not reserve either action's track.
+        const avatar = header.querySelector('.x-posed-card-avatar');
+        Object.assign(header.style, { display: avatar ? 'flex' : 'block', gridTemplateColumns: 'none', gridTemplateRows: 'none',
+            flexShrink: '0', flexDirection: 'row', alignItems: 'center' });
+        if (avatar) Object.assign(avatar.style, { width: '48px', height: '48px', flex: '0 0 48px' });
+        const title = header.querySelector('.x-posed-title');
+        if (title?.style.display === 'contents') {
+            Object.assign(title.style, { display: 'flex', flexDirection: 'column', width: avatar ? 'auto' : '100%',
+                minWidth: '0', flex: avatar ? '1' : 'none',
+                rowGap: header.style.rowGap && header.style.rowGap !== 'normal' ? header.style.rowGap : '0px' });
+        }
+        const handle = header.querySelector('.x-posed-handle-line');
+        if (handle) Object.assign(handle.style, { minHeight: '0', gridTemplateColumns: 'minmax(0, 1fr)', justifyContent: 'flex-start' });
+        const handleText = header.querySelector('.x-posed-handle');
+        if (handleText) Object.assign(handleText.style, { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip' });
+    }
     const name = root.querySelector('.x-posed-name');
     if (name) Object.assign(name.style, { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip', overflowWrap: 'anywhere' });
     const warning = root.querySelector('.x-posed-card-warning');

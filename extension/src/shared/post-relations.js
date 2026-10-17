@@ -1,4 +1,6 @@
 /** Public post relationships observed in X's existing responses. No text or viewer state. */
+import { normalizeAccountId } from './constants.js';
+
 export const POST_RELATION_LIMITS = Object.freeze({
     MAX_ENTRIES: 5000,
     MAX_POSTS_PER_RESPONSE: 500,
@@ -28,8 +30,10 @@ export function normalizePostRelation(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || !isPostId(value.id)) return null;
     const record = { id: value.id };
     const author = postHandle(value.author);
+    const authorId = normalizeAccountId(value.authorId);
     const language = postLanguage(value.language);
     if (author) record.author = author;
+    if (authorId) record.authorId = authorId;
     if (language) record.language = language;
     for (const kind of ['replyTo', 'quote']) {
         const id = value[`${kind}Id`];
@@ -81,13 +85,22 @@ function tweetAuthor(tweet) {
     return postHandle(user?.core?.screen_name ?? user?.legacy?.screen_name ?? user?.screen_name);
 }
 
+/** Identity belongs to this exact post, not the current owner of its author handle. */
+function tweetAuthorId(tweet) {
+    const user = tweet?.core?.user_results?.result ?? tweet?.user;
+    const ids = [tweet?.legacy?.user_id_str, tweet?.user_id_str, user?.rest_id, user?.id_str]
+        .map(normalizeAccountId).filter(Boolean);
+    // Conflicting explicit identities are not safe evidence for an account filter.
+    return new Set(ids).size === 1 ? ids[0] : undefined;
+}
+
 /** Project actual Tweet/visibility wrappers and older embedded legacy statuses. */
 export function projectPostRelation(value) {
     const tweet = unwrapTweet(value);
     const id = tweetId(tweet);
     if (!id) return null;
     const legacy = tweet.legacy && typeof tweet.legacy === 'object' ? tweet.legacy : tweet;
-    const record = { id, author: tweetAuthor(tweet), language: legacy.lang ?? tweet.lang };
+    const record = { id, author: tweetAuthor(tweet), authorId: tweetAuthorId(tweet), language: legacy.lang ?? tweet.lang };
     if (isPostId(legacy.in_reply_to_status_id_str)) {
         record.replyToId = legacy.in_reply_to_status_id_str;
         record.replyToAuthor = legacy.in_reply_to_screen_name;

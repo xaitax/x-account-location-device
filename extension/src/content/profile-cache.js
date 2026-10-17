@@ -19,7 +19,7 @@
  */
 
 import { LRUCache } from '../shared/lru-cache.js';
-import { normalizePcfLabel } from '../shared/constants.js';
+import { normalizePcfLabel, normalizeAccountId } from '../shared/constants.js';
 import { PROFILE_LIMITS, isProfileUsername, normalizeProfileHosts, normalizeProfileUrls } from '../shared/profile-data.js';
 
 /** Lowercase username -> bounded primitive profile fields; missing means unknown. */
@@ -49,10 +49,14 @@ function toCount(value) {
 export function setProfile(screenName, data) {
     if (!isProfileUsername(screenName) || !data || typeof data !== 'object' || Array.isArray(data)) return false;
     const key = screenName.toLowerCase();
-    const previous = profiles.get(key) || {};
+    const cached = profiles.get(key) || {};
+    const userId = normalizeAccountId(data.userId);
+    const identityChanged = !!userId && userId !== cached.userId;
+    // Handles can be reassigned. An observed new ID cannot borrow the old profile.
+    const previous = identityChanged ? {} : cached;
     const next = { ...previous };
-    let changed = false;
-    let filtersChanged = false;
+    let changed = identityChanged;
+    let filtersChanged = identityChanged;
     const assign = (field, value, affectsFilters = true) => {
         if (value === undefined) return;
         const old = previous[field];
@@ -64,6 +68,7 @@ export function setProfile(screenName, data) {
         changed = true;
         if (affectsFilters) filtersChanged = true;
     };
+    if (userId) assign('userId', userId);
 
     const forget = field => {
         if (!Object.hasOwn(next, field)) return;
