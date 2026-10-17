@@ -26,9 +26,9 @@
   <a href="#support">Support</a>
 </p>
 
-![X-Posed's inline country and device badge, with a compact account-details card](screenshots/v4/account-card.png)
+![X-Posed 4.3 showing an inline country and device badge beside an account card with a profile picture, quick filters, and Copy and Save controls](screenshots/v4.3/account-card.png)
 
-*Account details in the X-Posed 4.0 interface.*
+*More context. Quick filters. A card worth sharing. X-Posed 4.3 in action.*
 
 X-Posed is a free, open-source browser extension for Chrome and Firefox. It brings information from X's **About this account** panel into the timeline, alongside optional filters, local statistics and sharing tools.
 
@@ -144,7 +144,7 @@ Review the preview and caption, then choose Quote, Reply or New post. Desktop br
 
 ## Screenshots
 
-Screenshots show the 4.0 interface. Filter, statistics and sharing examples use demonstration data. Select an image to view it at full size.
+The examples below show the 4.0 interface; the main image above shows 4.3. Filter, statistics and sharing examples use demonstration data. Select an image to view it at full size.
 
 <table>
   <tr>
