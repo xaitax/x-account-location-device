@@ -784,9 +784,13 @@ function createBlockingSurface(config, container = null) {
             }
             form.append(settingCheckbox('linksMatchLocation', 'Also match URLs in profile location', 'Uses self-written profile location text, not X’s account country.'));
         }
-        if (kind === 'bioTags') form.append(settingCheckbox('bioTagsMatchLocation', 'Also match bio filters in profile location', 'Applies to all bio filters. Profile location is self-written text.'));
+        if (kind === 'bioTags') {
+            form.append(settingCheckbox('bioTagsMatchLocation', 'Also match bio filters in profile location', 'Applies to all bio filters. Profile location is self-written text.'));
+            form.append(settingCheckbox('bioTagsExactMatch', 'Match whole words only', 'Only matches complete words or phrases, so “cat” will not match “category”.'));
+        }
         if (settings.profileEnrichment === false && ['bioTags', 'links'].includes(kind)) form.append(el('p', 'xp-g-notice warning', 'Profile details are disabled. Enable them in Behavior to use observed bios and links.'));
-        const risk = ['tags', 'bioTags'].includes(kind) ? describeTagRisk(drafts[kind]) : null;
+        const risk = ['tags', 'bioTags'].includes(kind) && !(kind === 'bioTags' && settings.bioTagsExactMatch === true)
+            ? describeTagRisk(drafts[kind]) : null;
         if (risk) form.append(el('p', 'xp-g-notice warning', risk));
         const duplicate = normalized && [...sets[kind]].some(value => kind === 'links' ? value === normalized : value.toLowerCase() === normalized.toLowerCase());
         const invalid = Boolean((drafts[kind] || '').trim() && !normalized);

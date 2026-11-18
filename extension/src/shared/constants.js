@@ -245,6 +245,9 @@ export const DEFAULT_SETTINGS = {
     // Profile location is self-written text, not X's detected account country.
     // Keep existing bio rules unchanged until the user opts into this extra scope.
     bioTagsMatchLocation: false,
+    // Treat bio rules as complete words/phrases instead of loose substrings, so "cat"
+    // no longer matches "category". Off keeps existing filters unchanged.
+    bioTagsExactMatch: false,
     linksMatchLocation: false,
     // Inclusive account-count thresholds. Zero keeps each rule off.
     minFollowing: 0,
