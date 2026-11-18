@@ -759,7 +759,7 @@ async function handleBackgroundMessage(type, payload, revision) {
                 hovercard.syncFilters();
             }
             if (isEnabled && (!areRegionCountrySelectionsEqual(prevSettings.regionCountrySelections, settings.regionCountrySelections) ||
-                ['highlightInLists', 'profileEnrichment', 'bioTagsMatchLocation', 'linksMatchLocation',
+                ['highlightInLists', 'profileEnrichment', 'bioTagsMatchLocation', 'bioTagsExactMatch', 'linksMatchLocation',
                     ...ACCOUNT_COUNT_FILTERS.map(rule => rule.key)]
                     .some(key => prevSettings[key] !== settings[key]))) {
                 updateBlockedTweets(currentFilters());

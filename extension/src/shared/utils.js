@@ -587,6 +587,32 @@ export function extractTagsFromText(text) {
 }
 
 /**
+ * Does `haystack` contain `needle` as a complete word or phrase?
+ *
+ * Plain substring matching makes "cat" hit "category". Exact mode requires a non-word
+ * character (or the string edge) around each word-character end of the needle. Terms
+ * that start or end with punctuation or emoji keep their existing behaviour.
+ * Both arguments are expected to be lowercase.
+ * @param {string} haystack
+ * @param {string} needle
+ * @returns {boolean}
+ */
+export function includesWholeTerm(haystack, needle) {
+    if (!haystack || !needle) return false;
+
+    const wordChar = /[\p{L}\p{N}_]/u;
+    const startsOnWord = wordChar.test(needle[0]);
+    const endsOnWord = wordChar.test(needle[needle.length - 1]);
+
+    for (let index = haystack.indexOf(needle); index !== -1; index = haystack.indexOf(needle, index + 1)) {
+        const beforeIsWord = wordChar.test(haystack[index - 1] || '');
+        const afterIsWord = wordChar.test(haystack[index + needle.length] || '');
+        if ((!startsOnWord || !beforeIsWord) && (!endsOnWord || !afterIsWord)) return true;
+    }
+    return false;
+}
+
+/**
  * Explain how a tag will over-match, or null when it is specific enough.
  *
  * Tags are matched as a SUBSTRING (of the display name, or of the bio), so "fan" also hits

@@ -4,7 +4,7 @@
  */
 
 import { SELECTORS, CSS_CLASSES, MESSAGE_TYPES, TIMING, canonicalCountry, GOVERNMENT_LABEL, observedAccountId, normalizeAccountId } from '../shared/constants.js';
-import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry } from '../shared/utils.js';
+import { extractUsername, findInsertionPoint, getLoggedInUsername, extractTagsFromText, getDeviceCountry, includesWholeTerm } from '../shared/utils.js';
 import { createBadge, findUserCellInsertionPoint, showRateLimitToast } from './ui.js';
 import { LRUCache } from '../shared/lru-cache.js';
 import { getProfile } from './profile-cache.js';
@@ -948,9 +948,13 @@ function hasBlockedBio(profile, blockedBioTags, settings) {
     if (!profile || !blockedBioTags?.size) return false;
     const bio = profile.bio?.toLowerCase() || '';
     const location = settings.bioTagsMatchLocation === true ? profile.location?.toLowerCase() || '' : '';
+    const exact = settings.bioTagsExactMatch === true;
     for (const term of blockedBioTags) {
         const needle = term.trim().toLowerCase();
-        if (needle && (bio.includes(needle) || location.includes(needle))) return true;
+        if (!needle) continue;
+        if (exact
+            ? includesWholeTerm(bio, needle) || includesWholeTerm(location, needle)
+            : bio.includes(needle) || location.includes(needle)) return true;
     }
     return false;
 }

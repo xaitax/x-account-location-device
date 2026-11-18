@@ -20,7 +20,7 @@ export const PROFILE_STORAGE_KEY = 'x_filter_profiles_v1';
 export const PROFILE_LIMITS = Object.freeze({ MAX_PROFILES: 50, MAX_NAME_LENGTH: 40, MAX_RULES: 10000, MAX_BYTES: 4 * 1024 * 1024 });
 export const PROFILE_SETTING_KEYS = Object.freeze([
     'showVpnUsers', 'alwaysShowFollowing', 'hideRelatedPosts', 'regionCountrySelections',
-    'bioTagsMatchLocation', 'linksMatchLocation', 'minFollowing', 'minPosts',
+    'bioTagsMatchLocation', 'bioTagsExactMatch', 'linksMatchLocation', 'minFollowing', 'minPosts',
     'minHandleDigits', 'minDisplayNameDigits', 'highlightBlockedTweets', 'highlightInLists'
 ]);
 
